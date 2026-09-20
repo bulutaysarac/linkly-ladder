@@ -6,7 +6,7 @@ INGRESS_URL := https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/d
 METRICS_URL := https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
 SHELL := /bin/bash
 
-.PHONY: help cluster registry trust-ca core cnpg tempo argo obs dashboards minimal standard full chaos keda destroy status
+.PHONY: help cluster registry trust-ca core cnpg tempo argo security obs dashboards minimal standard full chaos keda destroy status
 
 help: ## Hedefler
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -106,3 +106,19 @@ argo: ## Argo CD + Argo Rollouts + Gitea (cluster içi git) — 12+
 	   --set controller.resources.requests.cpu=50m --set controller.resources.requests.memory=100Mi \
 	   --set dashboard.enabled=false --wait --timeout 10m
 	@echo "✔ argocd + rollouts → http://argocd.localtest.me (admin / $$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' 2>/dev/null | base64 -d))"
+
+security: ## cert-manager + sealed-secrets + Kyverno (13+)
+	@helm repo add jetstack https://charts.jetstack.io >/dev/null 2>&1 || true
+	@helm repo add sealed-secrets https://bitnami-labs.github.io/sealed-secrets >/dev/null 2>&1 || true
+	@helm repo add kyverno https://kyverno.github.io/kyverno >/dev/null 2>&1 || true
+	@helm repo update >/dev/null
+	@helm upgrade --install cert-manager jetstack/cert-manager -n cert-manager --create-namespace \
+	   --set crds.enabled=true --set resources.requests.cpu=20m --set resources.requests.memory=64Mi \
+	   --wait --timeout 10m
+	@helm upgrade --install sealed-secrets sealed-secrets/sealed-secrets -n kube-system \
+	   --set resources.requests.cpu=20m --set resources.requests.memory=64Mi --wait --timeout 10m
+	@helm upgrade --install kyverno kyverno/kyverno -n kyverno --create-namespace \
+	   --set admissionController.replicas=1 --set backgroundController.enabled=true \
+	   --set cleanupController.enabled=false --set reportsController.enabled=false \
+	   --wait --timeout 15m
+	@echo "✔ cert-manager + sealed-secrets + kyverno"

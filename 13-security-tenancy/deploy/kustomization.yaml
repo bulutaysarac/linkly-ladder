@@ -1,0 +1,25 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: lvl13
+resources:
+  - namespace.yaml
+  - cnpg.yaml
+  - redis.yaml
+  - redpanda.yaml
+  - consumer.yaml
+  - keda.yaml
+  - slo.yaml
+  - api-keys.yaml
+  - security.yaml
+  - kyverno-policies.yaml
+  - migrate-job.yaml
+  - redirect-svc.yaml
+  - rollout.yaml
+  - api-svc.yaml
+  - ingress.yaml
+labels:
+  - includeSelectors: false
+    includeTemplates: true
+    pairs:
+      app.kubernetes.io/part-of: linkly-ladder
+      ladder/level: "13"

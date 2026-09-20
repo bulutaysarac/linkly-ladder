@@ -14,4 +14,5 @@ use (
 	./10-resilience
 	./11-observability-deep
 	./12-delivery
+	./13-security-tenancy
 )

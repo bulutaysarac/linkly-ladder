@@ -1,0 +1,105 @@
+# NetworkPolicy: varsayılan REDDET + açık izin listesi.
+#
+# EN: Until now every pod could reach every other pod, including Postgres and Redis. That is the
+#     default in Kubernetes and it is the opposite of least privilege: a compromised sidecar, a
+#     debug container or a misconfigured job can talk to the database directly. Default-deny
+#     flips the question from "what should I block?" (endless, you always miss one) to "what must
+#     talk to what?" (finite, reviewable, and it documents your architecture).
+# TR: Şimdiye kadar her pod her pod'a ulaşabiliyordu, Postgres ve Redis dahil. Kubernetes'in
+#     varsayılanı budur ve en az yetkinin tam tersidir: ele geçirilmiş bir sidecar, bir debug
+#     konteyneri ya da yanlış yapılandırılmış bir job doğrudan veritabanıyla konuşabilir.
+#     Varsayılan-reddet, soruyu "neyi engellemeliyim?"den (sonsuz, hep birini kaçırırsın)
+#     "ne neyle konuşmalı?"ya (sonlu, gözden geçirilebilir ve mimariyi BELGELER) çevirir.
+# [Topic · Konu: NetworkPolicy, en az yetki]
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-services
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: [redirect, api]
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: ingress-nginx }
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: monitoring }   # Prometheus scrape
+      ports:
+        - { protocol: TCP, port: 8080 }
+---
+# Postgres'e YALNIZCA uygulama servisleri ve pooler erişebilir.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-postgres-from-apps
+spec:
+  podSelector:
+    matchLabels: { cnpg.io/cluster: pg }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: [redirect, api, analytics, migrate]
+        - podSelector:
+            matchLabels: { cnpg.io/cluster: pg }        # replikasyon
+        - podSelector:
+            matchLabels: { cnpg.io/poolerName: pg-pooler-rw }
+        - podSelector:
+            matchLabels: { cnpg.io/poolerName: pg-pooler-ro }
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: cnpg-system }  # operatör
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: monitoring }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-redis-from-apps
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: redis }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: [redirect, api]
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: monitoring }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-redpanda-from-apps
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: redpanda }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: [redirect, api, analytics]
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: keda }
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: monitoring }
