@@ -1,12 +1,15 @@
 // Command redirect-svc — yalnızca okuma yolu. Trafiğin ~%99'u buradan geçer.
 //
 // EN: This binary does one thing: turn a short code into a 302. It does not know how to create a
-//     link, it has no write path to the database beyond the click producer, and its readiness has
-//     nothing to do with whether the API is healthy. The narrower the service, the smaller the
-//     blast radius of every change you will ever make to it.
+//
+//	link, it has no write path to the database beyond the click producer, and its readiness has
+//	nothing to do with whether the API is healthy. The narrower the service, the smaller the
+//	blast radius of every change you will ever make to it.
+//
 // TR: Bu binary tek iş yapar: kısa kodu 302'ye çevirir. Link oluşturmayı bilmez, tıklama
-//     üreticisi dışında veritabanına yazma yolu yoktur ve hazır olması API'nin sağlığıyla
-//     ilgisizdir. Servis ne kadar darsa, ona yapacağın her değişikliğin patlama yarıçapı o kadar küçüktür.
+//
+//	üreticisi dışında veritabanına yazma yolu yoktur ve hazır olması API'nin sağlığıyla
+//	ilgisizdir. Servis ne kadar darsa, ona yapacağın her değişikliğin patlama yarıçapı o kadar küçüktür.
 package main
 
 import (

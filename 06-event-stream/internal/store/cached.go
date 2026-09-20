@@ -11,13 +11,17 @@ import (
 // Dekoratörün kendisi neredeyse hiç değişmedi: değişen yalnızca önbelleğin NEREDE durduğu.
 //
 // EN: A decorator, not a new store: handlers keep talking to the same interface and cannot tell the
-//     difference. That is what makes the caching decision reversible — and reversibility matters,
-//     because caching is the one change most likely to be WRONG in a way that only shows up in
-//     production (stale reads, split brain between replicas, invalidation you forgot).
+//
+//	difference. That is what makes the caching decision reversible — and reversibility matters,
+//	because caching is the one change most likely to be WRONG in a way that only shows up in
+//	production (stale reads, split brain between replicas, invalidation you forgot).
+//
 // TR: Yeni bir store değil, bir dekoratör: handler'lar aynı arayüzle konuşmaya devam ediyor ve farkı
-//     anlayamıyorlar. Önbellek kararını GERİ ALINABİLİR kılan şey bu — ve geri alınabilirlik önemli,
-//     çünkü önbellek, yalnızca üretimde ortaya çıkan biçimlerde yanlış olma ihtimali en yüksek
-//     değişikliktir (bayat okuma, replikalar arası ayrışma, unutulan geçersiz kılma).
+//
+//	anlayamıyorlar. Önbellek kararını GERİ ALINABİLİR kılan şey bu — ve geri alınabilirlik önemli,
+//	çünkü önbellek, yalnızca üretimde ortaya çıkan biçimlerde yanlış olma ihtimali en yüksek
+//	değişikliktir (bayat okuma, replikalar arası ayrışma, unutulan geçersiz kılma).
+//
 // [Topic · Konu: Cache-aside, dekoratör]
 type Cached struct {
 	inner Store
@@ -67,13 +71,16 @@ func (c *Cached) Get(ctx context.Context, code string) (*Link, error) {
 
 // IncrementClicks — önbelleğe DOKUNMUYOR.
 // EN: The cached copy carries a click count that is already stale by design. Invalidating on every
-//     click would turn the cache into a cache-miss generator on exactly the hottest keys — the
-//     opposite of what it is for. The honest statement is: redirect targets are cached, click counts
-//     are not authoritative in the cache. Say it out loud rather than pretending consistency.
+//
+//	click would turn the cache into a cache-miss generator on exactly the hottest keys — the
+//	opposite of what it is for. The honest statement is: redirect targets are cached, click counts
+//	are not authoritative in the cache. Say it out loud rather than pretending consistency.
+//
 // TR: Önbellekteki kopya, tasarım gereği zaten bayat bir tıklama sayısı taşıyor. Her tıklamada
-//     geçersiz kılmak, önbelleği tam da en sıcak anahtarlarda bir ıska üreticisine çevirirdi —
-//     varlık amacının tam tersi. Dürüst ifade şu: yönlendirme hedefi önbelleklidir, tıklama sayısı
-//     önbellekte yetkili değildir. Tutarlılık numarası yapmak yerine bunu açıkça söyle.
+//
+//	geçersiz kılmak, önbelleği tam da en sıcak anahtarlarda bir ıska üreticisine çevirirdi —
+//	varlık amacının tam tersi. Dürüst ifade şu: yönlendirme hedefi önbelleklidir, tıklama sayısı
+//	önbellekte yetkili değildir. Tutarlılık numarası yapmak yerine bunu açıkça söyle.
 func (c *Cached) IncrementClicks(ctx context.Context, code string) error {
 	return c.inner.IncrementClicks(ctx, code)
 }
@@ -106,7 +113,7 @@ func (c *Cached) WriteClicks(ctx context.Context, counts map[string]int64) error
 func (c *Cached) Stats(ctx context.Context, code string, days int) (*Stats, error) {
 	return c.inner.Stats(ctx, code, days)
 }
-func (c *Cached) Ping(ctx context.Context) error           { return c.inner.Ping(ctx) }
-func (c *Cached) Close()                                   { c.inner.Close() }
+func (c *Cached) Ping(ctx context.Context) error { return c.inner.Ping(ctx) }
+func (c *Cached) Close()                         { c.inner.Close() }
 
 var _ Store = (*Cached)(nil)

@@ -179,11 +179,15 @@ func (c *Consumer) Run(ctx context.Context) error {
 // handlePoison — ayrıştırılamayan mesaj.
 //
 // EN: A message the consumer cannot parse will be redelivered forever if you just fail: the offset
-//     never advances, lag grows without bound, and one malformed record stops all analytics. A dead
-//     letter topic turns an unbounded outage into a bounded, inspectable one.
+//
+//	never advances, lag grows without bound, and one malformed record stops all analytics. A dead
+//	letter topic turns an unbounded outage into a bounded, inspectable one.
+//
 // TR: Tüketicinin ayrıştıramadığı bir mesaj, sadece hata verirsen sonsuza dek yeniden teslim edilir:
-//     offset ilerlemez, lag sınırsız büyür ve tek bir bozuk kayıt tüm analitiği durdurur. Ölü mektup
-//     topic'i, sınırsız bir kesintiyi sınırlı ve incelenebilir bir olaya çevirir.
+//
+//	offset ilerlemez, lag sınırsız büyür ve tek bir bozuk kayıt tüm analitiği durdurur. Ölü mektup
+//	topic'i, sınırsız bir kesintiyi sınırlı ve incelenebilir bir olaya çevirir.
+//
 // [Topic · Konu: Poison message, DLQ]
 func (c *Consumer) handlePoison(ctx context.Context, recs []*kgo.Record) {
 	if c.cfg.NoDLQ {

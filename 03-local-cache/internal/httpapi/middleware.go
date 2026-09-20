@@ -17,13 +17,17 @@ type ctxKey string
 const ctxRequestID ctxKey = "request_id"
 
 // EN: The chain order is the design. recover must be outermost (it must catch panics from every
-//     layer below, including the logger); requestID must come before accessLog (so the log line has
-//     it); timeout must come before the handler but after logging (so a timed-out request is still
-//     logged); rateLimit sits last so rejected requests are cheap — they never reach business logic.
+//
+//	layer below, including the logger); requestID must come before accessLog (so the log line has
+//	it); timeout must come before the handler but after logging (so a timed-out request is still
+//	logged); rateLimit sits last so rejected requests are cheap — they never reach business logic.
+//
 // TR: Zincirin SIRASI tasarımın kendisi. recover en dışta olmalı (altındaki her katmanın panic'ini
-//     yakalamalı, logger dahil); requestID accessLog'dan önce gelmeli (log satırında görünsün diye);
-//     timeout handler'dan önce ama log'dan sonra olmalı (zaman aşımına uğrayan istek yine loglansın);
-//     rateLimit en sonda ki reddedilen istek ucuz olsun — iş mantığına hiç ulaşmasın.
+//
+//	yakalamalı, logger dahil); requestID accessLog'dan önce gelmeli (log satırında görünsün diye);
+//	timeout handler'dan önce ama log'dan sonra olmalı (zaman aşımına uğrayan istek yine loglansın);
+//	rateLimit en sonda ki reddedilen istek ucuz olsun — iş mantığına hiç ulaşmasın.
+//
 // [Topic · Konu: Katmanlı koruma, middleware sırası]
 func Chain(h http.Handler, log *slog.Logger, m *metrics.Metrics, rl *ratelimit.Limiter, handlerTimeout time.Duration) http.Handler {
 	h = rateLimit(h, m, rl)

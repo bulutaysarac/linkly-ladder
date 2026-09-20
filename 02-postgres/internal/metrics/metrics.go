@@ -1,11 +1,15 @@
 // Package metrics — Prometheus metrikleri.
 //
 // EN: Every counter is registered at zero on startup. This is not cosmetic: a counter that only
-//     appears the first time it fires CANNOT be alerted on, because the monitoring system cannot
-//     tell "this never happened" from "this endpoint is not reporting".
+//
+//	appears the first time it fires CANNOT be alerted on, because the monitoring system cannot
+//	tell "this never happened" from "this endpoint is not reporting".
+//
 // TR: Her sayaç açılışta SIFIRLA kaydedilir. Kozmetik değil: yalnızca ilk kez tetiklendiğinde
-//     ortaya çıkan bir sayaca alarm yazamazsın, çünkü izleme sistemi "hiç olmadı" ile
-//     "bu uç raporlamıyor"u ayırt edemez.
+//
+//	ortaya çıkan bir sayaca alarm yazamazsın, çünkü izleme sistemi "hiç olmadı" ile
+//	"bu uç raporlamıyor"u ayırt edemez.
+//
 // [Topic · Konu: Gözlemlenebilirlik, alarm yazılabilirliği]
 //
 // Label kuralı: SINIRSIZ değerler (kısa kod, URL, IP, tenant id) asla label olmaz — her yeni değer
@@ -92,9 +96,12 @@ func (m *Metrics) Registry() prometheus.Registerer { return m.reg }
 
 // BindPoolStats — bağlantı havuzunun anlık durumunu her scrape'te oku.
 // EN: A gauge you must remember to update is a gauge that will be stale. Deriving it from the pool
-//     at collection time means it cannot lie.
+//
+//	at collection time means it cannot lie.
+//
 // TR: Güncellemeyi hatırlaman gereken bir gauge, bayat kalacak bir gauge'dır. Toplama anında
-//     havuzdan türetmek yalan söylemesini imkânsız kılar.
+//
+//	havuzdan türetmek yalan söylemesini imkânsız kılar.
 func (m *Metrics) BindPoolStats(fn func() (acquired, idle, total, max int32)) {
 	m.reg.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 		Name: "db_pool_acquired_conns", Help: "Kullanımdaki bağlantı"},

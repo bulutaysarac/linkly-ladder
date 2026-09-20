@@ -12,15 +12,19 @@ import (
 // Redis — L2: pod'ların DIŞINDA, paylaşılan önbellek.
 //
 // EN: Moving the cache out of the process fixes every consistency problem of level 03 at once:
-//     one copy, one invalidation, one warm cache that survives deploys. What it buys with is a
-//     network hop on the hot path and a new dependency that can be slow, full, or dead. The rule
-//     this level teaches: a cache you depend on is no longer a cache, it is a database — unless
-//     you make its failure survivable.
+//
+//	one copy, one invalidation, one warm cache that survives deploys. What it buys with is a
+//	network hop on the hot path and a new dependency that can be slow, full, or dead. The rule
+//	this level teaches: a cache you depend on is no longer a cache, it is a database — unless
+//	you make its failure survivable.
+//
 // TR: Önbelleği süreç dışına taşımak 03'ün bütün tutarlılık sorunlarını tek hamlede çözer: tek
-//     kopya, tek geçersiz kılma, dağıtımlardan sağ çıkan sıcak bir önbellek. Karşılığında sıcak
-//     yola bir ağ adımı ve yavaşlayabilen, dolabilen ya da ölebilen yeni bir bağımlılık koyar.
-//     Bu seviyenin öğrettiği kural: bağımlı olduğun bir önbellek artık önbellek değil, veritabanıdır
-//     — arızasını hayatta kalınabilir yapmadıkça.
+//
+//	kopya, tek geçersiz kılma, dağıtımlardan sağ çıkan sıcak bir önbellek. Karşılığında sıcak
+//	yola bir ağ adımı ve yavaşlayabilen, dolabilen ya da ölebilen yeni bir bağımlılık koyar.
+//	Bu seviyenin öğrettiği kural: bağımlı olduğun bir önbellek artık önbellek değil, veritabanıdır
+//	— arızasını hayatta kalınabilir yapmadıkça.
+//
 // [Topic · Konu: Paylaşılan önbellek, bağımlılık, degrade]
 type Redis[V any] struct {
 	rdb    *redis.Client
@@ -55,15 +59,18 @@ func (c *Redis[V]) ttl(base time.Duration) time.Duration {
 // GetOrLoad — cache-aside, L2 sürümü.
 //
 // EN: Note what is NOT here: a distributed lock around the load. Cross-process singleflight needs
-//     a lock, and a lock needs a lease, a renewal and a failure story — real complexity for a
-//     partial win. Per-pod singleflight (kept below) collapses N concurrent misses per pod, which
-//     is most of the benefit; the remaining cross-pod stampede is bounded by the replica count,
-//     not by the request rate. Know which stampede you actually have before buying a lock.
+//
+//	a lock, and a lock needs a lease, a renewal and a failure story — real complexity for a
+//	partial win. Per-pod singleflight (kept below) collapses N concurrent misses per pod, which
+//	is most of the benefit; the remaining cross-pod stampede is bounded by the replica count,
+//	not by the request rate. Know which stampede you actually have before buying a lock.
+//
 // TR: Burada OLMAYAN şeye dikkat: yükleme etrafında dağıtık kilit yok. Süreçler arası singleflight
-//     bir kilit ister; kilit de kira süresi, yenileme ve arıza senaryosu ister — kısmi bir kazanç
-//     için gerçek karmaşıklık. Pod içi singleflight (aşağıda korunuyor) pod başına N eşzamanlı
-//     ıskayı birleştirir ki faydanın çoğu budur; kalan pod'lar arası izdiham istek hızıyla değil
-//     REPLİKA SAYISIYLA sınırlıdır. Kilit satın almadan önce hangi izdihama sahip olduğunu bil.
+//
+//	bir kilit ister; kilit de kira süresi, yenileme ve arıza senaryosu ister — kısmi bir kazanç
+//	için gerçek karmaşıklık. Pod içi singleflight (aşağıda korunuyor) pod başına N eşzamanlı
+//	ıskayı birleştirir ki faydanın çoğu budur; kalan pod'lar arası izdiham istek hızıyla değil
+//	REPLİKA SAYISIYLA sınırlıdır. Kilit satın almadan önce hangi izdihama sahip olduğunu bil.
 func (c *Redis[V]) GetOrLoad(ctx context.Context, k string, load func(context.Context) (V, bool, error)) (V, error) {
 	var zero V
 	raw, err := c.rdb.Get(ctx, c.key(k)).Result()

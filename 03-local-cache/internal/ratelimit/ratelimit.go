@@ -1,11 +1,15 @@
 // Package ratelimit — süreç İÇİ, IP başına token bucket.
 //
 // EN: Deliberately wrong at scale, and the README says so: with N replicas each pod keeps its own
-//     bucket, so the effective limit is N × limit and depends on how the load balancer spreads the
-//     client. Level 02 measures that error; level 08 fixes it with a shared limiter in Redis.
+//
+//	bucket, so the effective limit is N × limit and depends on how the load balancer spreads the
+//	client. Level 02 measures that error; level 08 fixes it with a shared limiter in Redis.
+//
 // TR: Ölçekte bilerek YANLIŞ ve README bunu söylüyor: N replikada her pod kendi kovasını tutar,
-//     yani gerçek limit N × limit olur ve load balancer'ın client'ı nasıl dağıttığına bağlıdır.
-//     02 bu hatayı ölçüyor; 08 Redis'teki paylaşılan limiter ile düzeltiyor.
+//
+//	yani gerçek limit N × limit olur ve load balancer'ın client'ı nasıl dağıttığına bağlıdır.
+//	02 bu hatayı ölçüyor; 08 Redis'teki paylaşılan limiter ile düzeltiyor.
+//
 // [Topic · Konu: Hız sınırlama, dağıtık durum]
 package ratelimit
 

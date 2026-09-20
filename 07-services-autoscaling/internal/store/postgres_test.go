@@ -14,13 +14,17 @@ import (
 )
 
 // Entegrasyon testi: gerçek Postgres gerektirir, yoksa ATLANIR.
-//   docker run --rm -d -p 55432:5432 -e POSTGRES_PASSWORD=linkly -e POSTGRES_USER=linkly -e POSTGRES_DB=linkly postgres:17-alpine
-//   DATABASE_URL='postgres://linkly:linkly@127.0.0.1:55432/linkly?sslmode=disable' go test ./internal/store/
+//
+//	docker run --rm -d -p 55432:5432 -e POSTGRES_PASSWORD=linkly -e POSTGRES_USER=linkly -e POSTGRES_DB=linkly postgres:17-alpine
+//	DATABASE_URL='postgres://linkly:linkly@127.0.0.1:55432/linkly?sslmode=disable' go test ./internal/store/
 //
 // EN: Skipping is not hiding: the skip message says exactly how to run it. A test that silently
-//     does nothing is worse than no test, so the message is part of the test.
+//
+//	does nothing is worse than no test, so the message is part of the test.
+//
 // TR: Atlamak saklamak değil: atlama mesajı nasıl koşulacağını birebir söylüyor. Sessizce hiçbir
-//     şey yapmayan bir test, test olmamasından kötüdür; bu yüzden mesaj testin parçası.
+//
+//	şey yapmayan bir test, test olmamasından kötüdür; bu yüzden mesaj testin parçası.
 func openTestDB(t *testing.T) *Postgres {
 	t.Helper()
 	dsn := os.Getenv("DATABASE_URL")

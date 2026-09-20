@@ -11,13 +11,17 @@ import (
 // ClickEvent — tel üzerindeki sözleşme.
 //
 // EN: Three fields matter beyond the payload. `EventID` makes the consumer able to be idempotent
-//     (P06-01). `Version` makes it possible to change this struct later without a flag day
-//     (P06-07). `At` is the producer's clock, not the consumer's — never derive "when" from when
-//     you happened to process something.
+//
+//	(P06-01). `Version` makes it possible to change this struct later without a flag day
+//	(P06-07). `At` is the producer's clock, not the consumer's — never derive "when" from when
+//	you happened to process something.
+//
 // TR: Yükün ötesinde üç alan önemli. `EventID`, tüketicinin idempotent olabilmesini sağlar (P06-01).
-//     `Version`, bu yapıyı ileride topyekûn bir geçiş günü olmadan değiştirebilmeyi (P06-07).
-//     `At` üreticinin saatidir, tüketicinin değil — "ne zaman"ı, bir şeyi işlemeye denk geldiğin
-//     andan asla türetme.
+//
+//	`Version`, bu yapıyı ileride topyekûn bir geçiş günü olmadan değiştirebilmeyi (P06-07).
+//	`At` üreticinin saatidir, tüketicinin değil — "ne zaman"ı, bir şeyi işlemeye denk geldiğin
+//	andan asla türetme.
+//
 // [Topic · Konu: Olay şeması, idempotency, şema evrimi]
 type ClickEvent struct {
 	Version int       `json:"v"`

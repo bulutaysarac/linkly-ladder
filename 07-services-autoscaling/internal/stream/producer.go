@@ -69,13 +69,17 @@ func NewProducer(brokers []string, topic string, maxBuffered int, m *ProducerMet
 // Record — istek yolundan çağrılır ve ASLA bloklamaz.
 //
 // EN: franz-go's Produce is already asynchronous, but "asynchronous" is not the same as "bounded".
-//     If the broker is down, records pile up in the client's buffer until memory runs out — the
-//     unbounded-queue mistake of P05-02, moved one layer down. So we keep our own counter and
-//     DROP past a limit. A broker outage must degrade analytics, never the redirect.
+//
+//	If the broker is down, records pile up in the client's buffer until memory runs out — the
+//	unbounded-queue mistake of P05-02, moved one layer down. So we keep our own counter and
+//	DROP past a limit. A broker outage must degrade analytics, never the redirect.
+//
 // TR: franz-go'nun Produce'u zaten asenkron, ama "asenkron" ile "sınırlı" aynı şey değil. Broker
-//     düşerse kayıtlar istemci tamponunda bellek bitene kadar birikir — P05-02'deki sınırsız kuyruk
-//     hatasının bir kat aşağı taşınmış hâli. Bu yüzden kendi sayacımızı tutup sınırı aşınca
-//     DÜŞÜRÜYORUZ. Bir broker kesintisi analitiği bozabilir, redirect'i ASLA.
+//
+//	düşerse kayıtlar istemci tamponunda bellek bitene kadar birikir — P05-02'deki sınırsız kuyruk
+//	hatasının bir kat aşağı taşınmış hâli. Bu yüzden kendi sayacımızı tutup sınırı aşınca
+//	DÜŞÜRÜYORUZ. Bir broker kesintisi analitiği bozabilir, redirect'i ASLA.
+//
 // [Topic · Konu: Back pressure, bağımlılık izolasyonu]
 func (p *Producer) Record(code string) {
 	if p.buffered.Load() >= p.maxBuf {

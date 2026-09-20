@@ -62,7 +62,9 @@ func TestTrapMetricLabelCodeAddsSeriesPerCode(t *testing.T) {
 	}
 }
 
-func contains(h, n string) bool { return len(h) >= len(n) && (func() bool { return indexOf(h, n) >= 0 })() }
+func contains(h, n string) bool {
+	return len(h) >= len(n) && (func() bool { return indexOf(h, n) >= 0 })()
+}
 func indexOf(h, n string) int {
 	for i := 0; i+len(n) <= len(h); i++ {
 		if h[i:i+len(n)] == n {

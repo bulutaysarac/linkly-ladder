@@ -1,11 +1,15 @@
 // Package cache — süreç içi (L1) önbellek: sınırlı LRU + TTL + singleflight + negatif önbellek.
 //
 // EN: The cheapest possible cache: a map in the pod's memory. It removes most of the database read
-//     load measured at P02-01 — and immediately creates a new class of problem, because now there
-//     are N copies of the truth and none of them knows when it became wrong (P03-01 … P03-04).
+//
+//	load measured at P02-01 — and immediately creates a new class of problem, because now there
+//	are N copies of the truth and none of them knows when it became wrong (P03-01 … P03-04).
+//
 // TR: Mümkün olan en ucuz önbellek: pod belleğinde bir map. P02-01'de ölçülen veritabanı okuma
-//     yükünün çoğunu kaldırıyor — ve anında yeni bir sorun sınıfı yaratıyor, çünkü artık gerçeğin
-//     N kopyası var ve hiçbiri ne zaman yanlışlandığını bilmiyor (P03-01 … P03-04).
+//
+//	yükünün çoğunu kaldırıyor — ve anında yeni bir sorun sınıfı yaratıyor, çünkü artık gerçeğin
+//	N kopyası var ve hiçbiri ne zaman yanlışlandığını bilmiyor (P03-01 … P03-04).
+//
 // [Topic · Konu: Cache-aside, LRU, TTL, stampede]
 package cache
 
@@ -64,11 +68,11 @@ func NewMetrics(reg prometheus.Registerer, layer string) *Metrics {
 }
 
 type Config struct {
-	Capacity      int
-	TTL           time.Duration
-	NegativeTTL   time.Duration
-	Jitter        float64 // TTL'e eklenen rastgelelik oranı (0.2 = ±%20)
-	Layer         string
+	Capacity       int
+	TTL            time.Duration
+	NegativeTTL    time.Duration
+	Jitter         float64 // TTL'e eklenen rastgelelik oranı (0.2 = ±%20)
+	Layer          string
 	NoSingleflight bool // TRAP
 	NoNegative     bool // TRAP
 	NoJitter       bool // TRAP
@@ -108,9 +112,13 @@ func New[V any](cfg Config, m *Metrics) *LRU[V] {
 
 // ttlWithJitter — aynı anda dolan TTL'ler aynı anda miss üretir.
 // EN: Without jitter, every key written during the same second expires during the same second, and
-//     the database sees a periodic spike forever after. Jitter is not noise, it is de-correlation.
+//
+//	the database sees a periodic spike forever after. Jitter is not noise, it is de-correlation.
+//
 // TR: Jitter olmadan aynı saniyede yazılan her anahtar aynı saniyede dolar ve veritabanı sonsuza
-//     kadar periyodik bir tepe görür. Jitter gürültü değil, korelasyon kırıcıdır.
+//
+//	kadar periyodik bir tepe görür. Jitter gürültü değil, korelasyon kırıcıdır.
+//
 // [Topic · Konu: Thundering herd, TTL jitter]
 func (c *LRU[V]) ttlWithJitter(base time.Duration) time.Duration {
 	if c.cfg.NoJitter {
@@ -122,13 +130,16 @@ func (c *LRU[V]) ttlWithJitter(base time.Duration) time.Duration {
 
 // GetOrLoad — cache-aside: bul, yoksa yükle, yaz.
 // EN: The singleflight wrapper is what stops a cache MISS from becoming a database STAMPEDE: when a
-//     hot key expires, a thousand concurrent requests would otherwise all query the database for the
-//     same row. One loads, the rest wait. cache_stampede_wait_total going up is not an error — it is
-//     proof the guard is working, and you cannot see that from hit ratio alone.
+//
+//	hot key expires, a thousand concurrent requests would otherwise all query the database for the
+//	same row. One loads, the rest wait. cache_stampede_wait_total going up is not an error — it is
+//	proof the guard is working, and you cannot see that from hit ratio alone.
+//
 // TR: singleflight sarmalayıcısı, bir önbellek ISKASININ veritabanı İZDİHAMINA dönüşmesini engeller:
-//     sıcak bir anahtarın TTL'i dolduğunda binlerce eşzamanlı istek aynı satır için veritabanına
-//     giderdi. Biri yükler, kalanı bekler. cache_stampede_wait_total'ın artması hata değil, korumanın
-//     çalıştığının kanıtıdır — ve bunu hit oranına bakarak göremezsin.
+//
+//	sıcak bir anahtarın TTL'i dolduğunda binlerce eşzamanlı istek aynı satır için veritabanına
+//	giderdi. Biri yükler, kalanı bekler. cache_stampede_wait_total'ın artması hata değil, korumanın
+//	çalıştığının kanıtıdır — ve bunu hit oranına bakarak göremezsin.
 func (c *LRU[V]) GetOrLoad(ctx context.Context, key string, load func(context.Context) (V, bool, error)) (V, error) {
 	var zero V
 	if v, negative, ok := c.lookup(key); ok {

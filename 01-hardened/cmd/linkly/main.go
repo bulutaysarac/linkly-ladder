@@ -1,13 +1,16 @@
 // Command linkly — seviye 01, "tek süreç ama düzgün".
 //
 // EN: Same single process, same in-memory store as level 00 — but with the disciplines that stop it
-//     from crashing, lying, or losing requests. The most instructive part of this file is the last
-//     twenty lines: the shutdown ORDER. Everything above is construction; below Shutdown is where
-//     requests get dropped if you get the order wrong.
+//
+//	from crashing, lying, or losing requests. The most instructive part of this file is the last
+//	twenty lines: the shutdown ORDER. Everything above is construction; below Shutdown is where
+//	requests get dropped if you get the order wrong.
+//
 // TR: 00 ile aynı tek süreç, aynı bellek içi store — ama çökmesini, yalan söylemesini ve istek
-//     kaybetmesini engelleyen disiplinlerle. Bu dosyanın en öğretici kısmı son yirmi satırı:
-//     kapatma SIRASI. Yukarısı kurulum; Shutdown'ın altı, sırayı yanlış yaparsan isteklerin
-//     düştüğü yer.
+//
+//	kaybetmesini engelleyen disiplinlerle. Bu dosyanın en öğretici kısmı son yirmi satırı:
+//	kapatma SIRASI. Yukarısı kurulum; Shutdown'ın altı, sırayı yanlış yaparsan isteklerin
+//	düştüğü yer.
 package main
 
 import (

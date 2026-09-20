@@ -23,11 +23,15 @@ type Postgres struct {
 
 // DBMetrics — veritabanı erişimini ölçmek uygulamanın işi.
 // EN: postgres_exporter tells you what the DATABASE sees. It cannot tell you how long YOUR request
-//     waited for a connection from the pool — and at level 02 that wait is the thing that will hurt
-//     you first (P02-02, P02-06). Measure both sides of the boundary.
+//
+//	waited for a connection from the pool — and at level 02 that wait is the thing that will hurt
+//	you first (P02-02, P02-06). Measure both sides of the boundary.
+//
 // TR: postgres_exporter sana VERİTABANININ gördüğünü söyler. SENİN isteğinin havuzdan bağlantı
-//     almak için ne kadar beklediğini söyleyemez — ve 02'de canını ilk yakacak şey tam olarak o
-//     bekleme (P02-02, P02-06). Sınırın iki tarafını da ölç.
+//
+//	almak için ne kadar beklediğini söyleyemez — ve 02'de canını ilk yakacak şey tam olarak o
+//	bekleme (P02-02, P02-06). Sınırın iki tarafını da ölç.
+//
 // [Topic · Konu: Gözlemlenebilirlik, bağlantı havuzu]
 type DBMetrics struct {
 	Queries      *prometheus.CounterVec   // op, result
@@ -113,11 +117,15 @@ func (p *Postgres) track(ctx context.Context, op string, fn func(context.Context
 
 // CreateUnique — 01'deki koşullu eklemenin SQL karşılığı.
 // EN: ON CONFLICT DO NOTHING + RETURNING: one round trip, no read-then-write race. The check-then-insert
-//     version ("SELECT, if absent INSERT") is wrong under concurrency no matter how careful you are —
-//     two requests can both pass the check. The database, not the application, must arbitrate.
+//
+//	version ("SELECT, if absent INSERT") is wrong under concurrency no matter how careful you are —
+//	two requests can both pass the check. The database, not the application, must arbitrate.
+//
 // TR: ON CONFLICT DO NOTHING + RETURNING: tek gidiş-geliş, oku-sonra-yaz yarışı yok. "Önce SELECT,
-//     yoksa INSERT" sürümü ne kadar dikkatli olursan ol eşzamanlılıkta yanlıştır — iki istek de
-//     kontrolü geçebilir. Hakemlik uygulamanın değil, veritabanının işi.
+//
+//	yoksa INSERT" sürümü ne kadar dikkatli olursan ol eşzamanlılıkta yanlıştır — iki istek de
+//	kontrolü geçebilir. Hakemlik uygulamanın değil, veritabanının işi.
+//
 // [Topic · Konu: Yarış koşulları, atomiklik]
 func (p *Postgres) CreateUnique(ctx context.Context, l *Link) error {
 	return p.track(ctx, "create", func(ctx context.Context) error {
@@ -152,13 +160,17 @@ func (p *Postgres) Get(ctx context.Context, code string) (*Link, error) {
 
 // IncrementClicks — BİLEREK senkron ve istek yolunda.
 // EN: This is the level-01 mutex turned into a database row lock. On a hot link every redirect
-//     serialises on the same row: the lock queue, not the CPU, sets your p99. It also generates a
-//     new row version per click (MVCC), so the table bloats and autovacuum has to keep up.
-//     P02-08 measures it; level 05 takes the write off the read path entirely.
+//
+//	serialises on the same row: the lock queue, not the CPU, sets your p99. It also generates a
+//	new row version per click (MVCC), so the table bloats and autovacuum has to keep up.
+//	P02-08 measures it; level 05 takes the write off the read path entirely.
+//
 // TR: Bu, 01'deki mutex'in veritabanı satır kilidine dönüşmüş hâli. Sıcak bir linkte her redirect
-//     aynı satırda sıraya girer: p99'unu CPU değil, kilit kuyruğu belirler. Üstelik her tıklama yeni
-//     bir satır sürümü üretir (MVCC), tablo şişer ve autovacuum yetişmek zorunda kalır.
-//     P02-08 bunu ölçüyor; 05 yazmayı okuma yolundan tamamen çıkarıyor.
+//
+//	aynı satırda sıraya girer: p99'unu CPU değil, kilit kuyruğu belirler. Üstelik her tıklama yeni
+//	bir satır sürümü üretir (MVCC), tablo şişer ve autovacuum yetişmek zorunda kalır.
+//	P02-08 bunu ölçüyor; 05 yazmayı okuma yolundan tamamen çıkarıyor.
+//
 // [Topic · Konu: Satır kilidi, MVCC, okuma/yazma yolu]
 func (p *Postgres) IncrementClicks(ctx context.Context, code string) error {
 	return p.track(ctx, "increment_clicks", func(ctx context.Context) error {
@@ -211,15 +223,19 @@ func (p *Postgres) Count(ctx context.Context) (int64, error) {
 // WriteClicks — tek sorguda toplu upsert.
 //
 // EN: One statement for the whole batch, not one per code. The unnest() form turns N codes into a
-//     single round trip and a single lock acquisition order, which is also why it cannot deadlock
-//     against itself: rows are touched in a deterministic order within one statement.
-//     Note what is missing: idempotency. A retry double-counts. That is acceptable for a click
-//     counter and is stated plainly in the README; level 06 makes it at-least-once + idempotent.
+//
+//	single round trip and a single lock acquisition order, which is also why it cannot deadlock
+//	against itself: rows are touched in a deterministic order within one statement.
+//	Note what is missing: idempotency. A retry double-counts. That is acceptable for a click
+//	counter and is stated plainly in the README; level 06 makes it at-least-once + idempotent.
+//
 // TR: Tüm parti için tek ifade, kod başına bir tane değil. unnest() biçimi N kodu tek bir gidiş-gelişe
-//     ve tek bir kilit alma sırasına indirger; kendisiyle kilitlenememesinin sebebi de bu: satırlara
-//     tek ifade içinde belirli bir sırayla dokunulur.
-//     Eksik olana dikkat: idempotency. Yeniden deneme çift sayar. Bir tıklama sayacı için kabul
-//     edilebilir ve README bunu açıkça söylüyor; 06 bunu en-az-bir-kez + idempotent yapıyor.
+//
+//	ve tek bir kilit alma sırasına indirger; kendisiyle kilitlenememesinin sebebi de bu: satırlara
+//	tek ifade içinde belirli bir sırayla dokunulur.
+//	Eksik olana dikkat: idempotency. Yeniden deneme çift sayar. Bir tıklama sayacı için kabul
+//	edilebilir ve README bunu açıkça söylüyor; 06 bunu en-az-bir-kez + idempotent yapıyor.
+//
 // [Topic · Konu: Toplu yazma, idempotency]
 func (p *Postgres) WriteClicks(ctx context.Context, counts map[string]int64) error {
 	if len(counts) == 0 {

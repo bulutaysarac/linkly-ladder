@@ -1,11 +1,14 @@
 // Command migrate — şemayı hedef sürüme getirir ve çıkar. Tek seferlik Job olarak koşar.
 //
 // EN: A separate binary, not a flag on the server: the migration image must be runnable without the
-//     server's config, its readiness semantics or its port. Sharing the module (and therefore the
-//     embedded migrations) guarantees the schema and the code that expects it ship together.
+//
+//	server's config, its readiness semantics or its port. Sharing the module (and therefore the
+//	embedded migrations) guarantees the schema and the code that expects it ship together.
+//
 // TR: Sunucuya bayrak değil, AYRI bir binary: migration imajı, sunucunun ayarlarına, hazır olma
-//     semantiğine ya da portuna ihtiyaç duymadan koşabilmeli. Modülü (dolayısıyla gömülü
-//     migration'ları) paylaşmak, şemanın ve onu bekleyen kodun birlikte dağıtılmasını garantiler.
+//
+//	semantiğine ya da portuna ihtiyaç duymadan koşabilmeli. Modülü (dolayısıyla gömülü
+//	migration'ları) paylaşmak, şemanın ve onu bekleyen kodun birlikte dağıtılmasını garantiler.
 package main
 
 import (

@@ -17,13 +17,17 @@ type createReq struct {
 
 // dbCtx — her sorguya bir süre sınırı.
 // EN: The client's context already carries the handler timeout, so why another one? Because they
-//     answer different questions: the handler timeout protects the CALLER (stop waiting), the query
-//     timeout protects the DEPENDENCY (stop asking). Without the second one a slow database keeps
-//     accumulating work from clients who already gave up — see P02-06 and, in its full form, P10-03.
+//
+//	answer different questions: the handler timeout protects the CALLER (stop waiting), the query
+//	timeout protects the DEPENDENCY (stop asking). Without the second one a slow database keeps
+//	accumulating work from clients who already gave up — see P02-06 and, in its full form, P10-03.
+//
 // TR: Client'ın context'i zaten handler timeout'unu taşıyor, o hâlde neden bir tane daha? Çünkü
-//     farklı sorulara cevap veriyorlar: handler timeout ÇAĞIRANI korur (beklemeyi bırak), sorgu
-//     timeout'u BAĞIMLILIĞI korur (sormayı bırak). İkincisi olmazsa yavaş bir veritabanı, çoktan
-//     vazgeçmiş client'lardan iş biriktirmeye devam eder — bkz. P02-06 ve tam hâliyle P10-03.
+//
+//	farklı sorulara cevap veriyorlar: handler timeout ÇAĞIRANI korur (beklemeyi bırak), sorgu
+//	timeout'u BAĞIMLILIĞI korur (sormayı bırak). İkincisi olmazsa yavaş bir veritabanı, çoktan
+//	vazgeçmiş client'lardan iş biriktirmeye devam eder — bkz. P02-06 ve tam hâliyle P10-03.
+//
 // [Topic · Konu: Timeout bütçesi]
 func (a *API) dbCtx(r *http.Request) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(r.Context(), a.cfg.DBQueryTimeout)

@@ -29,16 +29,16 @@ type Config struct {
 	MigrateTarget    int64  // hangi migration sürümüne kadar koşulsun (P02-05 alıştırması)
 	ListLimit        int
 
-	RedisAddr        string
-	RedisTimeout     time.Duration
-	QueueSize        int
-	BatchSize        int
-	FlushInterval    time.Duration
+	RedisAddr         string
+	RedisTimeout      time.Duration
+	QueueSize         int
+	BatchSize         int
+	FlushInterval     time.Duration
 	ClickWriteTimeout time.Duration
-	StatsDays        int
-	CacheCapacity    int
-	CacheTTL         time.Duration
-	CacheNegativeTTL time.Duration
+	StatsDays         int
+	CacheCapacity     int
+	CacheTTL          time.Duration
+	CacheNegativeTTL  time.Duration
 
 	// TRAP_* — seviye içi alıştırmalar. Varsayılan olarak KAPALI; README §7 açıklıyor.
 	TrapMetricLabelCode bool // kısa kodu metrik label'ı yap → kardinalite patlaması
@@ -72,20 +72,20 @@ func Load() Config {
 		DatabaseURL:      env("DATABASE_URL", "postgres://linkly:linkly@postgres:5432/linkly?sslmode=disable"),
 		DBMaxConns:       int32(envInt("DB_MAX_CONNS", 25)),
 		DBQueryTimeout:   envDur("DB_QUERY_TIMEOUT", 3*time.Second),
-		StatementTimeout: env("STATEMENT_TIMEOUT", ""), // BİLEREK boş: P02-06 bunun yokluğunu ölçüyor
+		StatementTimeout: env("STATEMENT_TIMEOUT", ""),       // BİLEREK boş: P02-06 bunun yokluğunu ölçüyor
 		MigrateTarget:    int64(envInt("MIGRATE_TARGET", 1)), // 2 = tenant index'i (P02-05 çözümü)
 		ListLimit:        envInt("LIST_LIMIT", 100),
 
-		RedisAddr:        env("REDIS_ADDR", "redis:6379"),
-		RedisTimeout:     envDur("REDIS_TIMEOUT", 500*time.Millisecond),
-		QueueSize:        envInt("ANALYTICS_QUEUE_SIZE", 20000),
-		BatchSize:        envInt("ANALYTICS_BATCH_SIZE", 500),
-		FlushInterval:    envDur("ANALYTICS_FLUSH_INTERVAL", time.Second),
+		RedisAddr:         env("REDIS_ADDR", "redis:6379"),
+		RedisTimeout:      envDur("REDIS_TIMEOUT", 500*time.Millisecond),
+		QueueSize:         envInt("ANALYTICS_QUEUE_SIZE", 20000),
+		BatchSize:         envInt("ANALYTICS_BATCH_SIZE", 500),
+		FlushInterval:     envDur("ANALYTICS_FLUSH_INTERVAL", time.Second),
 		ClickWriteTimeout: envDur("ANALYTICS_WRITE_TIMEOUT", 5*time.Second),
-		StatsDays:        envInt("STATS_DAYS", 30),
-		CacheCapacity:    envInt("CACHE_CAPACITY", 50000),
-		CacheTTL:         envDur("CACHE_TTL", 60*time.Second),
-		CacheNegativeTTL: envDur("CACHE_NEGATIVE_TTL", 10*time.Second),
+		StatsDays:         envInt("STATS_DAYS", 30),
+		CacheCapacity:     envInt("CACHE_CAPACITY", 50000),
+		CacheTTL:          envDur("CACHE_TTL", 60*time.Second),
+		CacheNegativeTTL:  envDur("CACHE_NEGATIVE_TTL", 10*time.Second),
 
 		TrapMetricLabelCode: envBool("TRAP_METRIC_LABEL_CODE", false),
 		TrapLivenessStrict:  envBool("TRAP_LIVENESS_STRICT", false),

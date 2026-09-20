@@ -1,14 +1,17 @@
 // Command linkly — seviye 02, "kalıcılık ve yatay ölçek".
 //
 // EN: The application is now STATELESS. That single word is what buys N replicas, clean rollouts,
-//     node drains and horizontal scaling — none of which were available at level 01, not because of
-//     missing Kubernetes features but because the data lived inside the process. The cost is that
-//     every request now crosses a network to a database that this level treats as always-up and
-//     infinitely fast. It is neither (P02-01 … P02-08).
+//
+//	node drains and horizontal scaling — none of which were available at level 01, not because of
+//	missing Kubernetes features but because the data lived inside the process. The cost is that
+//	every request now crosses a network to a database that this level treats as always-up and
+//	infinitely fast. It is neither (P02-01 … P02-08).
+//
 // TR: Uygulama artık DURUMSUZ. N replika, temiz rollout, node drain ve yatay ölçeklenme bu tek
-//     kelimenin karşılığı — hiçbiri 01'de yoktu, Kubernetes özelliği eksik olduğu için değil, veri
-//     sürecin içinde yaşadığı için. Bedeli: artık her istek, bu seviyenin hep ayakta ve sonsuz hızlı
-//     varsaydığı bir veritabanına ağ üzerinden gidiyor. İkisi de doğru değil (P02-01 … P02-08).
+//
+//	kelimenin karşılığı — hiçbiri 01'de yoktu, Kubernetes özelliği eksik olduğu için değil, veri
+//	sürecin içinde yaşadığı için. Bedeli: artık her istek, bu seviyenin hep ayakta ve sonsuz hızlı
+//	varsaydığı bir veritabanına ağ üzerinden gidiyor. İkisi de doğru değil (P02-01 … P02-08).
 package main
 
 import (
@@ -22,16 +25,16 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/bulutaysarac/linkly-ladder/05-async-analytics/internal/cache"
 	"github.com/bulutaysarac/linkly-ladder/05-async-analytics/internal/analytics"
+	"github.com/bulutaysarac/linkly-ladder/05-async-analytics/internal/cache"
 	"github.com/bulutaysarac/linkly-ladder/05-async-analytics/internal/config"
 	"github.com/bulutaysarac/linkly-ladder/05-async-analytics/internal/httpapi"
 	"github.com/bulutaysarac/linkly-ladder/05-async-analytics/internal/metrics"
 	"github.com/bulutaysarac/linkly-ladder/05-async-analytics/internal/ratelimit"
 	"github.com/bulutaysarac/linkly-ladder/05-async-analytics/internal/store"
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/redis/go-redis/v9"
 	"github.com/pressly/goose/v3"
+	"github.com/redis/go-redis/v9"
 )
 
 var version = "dev"

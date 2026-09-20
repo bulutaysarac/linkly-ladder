@@ -1,13 +1,17 @@
 // Package store — link deposu. 01'de bellek içi bir map'ti; artık Postgres.
 //
 // EN: The interface barely changed, and that is the point: CreateUnique's conditional-insert
-//     semantics were chosen at level 01 precisely because they map 1:1 onto SQL's UNIQUE constraint
-//     (ON CONFLICT DO NOTHING). Picking the narrow, honest interface early is what makes the swap
-//     a one-file change instead of a rewrite.
+//
+//	semantics were chosen at level 01 precisely because they map 1:1 onto SQL's UNIQUE constraint
+//	(ON CONFLICT DO NOTHING). Picking the narrow, honest interface early is what makes the swap
+//	a one-file change instead of a rewrite.
+//
 // TR: Arayüz neredeyse hiç değişmedi ve mesele tam olarak bu: CreateUnique'in koşullu ekleme
-//     semantiği 01'de tesadüfen değil, SQL'in UNIQUE kısıtına (ON CONFLICT DO NOTHING) birebir
-//     otursun diye seçilmişti. Dar ve dürüst arayüzü erken seçmek, değişimi baştan yazmak yerine
-//     tek dosyalık bir işe çeviriyor.
+//
+//	semantiği 01'de tesadüfen değil, SQL'in UNIQUE kısıtına (ON CONFLICT DO NOTHING) birebir
+//	otursun diye seçilmişti. Dar ve dürüst arayüzü erken seçmek, değişimi baştan yazmak yerine
+//	tek dosyalık bir işe çeviriyor.
+//
 // [Topic · Konu: Arayüz tasarımı, kalıcılık]
 package store
 

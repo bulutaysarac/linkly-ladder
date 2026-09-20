@@ -39,11 +39,14 @@ func (a *API) SetReady(v bool) { a.ready.Store(v) }
 
 // Handler — /metrics, /healthz, /readyz middleware zincirinin DIŞINDA kalır.
 // EN: Health and metrics endpoints must not be rate limited, must not be timed out by the business
-//     timeout, and must not pollute business metrics. If your readiness probe can be rate limited,
-//     a traffic spike will take every pod out of the load balancer at the worst possible moment.
+//
+//	timeout, and must not pollute business metrics. If your readiness probe can be rate limited,
+//	a traffic spike will take every pod out of the load balancer at the worst possible moment.
+//
 // TR: Sağlık ve metrik uçları hız sınırına takılmamalı, iş timeout'una tabi olmamalı ve iş
-//     metriklerini kirletmemeli. Readiness probe'un hız sınırına takılabiliyorsa, bir trafik
-//     dalgası tam en kötü anda bütün pod'ları load balancer'dan düşürür.
+//
+//	metriklerini kirletmemeli. Readiness probe'un hız sınırına takılabiliyorsa, bir trafik
+//	dalgası tam en kötü anda bütün pod'ları load balancer'dan düşürür.
 func (a *API) Handler(rl *ratelimit.Limiter) http.Handler {
 	business := http.NewServeMux()
 	business.HandleFunc("POST /api/links", a.handleCreate)
@@ -159,13 +162,17 @@ var _ = time.Second
 
 // tenantOf — X-Tenant-ID header'ı.
 // EN: THIS IS NOT AUTHENTICATION. Anyone can send this header with curl. It exists so the
-//     tenant-boundary logic can be built and tested without dragging an identity provider into a
-//     teaching project. In production the tenant must come from a validated token or be injected by
-//     a gateway that already authenticated the caller. Level 13 does that and measures what this costs.
+//
+//	tenant-boundary logic can be built and tested without dragging an identity provider into a
+//	teaching project. In production the tenant must come from a validated token or be injected by
+//	a gateway that already authenticated the caller. Level 13 does that and measures what this costs.
+//
 // TR: BU KİMLİK DOĞRULAMA DEĞİLDİR. Bu header'ı curl ile herkes gönderebilir. Amacı, kiracı sınırı
-//     mantığının bir kimlik sağlayıcı sürüklemeden kurulabilmesi ve test edilebilmesi. Üretimde
-//     kiracı, doğrulanmış bir token'dan gelmeli ya da çağıranı zaten doğrulamış bir ağ geçidi
-//     tarafından enjekte edilmeli. 13 bunu yapıyor ve bunun bedelini ölçüyor.
+//
+//	mantığının bir kimlik sağlayıcı sürüklemeden kurulabilmesi ve test edilebilmesi. Üretimde
+//	kiracı, doğrulanmış bir token'dan gelmeli ya da çağıranı zaten doğrulamış bir ağ geçidi
+//	tarafından enjekte edilmeli. 13 bunu yapıyor ve bunun bedelini ölçüyor.
+//
 // [Topic · Konu: Çok kiracılılık, kimlik]
 func tenantOf(r *http.Request) string {
 	if t := r.Header.Get("X-Tenant-ID"); t != "" {

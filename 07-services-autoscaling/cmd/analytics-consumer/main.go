@@ -1,13 +1,16 @@
 // Command analytics-consumer — tıklama olaylarını topic'ten okuyup veritabanına yazar.
 //
 // EN: A separate binary and a separate Deployment. This is what level 05's P05-03 asked for:
-//     the writer no longer shares the redirect path's process, CPU limit or connection pool. It
-//     can be scaled, restarted, rate limited and deployed on its own — and when it falls behind,
-//     the only thing that suffers is analytics freshness.
+//
+//	the writer no longer shares the redirect path's process, CPU limit or connection pool. It
+//	can be scaled, restarted, rate limited and deployed on its own — and when it falls behind,
+//	the only thing that suffers is analytics freshness.
+//
 // TR: Ayrı bir binary ve ayrı bir Deployment. 05'teki P05-03'ün istediği tam olarak buydu:
-//     yazıcı artık redirect yolunun sürecini, CPU limitini ve bağlantı havuzunu paylaşmıyor.
-//     Kendi başına ölçeklenebilir, yeniden başlatılabilir, sınırlanabilir ve dağıtılabilir —
-//     geri kaldığında zarar gören tek şey analitiğin tazeliği olur.
+//
+//	yazıcı artık redirect yolunun sürecini, CPU limitini ve bağlantı havuzunu paylaşmıyor.
+//	Kendi başına ölçeklenebilir, yeniden başlatılabilir, sınırlanabilir ve dağıtılabilir —
+//	geri kaldığında zarar gören tek şey analitiğin tazeliği olur.
 package main
 
 import (

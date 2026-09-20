@@ -61,7 +61,7 @@ func Load() Config {
 		DatabaseURL:      env("DATABASE_URL", "postgres://linkly:linkly@postgres:5432/linkly?sslmode=disable"),
 		DBMaxConns:       int32(envInt("DB_MAX_CONNS", 25)),
 		DBQueryTimeout:   envDur("DB_QUERY_TIMEOUT", 3*time.Second),
-		StatementTimeout: env("STATEMENT_TIMEOUT", ""), // BİLEREK boş: P02-06 bunun yokluğunu ölçüyor
+		StatementTimeout: env("STATEMENT_TIMEOUT", ""),       // BİLEREK boş: P02-06 bunun yokluğunu ölçüyor
 		MigrateTarget:    int64(envInt("MIGRATE_TARGET", 1)), // 2 = tenant index'i (P02-05 çözümü)
 		ListLimit:        envInt("LIST_LIMIT", 100),
 

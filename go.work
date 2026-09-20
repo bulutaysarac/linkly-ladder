@@ -9,4 +9,5 @@ use (
 	./05-async-analytics
 	./06-event-stream
 	./07-services-autoscaling
+	./08-rate-limiting
 )

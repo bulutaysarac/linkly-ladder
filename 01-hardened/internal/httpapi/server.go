@@ -32,11 +32,14 @@ func (a *API) SetReady(v bool) { a.ready.Store(v) }
 
 // Handler — /metrics, /healthz, /readyz middleware zincirinin DIŞINDA kalır.
 // EN: Health and metrics endpoints must not be rate limited, must not be timed out by the business
-//     timeout, and must not pollute business metrics. If your readiness probe can be rate limited,
-//     a traffic spike will take every pod out of the load balancer at the worst possible moment.
+//
+//	timeout, and must not pollute business metrics. If your readiness probe can be rate limited,
+//	a traffic spike will take every pod out of the load balancer at the worst possible moment.
+//
 // TR: Sağlık ve metrik uçları hız sınırına takılmamalı, iş timeout'una tabi olmamalı ve iş
-//     metriklerini kirletmemeli. Readiness probe'un hız sınırına takılabiliyorsa, bir trafik
-//     dalgası tam en kötü anda bütün pod'ları load balancer'dan düşürür.
+//
+//	metriklerini kirletmemeli. Readiness probe'un hız sınırına takılabiliyorsa, bir trafik
+//	dalgası tam en kötü anda bütün pod'ları load balancer'dan düşürür.
 func (a *API) Handler(rl *ratelimit.Limiter) http.Handler {
 	business := http.NewServeMux()
 	business.HandleFunc("POST /api/links", a.handleCreate)

@@ -1,13 +1,16 @@
 // Command api-svc — yönetim yolu: oluşturma, silme, listeleme, istatistik.
 //
 // EN: Low traffic, writes, and queries that are allowed to take 100 ms. Because it is a separate
-//     deployment it can have a bigger connection pool per pod (it needs the database) and a much
-//     smaller replica count (it does not need the throughput) — the exact opposite knobs from
-//     redirect-svc. One binary could never have both settings at once.
+//
+//	deployment it can have a bigger connection pool per pod (it needs the database) and a much
+//	smaller replica count (it does not need the throughput) — the exact opposite knobs from
+//	redirect-svc. One binary could never have both settings at once.
+//
 // TR: Düşük trafik, yazma ve 100 ms sürmesine izin verilen sorgular. Ayrı bir deployment olduğu
-//     için pod başına DAHA BÜYÜK bir bağlantı havuzu (veritabanına ihtiyacı var) ve çok DAHA AZ
-//     replika (aktarım hızına ihtiyacı yok) alabiliyor — redirect-svc'nin tam tersi düğmeler.
-//     Tek bir binary bu iki ayarı aynı anda taşıyamazdı.
+//
+//	için pod başına DAHA BÜYÜK bir bağlantı havuzu (veritabanına ihtiyacı var) ve çok DAHA AZ
+//	replika (aktarım hızına ihtiyacı yok) alabiliyor — redirect-svc'nin tam tersi düğmeler.
+//	Tek bir binary bu iki ayarı aynı anda taşıyamazdı.
 package main
 
 import (

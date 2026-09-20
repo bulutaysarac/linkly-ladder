@@ -11,13 +11,17 @@ import (
 // görmek öğretici: aynı kod, artık üretim yolu değil yalnızca bir test ikizi.
 //
 // EN: Why a hand-written fake instead of a real Postgres in unit tests? Because these tests are
-//     about HTTP behaviour — status codes, tenant boundaries, validation — not about SQL. The SQL
-//     is verified separately by postgres_test.go against a real database (skipped without
-//     DATABASE_URL). Mixing the two makes every test slow and none of them clear.
+//
+//	about HTTP behaviour — status codes, tenant boundaries, validation — not about SQL. The SQL
+//	is verified separately by postgres_test.go against a real database (skipped without
+//	DATABASE_URL). Mixing the two makes every test slow and none of them clear.
+//
 // TR: Birim testlerde gerçek Postgres yerine neden elle yazılmış bir ikiz? Çünkü bu testler HTTP
-//     davranışıyla ilgili — durum kodları, kiracı sınırı, doğrulama — SQL ile değil. SQL'i ayrıca
-//     postgres_test.go gerçek veritabanına karşı doğruluyor (DATABASE_URL yoksa atlanıyor). İkisini
-//     karıştırmak bütün testleri yavaşlatır ve hiçbirini netleştirmez.
+//
+//	davranışıyla ilgili — durum kodları, kiracı sınırı, doğrulama — SQL ile değil. SQL'i ayrıca
+//	postgres_test.go gerçek veritabanına karşı doğruluyor (DATABASE_URL yoksa atlanıyor). İkisini
+//	karıştırmak bütün testleri yavaşlatır ve hiçbirini netleştirmez.
+//
 // [Topic · Konu: Test ikizleri, test piramidi]
 type Fake struct {
 	mu    sync.RWMutex

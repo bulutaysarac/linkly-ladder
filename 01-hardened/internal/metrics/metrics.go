@@ -1,11 +1,15 @@
 // Package metrics — Prometheus metrikleri.
 //
 // EN: Every counter is registered at zero on startup. This is not cosmetic: a counter that only
-//     appears the first time it fires CANNOT be alerted on, because the monitoring system cannot
-//     tell "this never happened" from "this endpoint is not reporting".
+//
+//	appears the first time it fires CANNOT be alerted on, because the monitoring system cannot
+//	tell "this never happened" from "this endpoint is not reporting".
+//
 // TR: Her sayaç açılışta SIFIRLA kaydedilir. Kozmetik değil: yalnızca ilk kez tetiklendiğinde
-//     ortaya çıkan bir sayaca alarm yazamazsın, çünkü izleme sistemi "hiç olmadı" ile
-//     "bu uç raporlamıyor"u ayırt edemez.
+//
+//	ortaya çıkan bir sayaca alarm yazamazsın, çünkü izleme sistemi "hiç olmadı" ile
+//	"bu uç raporlamıyor"u ayırt edemez.
+//
 // [Topic · Konu: Gözlemlenebilirlik, alarm yazılabilirliği]
 //
 // Label kuralı: SINIRSIZ değerler (kısa kod, URL, IP, tenant id) asla label olmaz — her yeni değer

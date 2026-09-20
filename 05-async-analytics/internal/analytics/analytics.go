@@ -1,15 +1,19 @@
 // Package analytics — tıklamaları istek yolundan çıkaran sınırlı kuyruk + toplu yazıcı.
 //
 // EN: Level 02 measured what a synchronous counter costs: every redirect took a row lock on the
-//     hottest row in the database (P02-08). The fix is not a faster UPDATE, it is removing the write
-//     from the read path entirely. What you buy with is a delivery guarantee: this queue is
-//     AT-MOST-ONCE. A full queue drops clicks; a crash loses whatever was buffered. Correct for
-//     counters, wrong for billing — and the README says so out loud.
+//
+//	hottest row in the database (P02-08). The fix is not a faster UPDATE, it is removing the write
+//	from the read path entirely. What you buy with is a delivery guarantee: this queue is
+//	AT-MOST-ONCE. A full queue drops clicks; a crash loses whatever was buffered. Correct for
+//	counters, wrong for billing — and the README says so out loud.
+//
 // TR: 02, senkron bir sayacın bedelini ölçtü: her redirect, veritabanının en sıcak satırında bir
-//     satır kilidi alıyordu (P02-08). Çözüm daha hızlı bir UPDATE değil, yazmayı okuma yolundan
-//     TAMAMEN çıkarmak. Karşılığında bir teslimat garantisi ödüyorsun: bu kuyruk EN FAZLA BİR KEZ.
-//     Dolu kuyruk tıklama düşürür; çökme, tamponda ne varsa kaybeder. Sayaç için doğru, faturalama
-//     için yanlış — ve README bunu açıkça söylüyor.
+//
+//	satır kilidi alıyordu (P02-08). Çözüm daha hızlı bir UPDATE değil, yazmayı okuma yolundan
+//	TAMAMEN çıkarmak. Karşılığında bir teslimat garantisi ödüyorsun: bu kuyruk EN FAZLA BİR KEZ.
+//	Dolu kuyruk tıklama düşürür; çökme, tamponda ne varsa kaybeder. Sayaç için doğru, faturalama
+//	için yanlış — ve README bunu açıkça söylüyor.
+//
 // [Topic · Konu: Asenkronizm, back pressure, teslimat garantisi]
 package analytics
 
@@ -101,13 +105,17 @@ func New(cfg Config, w Writer, m *Metrics, log *slog.Logger) *Collector {
 // Record — istek yolundan çağrılır ve ASLA bloklamaz.
 //
 // EN: The whole design rests on this one property. A blocking send would make the redirect wait for
-//     the database again — the exact problem we are removing — and would do it invisibly, only under
-//     load. When the queue is full we DROP and count the drop. A drop you can see is a decision;
-//     a block you cannot see is an outage waiting for traffic.
+//
+//	the database again — the exact problem we are removing — and would do it invisibly, only under
+//	load. When the queue is full we DROP and count the drop. A drop you can see is a decision;
+//	a block you cannot see is an outage waiting for traffic.
+//
 // TR: Bütün tasarım bu tek özelliğe dayanıyor. Bloklayan bir gönderim, redirect'i yine veritabanını
-//     beklemeye zorlardı — tam da kaldırdığımız sorun — üstelik bunu görünmez biçimde, yalnızca yük
-//     altında yapardı. Kuyruk dolduğunda DÜŞÜRÜYORUZ ve düşürmeyi sayıyoruz. Gördüğün bir düşüş bir
-//     karardır; göremediğin bir bloklama, trafiği bekleyen bir kesintidir.
+//
+//	beklemeye zorlardı — tam da kaldırdığımız sorun — üstelik bunu görünmez biçimde, yalnızca yük
+//	altında yapardı. Kuyruk dolduğunda DÜŞÜRÜYORUZ ve düşürmeyi sayıyoruz. Gördüğün bir düşüş bir
+//	karardır; göremediğin bir bloklama, trafiği bekleyen bir kesintidir.
+//
 // [Topic · Konu: Back pressure, bounded queue]
 func (c *Collector) Record(code string) {
 	e := Event{Code: code, At: time.Now()}
@@ -201,11 +209,14 @@ func (c *Collector) loop() {
 
 // drain — kapanışta kuyrukta kalanları yaz.
 // EN: This is the difference between "we lose a second of clicks on every deploy" and "we don't".
-//     It only works if the process is actually given time to run it: see terminationGracePeriodSeconds
-//     and the shutdown ORDER in main.go. A drain nobody waits for is decoration.
+//
+//	It only works if the process is actually given time to run it: see terminationGracePeriodSeconds
+//	and the shutdown ORDER in main.go. A drain nobody waits for is decoration.
+//
 // TR: "Her dağıtımda bir saniyelik tıklama kaybediyoruz" ile "kaybetmiyoruz" arasındaki fark bu.
-//     Yalnızca sürece bunu çalıştıracak zaman verilirse işe yarar: terminationGracePeriodSeconds ve
-//     main.go'daki kapatma SIRASI. Kimsenin beklemediği bir drain, süstür.
+//
+//	Yalnızca sürece bunu çalıştıracak zaman verilirse işe yarar: terminationGracePeriodSeconds ve
+//	main.go'daki kapatma SIRASI. Kimsenin beklemediği bir drain, süstür.
 func (c *Collector) drain(batch *map[string]int64, n *int, flush func()) {
 	for {
 		select {

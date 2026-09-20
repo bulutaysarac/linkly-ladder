@@ -1,11 +1,14 @@
 // Command linkly — seviye 00, "en ilkel hal". Tek dosya, bellek içi map, hiçbir koruma yok.
 //
 // EN: Everything wrong here is wrong on purpose. Each of the ten problems in the README is
-//     caused by a line in this file; the README says which. Do not fix anything in this level —
-//     the next level exists for that.
+//
+//	caused by a line in this file; the README says which. Do not fix anything in this level —
+//	the next level exists for that.
+//
 // TR: Buradaki her yanlış bilerek yanlış. README'deki on sorunun her biri bu dosyadaki bir
-//     satırdan doğuyor; hangisi olduğunu README söylüyor. Bu seviyede hiçbir şeyi düzeltme —
-//     bir sonraki seviye bunun için var.
+//
+//	satırdan doğuyor; hangisi olduğunu README söylüyor. Bu seviyede hiçbir şeyi düzeltme —
+//	bir sonraki seviye bunun için var.
 package main
 
 import (
@@ -20,9 +23,12 @@ import (
 var version = "dev"
 
 // EN: A plain map shared by every request goroutine, no mutex. Go's runtime detects
-//     concurrent writes and aborts the whole process: "fatal error: concurrent map writes".
+//
+//	concurrent writes and aborts the whole process: "fatal error: concurrent map writes".
+//
 // TR: Her istek goroutine'inin paylaştığı düz map, mutex yok. Go runtime'ı eşzamanlı yazımı
-//     yakalayıp süreci tümden çökertir. [Topic · Konu: Eşzamanlılık] → P00-01
+//
+//	yakalayıp süreci tümden çökertir. [Topic · Konu: Eşzamanlılık] → P00-01
 var links = map[string]string{}
 var clicks = map[string]int{}
 var created = map[string]time.Time{}
@@ -30,9 +36,12 @@ var created = map[string]time.Time{}
 const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
 // EN: 4 chars of base62 = 14.8M codes. Birthday paradox: ~50% chance of a collision by 4.5k links,
-//     and a collision silently overwrites someone else's link.
+//
+//	and a collision silently overwrites someone else's link.
+//
 // TR: 4 karakter base62 = 14,8 M kod. Doğum günü paradoksu: ~4,5 k linkte %50 çakışma ve çakışma
-//     başkasının linkini sessizce ezer. [Topic · Konu: Anahtar üretimi] → P00-05
+//
+//	başkasının linkini sessizce ezer. [Topic · Konu: Anahtar üretimi] → P00-05
 func newCode() string {
 	b := make([]byte, 4)
 	for i := range b {

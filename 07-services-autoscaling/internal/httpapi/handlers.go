@@ -17,13 +17,17 @@ type createReq struct {
 
 // dbCtx — her sorguya bir süre sınırı.
 // EN: The client's context already carries the handler timeout, so why another one? Because they
-//     answer different questions: the handler timeout protects the CALLER (stop waiting), the query
-//     timeout protects the DEPENDENCY (stop asking). Without the second one a slow database keeps
-//     accumulating work from clients who already gave up — see P02-06 and, in its full form, P10-03.
+//
+//	answer different questions: the handler timeout protects the CALLER (stop waiting), the query
+//	timeout protects the DEPENDENCY (stop asking). Without the second one a slow database keeps
+//	accumulating work from clients who already gave up — see P02-06 and, in its full form, P10-03.
+//
 // TR: Client'ın context'i zaten handler timeout'unu taşıyor, o hâlde neden bir tane daha? Çünkü
-//     farklı sorulara cevap veriyorlar: handler timeout ÇAĞIRANI korur (beklemeyi bırak), sorgu
-//     timeout'u BAĞIMLILIĞI korur (sormayı bırak). İkincisi olmazsa yavaş bir veritabanı, çoktan
-//     vazgeçmiş client'lardan iş biriktirmeye devam eder — bkz. P02-06 ve tam hâliyle P10-03.
+//
+//	farklı sorulara cevap veriyorlar: handler timeout ÇAĞIRANI korur (beklemeyi bırak), sorgu
+//	timeout'u BAĞIMLILIĞI korur (sormayı bırak). İkincisi olmazsa yavaş bir veritabanı, çoktan
+//	vazgeçmiş client'lardan iş biriktirmeye devam eder — bkz. P02-06 ve tam hâliyle P10-03.
+//
 // [Topic · Konu: Timeout bütçesi]
 func (a *API) dbCtx(r *http.Request) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(r.Context(), a.cfg.DBQueryTimeout)
@@ -202,11 +206,14 @@ func (a *API) handleDelete(w http.ResponseWriter, r *http.Request) {
 
 // handleDebugKeys — TRAP_DEBUG_KEYS (P04-07).
 // EN: KEYS is O(N) and Redis is single threaded: while it walks a million keys, every redirect
-//     waits. The safe equivalent is SCAN (cursor based, bounded per call) or simply a counter you
-//     maintain yourself. "It is only a debug endpoint" is how this reaches production.
+//
+//	waits. The safe equivalent is SCAN (cursor based, bounded per call) or simply a counter you
+//	maintain yourself. "It is only a debug endpoint" is how this reaches production.
+//
 // TR: KEYS O(N)'dir ve Redis tek iş parçacıklıdır: bir milyon anahtarı gezerken HER redirect bekler.
-//     Güvenli karşılığı SCAN'dir (imleç tabanlı, çağrı başına sınırlı) ya da kendi tuttuğun bir sayaç.
-//     "Sadece debug ucu" cümlesi, bunun üretime nasıl ulaştığının tam açıklamasıdır.
+//
+//	Güvenli karşılığı SCAN'dir (imleç tabanlı, çağrı başına sınırlı) ya da kendi tuttuğun bir sayaç.
+//	"Sadece debug ucu" cümlesi, bunun üretime nasıl ulaştığının tam açıklamasıdır.
 func (a *API) handleDebugKeys(w http.ResponseWriter, r *http.Request) {
 	if a.rdb == nil {
 		writeErr(w, r, http.StatusNotFound, "not_found")
