@@ -7,4 +7,5 @@ use (
 	./03-local-cache
 	./04-redis-cache
 	./05-async-analytics
+	./06-event-stream
 )

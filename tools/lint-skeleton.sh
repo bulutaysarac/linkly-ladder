@@ -26,6 +26,11 @@ for x in dashboards load chaos charts helm; do [[ -e "$D/$x" ]] && err "seviyede
 # 5. go.mod modül yolu
 grep -q "^module github.com/bulutaysarac/linkly-ladder/$name\$" "$D/go.mod" || err "go.mod modül adı: github.com/bulutaysarac/linkly-ladder/$name olmalı"
 
+# 5b. go.work OLMADAN derlenebilmeli. Docker imajında go.work YOKTUR; yalnızca go.mod + go.sum
+#     vardır. Yerelde go.work bağımlılıkları çözüp eksik go.sum girdilerini gizler ve hata ancak
+#     `make up` sırasında, imaj derlenirken ortaya çıkar. Bu kural onu lint zamanına çeker.
+(cd "$D" && GOWORK=off go build ./... >/dev/null 2>&1) || err "GOWORK=off go build başarısız (go.sum eksik olabilir → go mod tidy)"
+
 # 6. README: 10 başlık sırayla + sabit metinler
 heads=("## 1. Bu seviye ne?" "## 2. Mimari" "## 3. Önceki seviyeden çözülenler" "## 4. Ayağa kaldırma" "## 5. API" \
        "## 6. Reproduce edilebilir sorunlar" "## 7. Seviye içi alıştırmalar" "## 8. Gözlemlenebilirlik" "## 9. Bilerek bırakılanlar" "## 10. \`make diff-prev\`")

@@ -1,0 +1,106 @@
+# Seviye 02: uygulama DURUMSUZ. Artık 3 replika, anti-affinity ve gerçek bir PDB anlamlı.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: linkly
+  labels:
+    app.kubernetes.io/name: linkly
+spec:
+  # P00-03 / P01-02: durum dışarıda olduğu için N replika artık DOĞRU cevap veriyor.
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: linkly
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: linkly
+    spec:
+      # P05-05: kuyruğun boşalmasına zaman TANIMAK zorundasın. Bu süre SHUTDOWN_GRACE'ten
+      # büyük olmalı, yoksa kubelet süreci drain'in ortasında öldürür ve tampondaki tıklamalar gider.
+      terminationGracePeriodSeconds: 60
+      # P01-03: üç replikanın üçü de aynı node'a düşerse yedeklilik kâğıt üstünde kalır.
+      # ScheduleAnyway (zorunlu değil): kind'da node biterse pod Pending kalmasın — 07'de
+      # bu tercihin bedeli ölçülecek (P07-07).
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: linkly
+      containers:
+        - name: linkly
+          image: localhost:5001/linkly-ladder/06-linkly:IMAGE_TAG
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - secretRef:
+                name: postgres      # DATABASE_URL buradan geliyor (P02-09: düz metin, 13'te düzelecek)
+          env:
+            - name: SHUTDOWN_GRACE
+              value: "20s"
+            # P02-02: 3 replika × 25 = 75 < max_connections=100. 10 replikaya çıkınca 250 > 100.
+            - name: DB_MAX_CONNS
+              value: "25"
+            - name: DB_QUERY_TIMEOUT
+              value: "3s"
+            # BİLEREK BOŞ: sunucu tarafı ifade timeout'u yok (P02-06).
+            # Açmak için: kubectl -n lvl06 set env deploy/linkly STATEMENT_TIMEOUT=2s
+            - name: STATEMENT_TIMEOUT
+              value: ""
+            # L2 önbellek: Redis. Kapasite artık pod'da değil Redis'te (maxmemory 64mb).
+            - name: REDIS_ADDR
+              value: redis:6379
+            # Kısa timeout bilinçli: yavaş bir önbelleği beklemek, DB'ye gitmekten kötüdür.
+            - name: REDIS_TIMEOUT
+              value: "500ms"
+            - name: CACHE_TTL
+              value: "60s"          # kısa tutuldu: P03-01'deki bayatlık penceresi bu kadar
+            - name: CACHE_NEGATIVE_TTL
+              value: "10s"          # pozitifin altıda biri: yeni link eski "yok" cevabının arkasında kalmasın
+            # Önbellek tuzakları varsayılan KAPALI (README §7):
+            #   TRAP_NO_NEGATIVE_CACHE · TRAP_NO_TTL_JITTER · TRAP_DEBUG_KEYS · TRAP_UPDATE_DELAY_MS
+            # Tıklamalar artık dayanıklı bir loga gidiyor. Tampon sınırı hâlâ şart: broker
+            # düşerse kayıtlar bellekte birikir ve P05-02'deki sınırsız kuyruk hatası bir kat
+            # aşağıda tekrarlanır. Sınırı aşınca DÜŞÜRÜLÜR (P06-05).
+            - name: KAFKA_BROKERS
+              value: redpanda:9092
+            - name: KAFKA_TOPIC
+              value: clicks
+            - name: PRODUCER_MAX_BUFFERED
+              value: "50000"
+            - name: RATE_LIMIT_PER_SEC
+              value: "5000"         # hâlâ SÜREÇ İÇİ: 3 replikada gerçek limit 15000 (P02-04)
+            - name: RATE_LIMIT_BURST
+              value: "10000"
+          resources:
+            requests: { cpu: 100m, memory: 64Mi }
+            # 03'e göre DÜŞTÜ: önbellek artık pod'da değil. Bellek maliyeti Redis'e taşındı
+            # ve bir kez ödeniyor — P03-03'ün çarpanı ortadan kalktı.
+            limits: { memory: 256Mi }
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 2
+            timeoutSeconds: 2
+            failureThreshold: 2
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
