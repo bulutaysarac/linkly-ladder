@@ -1,0 +1,40 @@
+# Şema değişikliği TEK SEFERLİK bir iş, uygulamanın açılış rutini değil.
+# EN: If every pod runs migrations on boot, N replicas race for the same schema lock: some block,
+#     some fail, the rollout flaps. Worse, a rollback of the app does not roll back the schema.
+#     A Job makes the migration an explicit, once, observable step. P02-07 measures the alternative
+#     (TRAP_MIGRATE_IN_MAIN), and level 12 shows expand/contract for changes that cannot be atomic.
+# TR: Her pod açılışta migration koşarsa, N replika aynı şema kilidi için yarışır: kimi bloklanır,
+#     kimi patlar, rollout çırpınır. Dahası uygulamayı geri almak şemayı geri almaz. Job, migration'ı
+#     açık, tek seferlik ve gözlemlenebilir bir adım yapar. P02-07 alternatifini ölçüyor
+#     (TRAP_MIGRATE_IN_MAIN), 12 ise atomik olamayan değişiklikler için expand/contract'ı gösteriyor.
+# [Topic · Konu: Şema göçü, dağıtım sırası]
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate
+  annotations:
+    # Her apply'da yeniden koşsun diye Job adı sabit; değişiklik olduğunda silip yeniden yaratılır.
+    ladder/note: "kubectl -n lvl11 delete job migrate  →  make up ile yeniden koşar"
+spec:
+  backoffLimit: 6
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: migrate
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          image: localhost:5001/linkly-ladder/11-migrate:IMAGE_TAG
+          envFrom:
+            - secretRef:
+                name: postgres
+          env:
+            # 3 = clicks_daily tablosu (05). Bu seviyede ŞART: analitik yazıcısı ona yazıyor.
+            # (2 = tenant index'i, P02-05'in çözümü — burada da uygulanmış oluyor.)
+            - name: MIGRATE_TARGET
+              value: "5"   # 5 = partition'lı processed_events (retention, 09)
+          resources:
+            requests: { cpu: 50m, memory: 32Mi }
+            limits: { memory: 128Mi }

@@ -1,0 +1,19 @@
+# Tempo — tek binary, yerel disk. Trace'ler kısa saklanır: amaç arşiv değil, TEŞHİS.
+tempo:
+  retention: 24h
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+  # Metriklerden trace'e atlayabilmek için exemplar desteği Prometheus tarafında (11'de açık).
+  metricsGenerator:
+    enabled: false      # kaynak tasarrufu: span metriklerini üretmiyoruz
+resources:
+  requests: { cpu: 100m, memory: 256Mi }
+  limits: { memory: 768Mi }
+persistence:
+  enabled: true
+  size: 5Gi

@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.sh"
+# P11-03 · Sampling: %100 collector'ı boğar, düşük oran nadir hatayı kaçırır
+# Head sampling kararı trace'in BAŞINDA verilir — yavaş mı, hatalı mı olduğunu bilmeden.
+# Bu yüzden nadir hatalar tam da nadir oldukları için kaçar. %100'e çıkarmak "çözüm" değil:
+# collector, ağ ve depolama maliyeti doğrusal artar, faydası artmaz.
+APP_SELECTOR="app.kubernetes.io/name=redirect"
+ensure_healthy
+on_cleanup "kubectl -n \"$NS\" set env deploy/redirect TRACE_SAMPLE_PCT=5"
+measure() {
+  kubectl -n "$NS" rollout status deploy/redirect --timeout=180s >/dev/null 2>&1 || true
+  for _ in $(seq 1 20); do serving && break; sleep 2; done
+  k6run redirect --vus 30 --duration 40s >/dev/null 2>&1 || true
+  sleep 15
+  local cpu mem
+  cpu=$(promq "max_over_time(sum(rate(container_cpu_usage_seconds_total{namespace=\"monitoring\",pod=~\"alloy.*\",image!=\"\",image!~\".*pause.*\"}[30s]))[3m:15s])")
+  mem=$(promq "max_over_time(sum(container_memory_working_set_bytes{namespace=\"monitoring\",pod=~\"alloy.*\",image!=\"\",image!~\".*pause.*\"})[3m:15s])")
+  echo "$cpu $mem"
+}
+step "(1) %5 sampling (varsayılan)"
+read -r c5 m5 <<< "$(measure)"
+note "%5: Alloy CPU tepe=$(awk -v v="$c5" 'BEGIN{printf "%.2f", v}') çekirdek · bellek tepe=$(( ${m5%%.*} / 1024 / 1024 )) MB"
+step "(2) %100 sampling"
+kubectl -n "$NS" set env deploy/redirect TRACE_SAMPLE_PCT=100 >/dev/null
+read -r c100 m100 <<< "$(measure)"
+note "%100: Alloy CPU tepe=$(awk -v v="$c100" 'BEGIN{printf "%.2f", v}') çekirdek · bellek tepe=$(( ${m100%%.*} / 1024 / 1024 )) MB"
+grafana_hint "01 · Pods & Resources (namespace=monitoring) → Alloy CPU/bellek"
+note "Maliyet 20 katına çıktı; peki fayda? Teşhis için gereken şey 'tüm trace'ler' değil,"
+note "'DOĞRU trace'. Exemplar zaten yavaş bir isteği işaret ediyor (P11-01) — yani %5 ile de"
+note "yavaş isteğe ulaşabiliyorsun."
+note "Head sampling'in gerçek zayıflığı: nadir HATALAR. %5 ile 100 hatadan 5'ini görürsün;"
+note "hata saniyede birden azsa hiçbirini görmeyebilirsin."
+note "Çözüm tail sampling: karar trace BİTTİKTEN sonra verilir (yavaşsa/hatalıysa sakla). Bedeli:"
+note "collector her span'i trace bitene kadar TAMPONLAR — gerçek bellek, gerçek karmaşıklık."
+note "Ara yol: hata/yavaşlık durumunda üretici tarafında zorla örnekleme (AlwaysSample + kural)."
+awk -v a="$c5" -v b="$c100" 'BEGIN{exit !(b >= a)}' \
+  && reproduced "%100 sampling collector maliyetini artırdı (CPU $(awk -v v="$c5" 'BEGIN{printf "%.2f", v}') → $(awk -v v="$c100" 'BEGIN{printf "%.2f", v}'), bellek $(( ${m5%%.*} / 1024 / 1024 )) → $(( ${m100%%.*} / 1024 / 1024 )) MB)"
+not_reproduced "maliyet farkı ölçülemedi (yükü artırıp tekrar dene)"

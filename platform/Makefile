@@ -6,7 +6,7 @@ INGRESS_URL := https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/d
 METRICS_URL := https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
 SHELL := /bin/bash
 
-.PHONY: help cluster registry trust-ca core cnpg obs dashboards minimal standard full chaos keda destroy status
+.PHONY: help cluster registry trust-ca core cnpg tempo obs dashboards minimal standard full chaos keda destroy status
 
 help: ## Hedefler
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -85,3 +85,13 @@ cnpg: ## CloudNativePG operatörü + MinIO (09+)
 	@helm upgrade --install cnpg cnpg/cloudnative-pg -n cnpg-system --create-namespace \
 	   --set resources.requests.cpu=50m --set resources.requests.memory=100Mi --wait --timeout 10m
 	@echo "✔ cnpg"
+
+tempo: ## Grafana Tempo (trace) + Alloy OTLP alıcısı (11+)
+	@helm repo add grafana https://grafana.github.io/helm-charts >/dev/null 2>&1 || true; helm repo update >/dev/null
+	@helm upgrade --install tempo grafana/tempo -n monitoring -f helm/tempo.values.yaml --wait --timeout 10m
+	@helm upgrade --install alloy grafana/alloy -n monitoring -f helm/alloy-otlp.values.yaml --wait --timeout 5m
+	@echo "✔ tempo + alloy(otlp)"
+
+# NOT: Sloth (SLO→kural üreteci) BİLEREK kullanılmıyor. Üreteç, burn-rate matematiğini bir
+# soyutlamanın arkasına saklıyor; bu merdivende kuralları ELLE yazmak daha öğretici — pencereler,
+# çarpanlar ve neden iki pencere gerektiği 11-observability-deep/deploy/slo.yaml'da görünür.

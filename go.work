@@ -12,4 +12,5 @@ use (
 	./08-rate-limiting
 	./09-database-scaling
 	./10-resilience
+	./11-observability-deep
 )
