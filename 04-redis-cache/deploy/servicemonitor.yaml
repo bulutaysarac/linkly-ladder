@@ -1,0 +1,44 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: linkly
+  labels:
+    app.kubernetes.io/name: linkly
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: linkly
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 10s
+---
+# Veritabanının kendi metrikleri: connections vs max, tps, seq scan, kilitler, ölü satırlar.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: postgres
+  labels:
+    app.kubernetes.io/name: postgres
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  endpoints:
+    - port: metrics
+      interval: 10s
+---
+# Redis'in kendi metrikleri: ops, hit/miss, bellek, eviction, bağlanan istemci, komut dağılımı.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: redis
+  labels:
+    app.kubernetes.io/name: redis
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+  endpoints:
+    - port: metrics
+      interval: 10s

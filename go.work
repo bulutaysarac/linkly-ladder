@@ -5,4 +5,5 @@ use (
 	./01-hardened
 	./02-postgres
 	./03-local-cache
+	./04-redis-cache
 )

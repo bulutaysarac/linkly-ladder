@@ -1,0 +1,124 @@
+# Postgres 17 — BİLEREK düz StatefulSet, operatör YOK.
+# EN: CloudNativePG would give failover, connection pooling, backups and PITR out of the box — and
+#     that is exactly why it is not here yet. Level 09 introduces it AFTER this level has made you
+#     feel the absence: a single pod whose death is a full outage (P02-03), a connection limit you
+#     will hit (P02-02), and no way back from a bad DELETE. Reaching for the operator before feeling
+#     the pain teaches you a product, not a problem.
+# TR: CloudNativePG failover'ı, bağlantı havuzunu, yedeği ve PITR'ı hazır verirdi — tam da bu yüzden
+#     henüz burada değil. 09 onu, bu seviye yokluğunu HİSSETTİRDİKTEN sonra getiriyor: ölümü tam
+#     kesinti olan tek bir pod (P02-03), er geç çarpacağın bağlantı limiti (P02-02) ve yanlış bir
+#     DELETE'ten dönüşü olmayan bir dünya. Acıyı hissetmeden operatöre uzanmak sana bir sorunu değil,
+#     bir ürünü öğretir.
+# [Topic · Konu: Tek nokta arıza, operatör ne zaman]
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres
+type: Opaque
+stringData:
+  # BİLEREK düz metin ve git'te: P02-09. 13'te sealed-secrets ile şifrelenecek.
+  POSTGRES_USER: linkly
+  POSTGRES_PASSWORD: linkly
+  POSTGRES_DB: linkly
+  DATABASE_URL: postgres://linkly:linkly@postgres:5432/linkly?sslmode=disable
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  labels:
+    app.kubernetes.io/name: postgres
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+    - name: metrics
+      port: 9187
+      targetPort: metrics
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  labels:
+    app.kubernetes.io/name: postgres
+spec:
+  serviceName: postgres
+  replicas: 1          # P02-03: TEK kopya. Ölürse yazma da okuma da durur.
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: postgres
+          image: postgres:17-alpine
+          args:
+            # max_connections=100 varsayılanı BİLEREK korunuyor: 10 replika × pool 25 = 250 > 100.
+            # P02-02 bunu ölçüyor; 09'da PgBouncer (Pooler) çözüyor.
+            - -c
+            - max_connections=100
+            - -c
+            - shared_buffers=128MB
+            # pg_stat_statements: hangi sorgunun yükü ürettiğini SORMAK için. Onsuz "DB yavaş"
+            # diyebilirsin ama "şu SELECT yüzünden" diyemezsin.
+            - -c
+            - shared_preload_libraries=pg_stat_statements
+            - -c
+            - pg_stat_statements.track=all
+          ports:
+            - name: postgres
+              containerPort: 5432
+          envFrom:
+            - secretRef:
+                name: postgres
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          resources:
+            requests: { cpu: 200m, memory: 256Mi }
+            limits: { memory: 1Gi }
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "linkly", "-d", "linkly"] }
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            exec: { command: ["pg_isready", "-U", "linkly", "-d", "linkly"] }
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 6
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+        # postgres_exporter: veritabanının KENDİ gördüğü gerçek. Uygulamanın gördüğü (pool bekleme,
+        # sorgu süresi) ayrı bir gerçek — ikisini birlikte okumak gerekiyor (bkz. internal/store).
+        - name: exporter
+          image: quay.io/prometheuscommunity/postgres-exporter:v0.15.0
+          ports:
+            - name: metrics
+              containerPort: 9187
+          env:
+            - name: DATA_SOURCE_NAME
+              value: postgresql://linkly:linkly@127.0.0.1:5432/linkly?sslmode=disable
+            - name: PG_EXPORTER_AUTO_DISCOVER_DATABASES
+              value: "false"
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { memory: 128Mi }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 4Gi

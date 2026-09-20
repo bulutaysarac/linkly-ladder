@@ -32,7 +32,7 @@ note "ÇÖZÜM (002 migration, CONCURRENTLY):"
 note "  kubectl -n $NS set env job/migrate MIGRATE_TARGET=2  # ya da deploy/migrate-job.yaml'da 2 yap"
 note "  kubectl -n $NS delete job migrate && make up   →  sonra bu scripti tekrar koş"
 note "Dikkat: düz CREATE INDEX tabloyu KİLİTLER; 002 bu yüzden CONCURRENTLY kullanıyor."
-if echo "$plan" | grep -qi 'seq scan'; then
+if [[ -n "$scan_line" ]]; then
   reproduced "planda Seq Scan var (${after:-?} satır, list ${t}s) — tenant index'i yok"
 fi
 not_reproduced "sorgu index kullanıyor — 002 migration uygulanmış"
