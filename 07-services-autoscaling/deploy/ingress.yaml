@@ -1,0 +1,23 @@
+# Tek host, iki servis: yol tabanlı yönlendirme.
+# EN: The split is invisible from outside — same URL space, same contract (docs/API.md). That is
+#     the point: a service boundary is an internal decision, not an API change. If splitting
+#     services forced clients to change, the boundary was drawn in the wrong place.
+# TR: Ayrım dışarıdan GÖRÜNMEZ — aynı URL uzayı, aynı sözleşme (docs/API.md). Mesele de bu:
+#     servis sınırı içeriye ait bir karardır, bir API değişikliği değil. Servisleri ayırmak
+#     client'ları değiştirmeye zorluyorsa, sınır yanlış yere çizilmiştir.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: linkly
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: lvl07.localtest.me
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend: { service: { name: api, port: { name: http } } }
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: redirect, port: { name: http } } }

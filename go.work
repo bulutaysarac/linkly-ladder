@@ -8,4 +8,5 @@ use (
 	./04-redis-cache
 	./05-async-analytics
 	./06-event-stream
+	./07-services-autoscaling
 )
