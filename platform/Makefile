@@ -57,7 +57,10 @@ chaos: ## Chaos Mesh (02+)
 	@helm repo add chaos-mesh https://charts.chaos-mesh.org >/dev/null 2>&1 || true; helm repo update >/dev/null
 	@helm upgrade --install chaos-mesh chaos-mesh/chaos-mesh -n chaos-mesh --create-namespace \
 	   --set chaosDaemon.runtime=containerd --set chaosDaemon.socketPath=/run/containerd/containerd.sock \
-	   --set dashboard.create=false --wait --timeout 10m
+	   --set dashboard.create=false --set controllerManager.replicaCount=1 \
+	   --set controllerManager.resources.requests.cpu=50m --set controllerManager.resources.requests.memory=128Mi \
+	   --set chaosDaemon.resources.requests.cpu=25m --set chaosDaemon.resources.requests.memory=64Mi \
+	   --wait --timeout 15m
 	@echo "✔ chaos-mesh"
 
 keda: ## KEDA (07+)

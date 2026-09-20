@@ -1,0 +1,11 @@
+# 02'de PDB ARTIK anlamlı: 3 replika var, biri tahliye edilirken ikisi ayakta kalıyor.
+# 01'de aynı nesne bir yanılsamaydı (P01-03) — değişen PDB değil, YEDEKLİLİK.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: linkly
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: linkly

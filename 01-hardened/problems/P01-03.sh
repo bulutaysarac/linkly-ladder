@@ -32,7 +32,16 @@ blocked=false
 note "drain çıkış kodu: $drain_rc → $([[ $blocked == true ]] && echo 'BLOKE (node bakımı yapılamıyor)' || echo 'geçti')"
 
 step "UÇ (b): operatörün gerçekte yaptığı şey — zorla"
-kubectl -n "$NS" delete pod -l "$APP_SELECTOR" --force --grace-period=0 >/dev/null 2>&1 || true
+# YALNIZCA drain edilmek istenen node'daki pod'u zorla. Hepsini silmek, çok replikalı bir seviyede
+# (02+) yapay bir kesinti üretir ve "yedeklilik işe yaramadı" gibi YANLIŞ bir sonuç verirdi.
+victim=$(kubectl -n "$NS" get pods -l "$APP_SELECTOR" --field-selector "spec.nodeName=$node" \
+           -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+if [[ -n "$victim" ]]; then
+  note "zorla silinen pod: $victim (node $node)"
+  kubectl -n "$NS" delete pod "$victim" --force --grace-period=0 >/dev/null 2>&1 || true
+else
+  note "bu node'da uygulama pod'u yok — zorlamaya gerek kalmadı"
+fi
 sleep 25
 wait_ready >/dev/null 2>&1 || true
 wait $kpid || true
@@ -40,6 +49,7 @@ e5=$(k6_5xx); e404=$(k6_404)
 grafana_hint "02 · App RED → 5xx ; 01 · Pods & Resources → 'Pod fazları' (Pending)"
 note "zorlamadan sonra: 5xx=$e5 · 404=$e404 (404'ler P01-01: yeni pod'un belleği boş)"
 note "Sonuç: PDB ya bakımı kilitler ya da kesintiyi seyreder. Üçüncü seçenek YEDEKLİLİKTİR — 02."
+note "Karşılaştırma: aynı script 02'de (3 replika, minAvailable=2) drain'i geçirir ve 5xx üretmez."
 { [[ "$blocked" == true ]] || (( e5 > 0 )); } \
   && reproduced "tek replikada güvenli bakım YOK: drain $([[ $blocked == true ]] && echo 'bloke oldu' || echo 'geçti'), zorlayınca $e5 istek 5xx aldı"
 not_reproduced "drain sorunsuz geçti ve kesinti olmadı — yedeklilik var (02)"

@@ -1,0 +1,252 @@
+# 03 — local-cache · "Süreç içi önbellek"
+
+## 1. Bu seviye ne?
+
+Mümkün olan en ucuz önbellek: pod'un belleğinde sınırlı bir LRU (+ TTL, singleflight, negatif
+önbellek). P02-01'de ölçülen veritabanı okuma yükünün büyük kısmını kaldırıyor — ve aynı anda yeni
+bir sorun sınıfı yaratıyor: artık **gerçeğin N kopyası** var ve hiçbiri ne zaman yanlışlandığını
+bilmiyor. Bu seviyenin tamamı o takasın muhasebesi.
+
+## 2. Mimari
+
+```mermaid
+flowchart LR
+  C([client]) --> I[ingress-nginx<br/>lvl03.localtest.me]
+  I --> A1 & A2 & A3
+
+  subgraph APP["linkly · 3 replika"]
+    A1["pod 1<br/>L1: LRU+TTL<br/>(kendi kopyası)"]
+    A2["pod 2<br/>L1: LRU+TTL<br/>(kendi kopyası)"]
+    A3["pod 3<br/>L1: LRU+TTL<br/>(kendi kopyası)"]
+  end
+
+  A1 & A2 & A3 -.->|yalnızca MISS| PG[("postgres:17<br/>× 1")]
+  A1 & A2 & A3 -->|her tıklama<br/>UPDATE| PG
+```
+
+Dikkat: **okuma** yolu artık çoğunlukla DB'ye gitmiyor, ama **tıklama sayacı** hâlâ her istekte
+gidiyor (P02-08 duruyor). Yani önbellek, yükün yarısını kaldırdı.
+
+## 3. Önceki seviyeden çözülenler
+
+| ID | Sorun | Nasıl çözüldü |
+|---|---|---|
+| P02-01 | Her redirect = DB sorgusu | Cache-aside: `internal/store/cached.go` dekoratörü + `internal/cache` (LRU + TTL + singleflight + negatif önbellek) |
+
+Yalnızca bir madde — ve bilerek. Bir önbellek **tek bir şeyi** çözer: aynı veriyi tekrar tekrar
+okumayı. Bağlantı havuzunu (P02-02), tek nokta arızayı (P02-03), satır kilidini (P02-08) ya da
+sırları (P02-09) çözmez. Önbelleği "performans sorunlarının cevabı" sanmak, bu merdivendeki en
+yaygın yanılgıdır.
+
+## 4. Ayağa kaldırma
+
+Platform bir kere kurulur (`cd platform && make minimal`). Sonra bu klasörde:
+
+```bash
+make up            # build → push → deploy → rollout wait → smoke
+curl -s -XPOST http://lvl03.localtest.me/api/links -H 'Content-Type: application/json' -d '{"url":"https://example.com"}'
+curl -I http://lvl03.localtest.me/<code>
+make grafana       # Ladder klasörü, level=lvl03
+make load S=mixed  # aynı senaryolar her seviyede: create redirect mixed hot-key burst abuser read-your-writes stairs scan
+make down
+```
+
+## 5. API
+
+Her seviyede aynı: [docs/API.md](../docs/API.md).
+
+Davranış değişikliği yok — **ama garanti değişti**: `GET /{code}` artık TTL kadar bayat olabilen bir
+kopyadan cevaplanabilir. `GET /api/links/{code}` içindeki `clicks` alanı da önbellekten gelirse
+bayattır; tıklama sayısı önbellekte **yetkili değildir**.
+
+## 6. Reproduce edilebilir sorunlar
+
+| ID | Sorun | Reproduce | Grafana'da | Çözüm |
+|---|---|---|---|---|
+| P03-01 | Silinen link diğer pod'larda yaşıyor | `make repro P=P03-01` | Cache → hit ratio by pod | 04 |
+| P03-02 | Rollout = soğuk önbellek = DB testere dişi | `make repro P=P03-02` | Cache → miss vs DB qps | 04 |
+| P03-03 | Aynı veri N pod'da N kopya | `make repro P=P03-03` | Cache → entries by pod | 04 |
+| P03-04 | Hit oranı replika sayısıyla düşer | `CONFIRM=1 make repro P=P03-04` | Cache → hit ratio by pod | 04 |
+| P03-05 | **TRAP** singleflight yok → stampede | `make repro P=P03-05` | Cache → stampede wait/s | seviye içi |
+| P03-06 | **TRAP** negatif önbellek yok → tarama DB'ye | `make repro P=P03-06` | Cache → negative_hit | seviye içi |
+| P03-07 | **TRAP** jitter yok → periyodik DB tepesi | `make repro P=P03-07` | Postgres → DB queries | seviye içi |
+
+---
+
+### P03-01 · Silinen link diğer pod'larda TTL boyunca yaşıyor
+
+**Belirti:** Kullanıcı linki siler, sunucu `204` döner, veritabanında kayıt yoktur — ve link
+dakikalarca çalışmaya devam eder. Hangi isteğin çalışacağı hangi pod'a düştüğüne bağlıdır.
+**Neden:** `DELETE` isteği **bir** pod'a düşer; o pod kendi kopyasını temizler
+(`cached.go · Invalidate`), diğer N−1 pod hiçbir şey duymaz. [Topic · Konu: Önbellek tutarlılığı, invalidation]
+
+**Reproduce (adım adım):**
+1. `make repro P=P03-01` — linki tüm pod'ların önbelleğine sokar, siler, 60 kez okur
+2. Elle: `for i in $(seq 30); do curl -s -o /dev/null -w '%{http_code} ' http://lvl03.localtest.me/$code; done`
+
+**Grafana:** `04 · Cache` → "hit ratio by pod"; `03 · App Business` → "redirect sonuçları".
+**Nerede çözülüyor:** 04 (tek paylaşılan önbellek → geçersiz kılma tek yerde olur). Alternatif:
+pub/sub ile yayın yapmak. Kural şu: **her kopya, bir geçersiz kılma kanalı borçlanır.** Kanalı
+kurmazsan borcu kullanıcı öder — bayat veri olarak.
+
+---
+
+### P03-02 · Rollout = soğuk önbellek = DB'de testere dişi
+
+**Belirti:** Her dağıtımdan sonra DB okuma grafiğinde dikey bir tepe; birkaç dakika sonra normale
+dönüş. Grafik testere dişine benzer.
+**Neden:** Önbellek pod'un belleğinde; pod ölünce önbellek de ölür. Her yeni pod boş doğar ve ilk
+istekler zorunlu olarak DB'ye iner. [Topic · Konu: Soğuk başlangıç, kapasite planlaması]
+
+**Reproduce (adım adım):**
+1. `make repro P=P03-02` — 300 linkle ısıtır, yük altında `rollout restart` yapar, tepeyi ölçer
+
+**Grafana:** `04 · Cache` → "cache miss vs DB qps"; `05 · Postgres` → "DB queries by op".
+**Nerede çözülüyor:** 04 (önbellek pod'un dışında; pod ölse de yaşar).
+**Kritik ders:** "Önbellek sayesinde DB'yi küçülttük" tehlikeli bir cümledir. Veritabanı **soğuk
+anı** kaldırabilmeli; aksi hâlde ilk dağıtım seni devirir. Kapasiteyi ortalamaya değil, **en kötü
+ana** göre planla.
+
+---
+
+### P03-03 · Aynı veri N pod'da N kopya
+
+**Belirti:** Üç pod, üç kez aynı 3000 kayıt. Bellek kullanımı replika sayısıyla çarpılıyor.
+**Neden:** Süreç içi önbellek tanımı gereği pod başına. [Topic · Konu: Bellek maliyeti, ölçek]
+
+**Reproduce (adım adım):**
+1. `make repro P=P03-03` — 3000 linki tüm pod'lara okutur, `cache_entries`'i pod bazında basar
+
+**Grafana:** `04 · Cache` → "entries by pod"; `01 · Pods & Resources` → "Heap alloc".
+**Nerede çözülüyor:** 04. Zarf arkası: 1M sıcak link × ~200 byte × 10 pod = **2 GB**, aynı veri için
+on kez. Paylaşılan önbellekte bir kez ödersin — karşılığında bir ağ gidiş-gelişi (P04-02).
+
+---
+
+### P03-04 · Hit oranı replika sayısıyla düşer
+
+**Belirti:** Aynı çalışma kümesi ve aynı yük, daha fazla replika → **daha düşük** hit oranı.
+Ölçekledikçe DB yükü beklediğinden yavaş azalır.
+**Neden:** Load balancer istekleri rastgele dağıtır; sabit bir çalışma kümesi için her pod'un
+gördüğü örneklem küçülür, ısınma N kat uzar. [Topic · Konu: Önbellek lokalitesi, dağıtım]
+
+**Reproduce (adım adım):**
+1. `CONFIRM=1 make repro P=P03-04` — 1 replika ve çok replika ile aynı yükü koşup hit oranını kıyaslar
+
+**Grafana:** `04 · Cache` → "hit ratio by pod".
+**Nerede çözülüyor:** 04 (sorun tamamen ortadan kalkar). Ara çözüm **consistent hashing**'dir
+(aynı anahtar hep aynı pod'a) ama iki yeni sorun getirir: sıcak anahtar tek pod'a bağlanır ve
+ölçekleme anında anahtarlar taşınır.
+
+---
+
+### P03-05 · TRAP · Singleflight olmadan izdiham (cache stampede)
+
+**Belirti:** Hit oranı yüksek ve her şey iyi görünüyor, ama DB grafiğinde düzenli dikey darbeler var.
+**Neden:** Sıcak bir anahtarın TTL'i dolduğu anda, uçuştaki **tüm** istekler aynı satır için DB'ye
+gider. Yük ne kadar yüksekse darbe o kadar büyük — koruma tam da en gerekli olduğu anda yok.
+[Topic · Konu: Cache stampede, singleflight]
+
+**Reproduce (adım adım):**
+1. `make repro P=P03-05` — TTL'i 5 sn'ye çeker, `hot-key` yükü verir, önce korumalı sonra korumasız ölçer
+
+**Grafana:** `04 · Cache` → "stampede wait/s" ve "cache miss vs DB qps".
+**Okuma notu:** `cache_stampede_wait_total`'ın **yükselmesi hata değildir** — o kadar çağrının DB'ye
+gitmek yerine beklediğini gösterir, yani korumanın çalıştığının kanıtıdır. Bunu hit oranına bakarak
+göremezsin: iki durumda da hit oranı yüksek görünür, fark yalnızca DB'deki **tepe**dedir.
+
+---
+
+### P03-06 · TRAP · Negatif önbellek yoksa "yok" cevabı hep DB'ye iner
+
+**Belirti:** Var olmayan kodlara yapılan istekler (tarama, ölü linkler, yanlış yazım) önbelleği
+tamamen atlar.
+**Neden:** Önbellek yalnızca **var olanı** korur; **yok olan**, korumasız bir tüneldir.
+[Topic · Konu: Negatif önbellek, enumeration]
+
+**Reproduce (adım adım):**
+1. `make repro P=P03-06` — `scan` senaryosuyla rastgele kodlara yük verir, açık/kapalı kıyaslar
+
+**Grafana:** `04 · Cache` → "ops by result & layer" (`negative_hit`); `05 · Postgres` → "DB queries by op".
+**Denge:** Negatif TTL **kısa** olmalı (burada 10 sn, pozitifin altıda biri) — yeni oluşturulan bir
+link, eski "yok" cevabının arkasında kalmasın. Tarama ayrıca bir hız sınırı sorunudur: 08'de 404
+oranına göre limit uygulanacak.
+
+---
+
+### P03-07 · TRAP · TTL jitter yoksa periyodik DB tepesi
+
+**Belirti:** DB grafiğinde saat gibi işleyen, düzenli aralıklı dikey darbeler.
+**Neden:** Bir dağıtımdan sonra önbellek tek seferde ısınır: binlerce anahtar aynı saniyede yazılır
+ve TTL süresi sonra hepsi **aynı saniyede** dolar. Sistem kendi kendine bir yük dalgası üretir.
+[Topic · Konu: Korelasyon kırma, thundering herd]
+
+**Reproduce (adım adım):**
+1. `make repro P=P03-07` — 400 anahtarı tek seferde ısıtır, jitter açık/kapalı **tepe/ortalama**
+   oranını kıyaslar
+
+**Grafana:** `05 · Postgres` → "DB queries by op" (darbeler); `04 · Cache` → "eviction/expired".
+**Okuma notu:** Bakılacak sayı ortalama değil, **tepe/ortalama oranıdır** — kapasite tepeye göre
+planlanır. Jitter, ilişkisiz olayların ilişkili hâle gelmesini engelleyen genel bir tekniktir;
+aynı fikir retry'da (10) ve zamanlanmış işlerde de karşına çıkacak.
+
+## 7. Seviye içi alıştırmalar (TRAP_ bayrakları)
+
+| Bayrak | Ne yapar | Reproduce | Düzeltme |
+|---|---|---|---|
+| `TRAP_NO_SINGLEFLIGHT` | Eşzamanlı miss'leri birleştirmez | `make repro P=P03-05` | Bayrağı kapat |
+| `TRAP_NO_NEGATIVE_CACHE` | "Yok" cevabını önbelleklemez | `make repro P=P03-06` | Bayrağı kapat |
+| `TRAP_NO_TTL_JITTER` | TTL'e rastgelelik eklemez | `make repro P=P03-07` | Bayrağı kapat |
+| `TRAP_READYZ_CHECKS_DB` · `TRAP_MIGRATE_IN_MAIN` | (02'den devam) | `make repro P=P02-10` (02'de) | — |
+
+Elle denemeye değer:
+- `CACHE_CAPACITY=100` yap ve `make load S=mixed` koş: kapasite çalışma kümesinden küçükse önbellek
+  bir **eviction makinesine** döner; `cache_evictions_total{reason="capacity"}` tırmanır, hit oranı çöker.
+- `CACHE_TTL=1h` yap ve P03-01'i koş: bayatlık penceresi bir saate çıkar. TTL, tutarlılık ile
+  DB yükü arasındaki ayar düğmesidir — ve bu seviyede **tek** ayar düğmesi odur.
+- `make load S=hot-key` ile `make load S=redirect` hit oranlarını karşılaştır: sıcak anahtar
+  önbelleğin en iyi çalıştığı durumdur, tekdüze dağılım en kötüsü.
+
+## 8. Gözlemlenebilirlik: hangi paneller dolu, hangileri boş
+
+| Dashboard | Durum | Neden |
+|---|---|---|
+| `04 · Cache` | **Dolu** ✨ | `cache_ops_total{layer="l1"}`, stampede, eviction, entries |
+| `05 · Postgres` | Dolu | Artık çok daha az sorgu görüyor — fark P02 ile kıyaslanarak okunur |
+| `02 · App RED` · `03 · App Business` · `01 · Pods` · `10 · Rate limit` | Dolu | — |
+| `06 · Redis` | Boş | L2 yok (04) |
+| `07 · Analytics` · `08 · Stream` · `09 · Autoscaling` | Boş | — |
+| `11 · Resilience` · `12 · SLO` · `13 · Rollout` | Boş | — |
+
+Bu seviyenin en öğretici karşılaştırması **seviyeler arası**: `04 · Cache` panelinde `level` seçicisini
+`lvl02` ↔ `lvl03` arasında değiştirip aynı yük altında DB qps'ini kıyasla. Dashboard'ların ortak ve
+`$level` değişkenli olmasının sebebi tam olarak bu.
+
+## 9. Bilerek bırakılanlar
+
+- **Önbellek pod başına** — tutarsızlık, soğuk başlangıç, bellek çarpanı, düşen hit oranı (P03-01…04 → 04).
+- **Geçersiz kılma yayını yok** (pub/sub yok): silme yalnızca yerel.
+- **Yazma yolu önbelleğe yazmıyor** (write-through değil) — bilerek: 09'daki read-your-writes
+  sorununu şanslı bir yerel isabetin arkasına saklamamak için.
+- **Tıklama sayacı hâlâ her istekte DB'ye** (P02-08 duruyor → 05).
+- **Liste önbelleklenmiyor**: her yazmada değişir, geçersiz kılması pahalı. Neyin
+  önbelleklenmeyeceğine karar vermek, neyin önbellekleneceğine karar vermek kadar önemlidir.
+- **Bağlantı havuzu, tek DB, sırlar, süreç içi hız sınırı**: 02'den olduğu gibi devrediyor.
+
+## 10. `make diff-prev` okuma rehberi
+
+`make diff-prev` 02 ile farkı gösterir:
+
+1. **`internal/cache/cache.go`** (yeni): LRU + TTL + jitter + singleflight + negatif önbellek, hepsi
+   ~200 satır. Dört TRAP bayrağının her biri bu dosyada tek bir `if` — koruma ile korumasızlık
+   arasındaki farkın ne kadar küçük göründüğünü görmek öğretici.
+2. **`internal/store/cached.go`** (yeni): **dekoratör**, yeni bir store değil. Handler'lar aynı
+   arayüzle konuşmaya devam ediyor ve farkı anlayamıyorlar — önbellek kararını **geri alınabilir**
+   kılan şey bu.
+3. **`IncrementClicks` önbelleğe dokunmuyor**: her tıklamada geçersiz kılmak, önbelleği tam da en
+   sıcak anahtarlarda bir ıska üreticisine çevirirdi. Bunun yerine dürüst ifade: *tıklama sayısı
+   önbellekte yetkili değildir.*
+4. **`deploy/deployment.yaml`**: bellek limiti 256Mi → 384Mi. Önbellek bedava değil; takas manifestte görünür.
+5. **`cmd/linkly/main.go`**: `cache.New` + `store.NewCached` — üç satırlık bir kablolama. Mimari
+   değişikliğin küçük görünmesi, sonuçlarının küçük olduğu anlamına gelmiyor: P03-01…04 hepsi bu
+   üç satırdan doğuyor.

@@ -1,6 +1,8 @@
-go 1.26
+go 1.26.0
 
 use (
 	./00-naive
 	./01-hardened
+	./02-postgres
+	./03-local-cache
 )
