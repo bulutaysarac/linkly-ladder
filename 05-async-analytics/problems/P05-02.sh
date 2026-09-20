@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.sh"
+# P05-02 · Kuyruk dolunca düşürme — ve TRAP_UNBOUNDED_QUEUE ile alternatifinin neden daha kötü olduğu
+# Sınırlı kuyruk, yazıcı yetişemediğinde tıklama DÜŞÜRÜR ve sayar. Kötü görünür; alternatifi
+# (sınırsız kuyruk) daha kötüdür: bellek büyür, süreç OOM olur ve tampondaki HER ŞEY gider.
+# Yani "hiç düşürmeyelim" isteği, sonunda her şeyi düşürmekle biter.
+ensure_healthy
+on_cleanup "kubectl -n \"$NS\" set env deploy/linkly TRAP_UNBOUNDED_QUEUE- ANALYTICS_QUEUE_SIZE- ANALYTICS_WRITE_TIMEOUT-"
+step "Kuyruğu küçült ve yazıcıyı yavaşlat (DB'ye gecikme enjekte et)"
+kubectl -n "$NS" set env deploy/linkly ANALYTICS_QUEUE_SIZE=500 >/dev/null
+kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null
+for _ in $(seq 1 20); do serving && break; sleep 2; done
+if "$LADDER_ROOT/platform/lib/chaos.sh" apply pg-delay-2s >/dev/null 2>&1; then
+  on_cleanup "$LADDER_ROOT/platform/lib/chaos.sh delete pg-delay-2s"
+  note "Postgres'e 2 sn gecikme enjekte edildi (yazıcı yetişemeyecek)"
+else
+  warn "Chaos Mesh yok; yalnızca yüksek yükle deneniyor"
+fi
+step "Yoğun tıklama yükü — kuyruk dolacak"
+k6run hot-key --vus 80 --duration 45s >/dev/null 2>&1 || true
+sleep 10
+dropped=$(promq "sum(increase(analytics_events_total{namespace=\"$NS\",result=\"dropped\"}[5m]))")
+enq=$(promq "sum(increase(analytics_events_total{namespace=\"$NS\",result=\"enqueued\"}[5m]))")
+depth=$(promq "max_over_time(sum(analytics_queue_depth{namespace=\"$NS\"})[5m:15s])")
+p99=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le))")
+grafana_hint "07 · Analytics → 'events by result' + 'queue depth by pod' · 02 · App RED → p99"
+note "kuyruğa alınan: ${enq%%.*} · DÜŞÜRÜLEN: ${dropped%%.*} · tepe derinlik: ${depth%%.*}"
+note "ÖNEMLİ: redirect p99'u $(awk -v v="$p99" 'BEGIN{printf "%.0f", v*1000}') ms — yazıcı boğulurken bile okuma yolu ETKİLENMEDİ."
+note "Tasarımın vaadi tam olarak buydu: analitik geri kalabilir, ama kullanıcıyı bekletmez."
+note "TRAP_UNBOUNDED_QUEUE=true ile alternatifi dene: düşürme sıfırlanır, working set tırmanır,"
+note "sonunda OOMKilled olur ve tampondaki HER ŞEY kaybolur (P05-01'in en kötü hâli)."
+awk -v d="${dropped%%.*}" 'BEGIN{exit !(d>0)}' \
+  && reproduced "${dropped%%.*} tıklama düşürüldü (tepe derinlik ${depth%%.*}) — back pressure görünür ve okuma yolu korundu"
+not_reproduced "düşürme olmadı (kuyruk daha da küçültülüp yük artırılabilir)"

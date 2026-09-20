@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.sh"
+# P05-01 · At-most-once: rollout/çökme sırasında tampondaki tıklamalar kaybolur
+# Kuyruk süreç belleğinde. Süreç graceful kapanırsa drain eder (kayıp yok); SERT ölürse
+# (OOM, kill -9, node arızası) tampondaki her şey gider. Teslimat garantisi bir TERCİHTİR
+# ve bu seviyede "en fazla bir kez" seçildi — ucuz ve sayaçlar için yeterli, faturalama için değil.
+ensure_healthy
+code=$(create_link "https://example.com/atmostonce")
+step "Sayacı sıfırla ve bilinen sayıda tıklama üret"
+before=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0')
+N=${N:-400}
+for i in $(seq 1 "$N"); do status_of "$code" >/dev/null; done
+step "Kuyruk daha boşalmadan pod'ları SERT öldür (graceful DEĞİL)"
+need_confirm "pod'lar --force ile öldürülecek"
+kubectl -n "$NS" delete pod -l "$APP_SELECTOR" --force --grace-period=0 >/dev/null 2>&1 || true
+wait_ready; for _ in $(seq 1 25); do serving && break; sleep 2; done
+sleep 6
+hard=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0')
+lost_hard=$(( before + N - hard ))
+note "sert ölüm: $N tıklama üretildi, kaydedilen $(( hard - before )) → KAYIP $lost_hard"
+step "Karşılaştırma: aynı senaryo GRACEFUL kapanışla (drain devrede)"
+code2=$(create_link "https://example.com/graceful")
+b2=$(curl -s "$BASE_URL/api/links/$code2/stats" | jq -r '.clicks // 0')
+for i in $(seq 1 "$N"); do status_of "$code2" >/dev/null; done
+kubectl -n "$NS" rollout restart deploy/linkly >/dev/null
+kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null 2>&1 || true
+for _ in $(seq 1 25); do serving && break; sleep 2; done
+sleep 8
+g=$(curl -s "$BASE_URL/api/links/$code2/stats" | jq -r '.clicks // 0')
+lost_soft=$(( b2 + N - g ))
+note "graceful: $N tıklama üretildi, kaydedilen $(( g - b2 )) → KAYIP $lost_soft"
+grafana_hint "07 · Analytics → 'events by result' (dropped/written) + 'k6 tıklama − DB tıklama' farkı"
+note "Fark şurada: drain, PLANLI kapanışı kurtarır; plansız ölümü kurtaramaz."
+note "Kalıcı çözüm 06: olayı süreç belleğinden çıkar, dayanıklı bir loga yaz (en az bir kez) ve"
+note "tüketiciyi idempotent yap. Orada yeni sorun 'çift sayma' olacak — garanti seçmek, sorun seçmektir."
+(( lost_hard > 0 )) && reproduced "sert ölümde $lost_hard tıklama kayboldu (graceful kapanışta kayıp: $lost_soft)"
+not_reproduced "sert ölümde bile kayıp yok — olaylar dayanıklı bir yere yazılıyor (06)"

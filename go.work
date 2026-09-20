@@ -6,4 +6,5 @@ use (
 	./02-postgres
 	./03-local-cache
 	./04-redis-cache
+	./05-async-analytics
 )
