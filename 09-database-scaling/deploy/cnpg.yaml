@@ -1,0 +1,106 @@
+# CloudNativePG — primary + 2 replika, otomatik failover, PgBouncer (Pooler), yedek/PITR.
+#
+# EN: Level 02 deliberately shipped a single StatefulSet so you would feel its absence: a dead pod
+#     was a full outage (P02-03), the connection limit was a wall (P02-02), and a bad DELETE was
+#     forever. The operator does not make those problems disappear — it makes them RECOVERABLE,
+#     and introduces new ones you can only have once you have replicas (lag, read-your-writes,
+#     failover windows). Reaching for the operator earlier would have taught you a product;
+#     reaching for it now teaches you a problem.
+# TR: 02, yokluğunu hissedesin diye bilerek tek bir StatefulSet ile geldi: ölü bir pod tam
+#     kesintiydi (P02-03), bağlantı limiti bir duvardı (P02-02) ve yanlış bir DELETE sonsuza
+#     kadardı. Operatör bu sorunları yok etmiyor — onları TELAFİ EDİLEBİLİR kılıyor ve ancak
+#     replikan olduğunda sahip olabileceğin yenilerini getiriyor (gecikme, read-your-writes,
+#     failover penceresi). Operatöre daha erken uzanmak sana bir ürünü öğretirdi; şimdi uzanmak
+#     bir sorunu öğretiyor.
+# [Topic · Konu: Operatör, HA, failover]
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres
+type: Opaque
+stringData:
+  POSTGRES_USER: linkly
+  POSTGRES_PASSWORD: linkly
+  POSTGRES_DB: linkly
+  # Uygulama artık POOLER üzerinden bağlanıyor (doğrudan primary'ye değil).
+  DATABASE_URL: postgres://linkly:linkly@pg-pooler-rw:5432/linkly?sslmode=disable
+  DATABASE_URL_RO: postgres://linkly:linkly@pg-pooler-ro:5432/linkly?sslmode=disable
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pg-app-user
+type: kubernetes.io/basic-auth
+stringData:
+  username: linkly
+  password: linkly
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg
+spec:
+  instances: 3          # 1 primary + 2 replika
+  imageName: ghcr.io/cloudnative-pg/postgresql:17.2
+  primaryUpdateStrategy: unsupervised
+  bootstrap:
+    initdb:
+      database: linkly
+      owner: linkly
+      secret:
+        name: pg-app-user
+  postgresql:
+    parameters:
+      max_connections: "100"        # BİLEREK aynı: Pooler'ın neden gerektiğini görelim
+      shared_buffers: "128MB"
+      shared_preload_libraries: "pg_stat_statements"
+      # P09-04: uzun okuma sorguları replikada iptal edilmesin diye primary'ye geri bildirim.
+      # Bedeli: primary'de vacuum gecikir, şişme artar. Her ayarın bir faturası var.
+      hot_standby_feedback: "on"
+  resources:
+    requests: { cpu: 150m, memory: 256Mi }
+    limits: { memory: 768Mi }
+  storage:
+    size: 3Gi
+  monitoring:
+    enablePodMonitor: true
+---
+# Pooler (PgBouncer) — P02-02'nin çözümü.
+# EN: transaction pooling multiplexes hundreds of application connections onto a handful of real
+#     backend connections. The catch is in the name: in TRANSACTION mode a connection belongs to
+#     you only for the duration of a transaction, so anything that spans transactions breaks —
+#     session state, LISTEN/NOTIFY, and (the one that bites first) server-side PREPARED STATEMENTS.
+#     P09-03 reproduces exactly that.
+# TR: transaction havuzlaması, yüzlerce uygulama bağlantısını bir avuç gerçek arka uç bağlantısına
+#     çoğullar. Tuzak adında: TRANSACTION modunda bağlantı sana yalnızca bir işlem süresince
+#     aittir; işlemler arasına yayılan her şey bozulur — oturum durumu, LISTEN/NOTIFY ve (ilk
+#     canını yakan) sunucu tarafı PREPARED STATEMENT'lar. P09-03 tam olarak bunu üretiyor.
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: pg-pooler-rw
+spec:
+  cluster:
+    name: pg
+  instances: 2
+  type: rw
+  pgbouncer:
+    poolMode: transaction
+    parameters:
+      max_client_conn: "500"     # uygulama tarafı: bol
+      default_pool_size: "20"    # DB tarafı: az → çoğullama oranı 25:1
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: pg-pooler-ro
+spec:
+  cluster:
+    name: pg
+  instances: 2
+  type: ro                        # okuma replikalarına yönlendirir
+  pgbouncer:
+    poolMode: transaction
+    parameters:
+      max_client_conn: "500"
+      default_pool_size: "20"

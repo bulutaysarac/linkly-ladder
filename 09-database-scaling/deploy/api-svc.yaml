@@ -1,0 +1,81 @@
+# api-svc — yönetim yolu. Az replika, BÜYÜK havuz, HPA yok (trafiği öngörülebilir).
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  labels: { app.kubernetes.io/name: api }
+spec:
+  selector: { app.kubernetes.io/name: api }
+  ports: [{ name: http, port: 8080, targetPort: http }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  labels: { app.kubernetes.io/name: api }
+spec:
+  replicas: 2
+  strategy:
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  selector:
+    matchLabels: { app.kubernetes.io/name: api }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: api }
+    spec:
+      terminationGracePeriodSeconds: 45
+      containers:
+        - name: api
+          image: localhost:5001/linkly-ladder/09-api-svc:IMAGE_TAG
+          ports: [{ name: http, containerPort: 8080 }]
+          envFrom: [{ secretRef: { name: postgres } }]
+          env:
+            - { name: SERVICE_NAME, value: api }
+            - { name: REDIS_ADDR, value: "redis:6379" }
+            - { name: KAFKA_BROKERS, value: "redpanda:9092" }
+            # redirect'in TAM TERSİ: az pod, çok bağlantı. Yazma ve liste sorguları DB'ye gider.
+            - { name: DB_MAX_CONNS, value: "20" }
+            - { name: SHUTDOWN_GRACE, value: "20s" }
+            # Paylaşılan limiter: pencere BAŞINA limit, pod başına DEĞİL. Replika sayısı
+            # değişince limit değişmez — P01-05/P02-04'ün çözümü budur.
+            - { name: RATE_LIMIT_WINDOW, value: "10s" }
+            - { name: RATE_LIMIT_PER_IP, value: "300" }
+            - { name: RATE_LIMIT_PER_TENANT, value: "2000" }
+            # Redis düşerse İZİN VER ve alarm üret: korumayı kaybetmek telafi edilebilir,
+            # hizmeti kaybetmek edilemez (P08-01 iki tarafı da ölçüyor).
+            - { name: RATE_LIMIT_FAIL_OPEN, value: "true" }
+            # Yalnızca kendi ingress'imizin eklediği hop'a güven (P08-03b)
+            - { name: TRUSTED_PROXY_HOPS, value: "1" }
+            # Okumalar replikalara (pooler-ro), yazmalar primary'ye (pooler-rw) gider.
+            # DATABASE_URL_RO'yu boşaltmak ayrımı kapatır: 09'un tüm yeni sorunları kaybolur
+            # ve okuma ölçeklenmesi de kaybolur — takas görünür olsun diye tek bir env.
+            - name: DATABASE_URL_RO
+              valueFrom: { secretKeyRef: { name: postgres, key: DATABASE_URL_RO } }
+            # Yazma sonrası bu süre boyunca okumalar primary'den (read-your-writes, P09-01)
+            - { name: STICKY_WINDOW, value: "2s" }
+            # Pooler transaction modunda: prepared statement KAPALI olmalı (P09-03)
+            - { name: TRAP_PREPARED_STATEMENTS, value: "false" }
+            # TRAP'ler kapalı: TRAP_LIST_N_PLUS_ONE · TRAP_READY_ALWAYS
+          resources:
+            requests: { cpu: 100m, memory: 64Mi }
+            limits: { memory: 256Mi }   # CPU limiti YOK: burst'e izin ver, throttling'i redirect'te ölç
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 2
+            failureThreshold: 2
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 6
+          lifecycle: { preStop: { sleep: { seconds: 5 } } }
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: api
+  labels: { app.kubernetes.io/name: api }
+spec:
+  selector:
+    matchLabels: { app.kubernetes.io/name: api }
+  endpoints: [{ port: http, path: /metrics, interval: 10s }]

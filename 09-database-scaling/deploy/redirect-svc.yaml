@@ -1,0 +1,137 @@
+# redirect-svc — okuma yolu. Çok replika, küçük havuz, agresif HPA.
+apiVersion: v1
+kind: Service
+metadata:
+  name: redirect
+  labels:
+    app.kubernetes.io/name: redirect
+spec:
+  selector:
+    app.kubernetes.io/name: redirect
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redirect
+  labels:
+    app.kubernetes.io/name: redirect
+spec:
+  replicas: 2
+  strategy:
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 2 }
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redirect
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: redirect
+    spec:
+      terminationGracePeriodSeconds: 45
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: redirect
+      containers:
+        - name: redirect
+          image: localhost:5001/linkly-ladder/09-redirect-svc:IMAGE_TAG
+          ports: [{ name: http, containerPort: 8080 }]
+          envFrom: [{ secretRef: { name: postgres } }]
+          env:
+            - { name: SERVICE_NAME, value: redirect }
+            - { name: REDIS_ADDR, value: "redis:6379" }
+            - { name: KAFKA_BROKERS, value: "redpanda:9092" }
+            # P02-02 aritmetiği: HPA 12 replikaya kadar çıkabiliyor. 12 × 6 = 72 bağlantı,
+            # + api-svc (2 × 15 = 30) + tüketici (10) = 112 > max_connections=100 → 09'da Pooler.
+            # Bu sayıyı BİLEREK sınırda bırakıyoruz: P07-02 darboğazın DB'ye kaydığını ölçecek.
+            # Pooler arkasında: uygulama bağlantısı BOL olabilir, gerçek DB bağlantısı Pooler'da az (P02-02 çözüldü)
+            - { name: DB_MAX_CONNS, value: "20" }
+            - { name: SHUTDOWN_GRACE, value: "20s" }
+            # Paylaşılan limiter: pencere BAŞINA limit, pod başına DEĞİL. Replika sayısı
+            # değişince limit değişmez — P01-05/P02-04'ün çözümü budur.
+            - { name: RATE_LIMIT_WINDOW, value: "10s" }
+            - { name: RATE_LIMIT_PER_IP, value: "300" }
+            - { name: RATE_LIMIT_PER_TENANT, value: "2000" }
+            # Redis düşerse İZİN VER ve alarm üret: korumayı kaybetmek telafi edilebilir,
+            # hizmeti kaybetmek edilemez (P08-01 iki tarafı da ölçüyor).
+            - { name: RATE_LIMIT_FAIL_OPEN, value: "true" }
+            # Yalnızca kendi ingress'imizin eklediği hop'a güven (P08-03b)
+            - { name: TRUSTED_PROXY_HOPS, value: "1" }
+            # Okumalar replikalara (pooler-ro), yazmalar primary'ye (pooler-rw) gider.
+            # DATABASE_URL_RO'yu boşaltmak ayrımı kapatır: 09'un tüm yeni sorunları kaybolur
+            # ve okuma ölçeklenmesi de kaybolur — takas görünür olsun diye tek bir env.
+            - name: DATABASE_URL_RO
+              valueFrom: { secretKeyRef: { name: postgres, key: DATABASE_URL_RO } }
+            # Yazma sonrası bu süre boyunca okumalar primary'den (read-your-writes, P09-01)
+            - { name: STICKY_WINDOW, value: "2s" }
+            # Pooler transaction modunda: prepared statement KAPALI olmalı (P09-03)
+            - { name: TRAP_PREPARED_STATEMENTS, value: "false" }
+          resources:
+            requests: { cpu: 150m, memory: 64Mi }
+            # P07-04: limit BİLEREK istek değerine yakın. CPU limiti bir "en fazla" değil, bir
+            # KOTA'dır: 100ms'lik dilimlerde kotan biterse kalan süre boyunca beklersin (throttling).
+            limits: { cpu: 300m, memory: 192Mi }
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 2
+            failureThreshold: 2
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 6
+          lifecycle: { preStop: { sleep: { seconds: 5 } } }
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: redirect
+  labels: { app.kubernetes.io/name: redirect }
+spec:
+  selector:
+    matchLabels: { app.kubernetes.io/name: redirect }
+  endpoints: [{ port: http, path: /metrics, interval: 10s }]
+---
+# HPA — CPU'ya göre. behavior BİLEREK ayarsız bırakılmadı: varsayılan ölçek-küçültme penceresi
+# 5 dakikadır ve bu, burst'ten sonra pod'ların uzun süre açık kalmasına yol açar. Ölçek-büyütmeyi
+# hızlı, küçültmeyi yavaş tutmak genel kuraldır — ama "hızlı" bile HPA döngüsü (15 sn) + pod
+# başlatma süresi kadar gecikir. P07-01 o pencereyi ölçüyor.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: redirect
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: redirect
+  minReplicas: 2
+  maxReplicas: 12
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 60 }
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies: [{ type: Percent, value: 100, periodSeconds: 15 }]
+    scaleDown:
+      stabilizationWindowSeconds: 120
+      policies: [{ type: Percent, value: 50, periodSeconds: 60 }]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: redirect
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: redirect }
