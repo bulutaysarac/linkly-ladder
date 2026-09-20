@@ -1,0 +1,28 @@
+# redirect Service + ServiceMonitor. Deployment yerine Rollout kullanıldığı için ayrıldı.
+apiVersion: v1
+kind: Service
+metadata:
+  name: redirect
+  labels: { app.kubernetes.io/name: redirect }
+spec:
+  selector: { app.kubernetes.io/name: redirect }
+  ports: [{ name: http, port: 8080, targetPort: http }]
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: redirect
+  labels: { app.kubernetes.io/name: redirect }
+spec:
+  selector:
+    matchLabels: { app.kubernetes.io/name: redirect }
+  endpoints: [{ port: http, path: /metrics, interval: 10s }]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: redirect
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: redirect }

@@ -1,0 +1,30 @@
+# KEDA — tüketiciyi CPU'ya değil, GERİ KALDIĞI MİKTARA göre ölçekle.
+# EN: CPU is the wrong signal for a consumer: it can be idle while a million events wait, and busy
+#     while perfectly caught up. The signal that matters is lag — "how far behind are we?" — which
+#     is also the thing your users actually feel (stale analytics). Scale on the metric that
+#     encodes the user-visible problem, not on the one that is easiest to collect.
+# TR: CPU bir tüketici için YANLIŞ sinyaldir: bir milyon olay beklerken boşta olabilir, tamamen
+#     yetişmişken meşgul görünebilir. Önemli olan sinyal LAG'dir — "ne kadar geriden geliyoruz?" —
+#     ki kullanıcının gerçekten hissettiği şey de budur (bayat analitik). Ölçeklemeyi, toplaması
+#     en kolay metriğe göre değil, KULLANICIYA GÖRÜNEN sorunu kodlayan metriğe göre yap.
+# [Topic · Konu: Ölçekleme sinyali, KEDA]
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: analytics
+spec:
+  scaleTargetRef:
+    name: analytics
+  minReplicaCount: 1
+  maxReplicaCount: 3          # partition sayısı kadar — fazlası boşa gider (P06-03)
+  pollingInterval: 15
+  cooldownPeriod: 60
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: redpanda:9092
+        consumerGroup: analytics
+        topic: clicks
+        lagThreshold: "500"
+        offsetResetPolicy: earliest
+        allowIdleConsumers: "false"

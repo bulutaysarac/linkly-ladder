@@ -1,0 +1,22 @@
+# API anahtarları.
+#
+# EN: This file is the honest middle of the story. A real deployment would ship a SealedSecret
+#     (encrypted with the cluster's public key, safe to commit) and the controller would decrypt
+#     it in-cluster. Generating one requires kubeseal and the cluster's key, which would make this
+#     repo unusable on a fresh cluster — so the plain Secret stays, and P13-04 measures exactly
+#     what that costs and shows the kubeseal command that fixes it.
+#     Pretending a secret is safe is worse than admitting it is not.
+# TR: Bu dosya hikâyenin dürüst orta noktası. Gerçek bir dağıtım SealedSecret gönderirdi
+#     (cluster'ın açık anahtarıyla şifreli, commit'lenmesi güvenli) ve controller onu cluster
+#     içinde çözerdi. Üretmek kubeseal ve cluster'ın anahtarını gerektirir; bu da depoyu taze bir
+#     cluster'da kullanılamaz kılardı — o yüzden düz Secret kalıyor ve P13-04 bunun bedelini
+#     ÖLÇÜP düzelten kubeseal komutunu gösteriyor.
+#     Bir sırrın güvenli olduğunu VARSAYMAK, güvenli olmadığını KABUL ETMEKTEN kötüdür.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: linkly-api-keys
+type: Opaque
+stringData:
+  # biçim: tenant:tier:key,...
+  API_KEYS: "acme:pro:acme-key-9f2c,globex:free:globex-key-3a71,initech:enterprise:initech-key-77bd"

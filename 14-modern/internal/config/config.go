@@ -1,0 +1,265 @@
+// Package config — ortam değişkenlerinden ayar. Varsayılanlar üretimde güvenli tarafta olmalı:
+// bir ayarı vermeyi unutmak, korumayı KAPATMAK anlamına gelmemeli.
+package config
+
+import (
+	"os"
+	"strconv"
+	"time"
+)
+
+type Config struct {
+	Addr               string
+	ReadHeaderTimeout  time.Duration // EN: slowloris guard  TR: yarım bağlantı koruması [Topic · Konu: Timeout]
+	ReadTimeout        time.Duration
+	WriteTimeout       time.Duration
+	IdleTimeout        time.Duration
+	HandlerTimeout     time.Duration // istek başına üst sınır
+	ShutdownGrace      time.Duration
+	MaxBodyBytes       int64
+	CodeLength         int
+	CodeMaxAttempts    int
+	RateLimitPerSec    float64
+	RateLimitBurst     int
+	RateLimitWindow    time.Duration
+	RateLimitPerIP     int
+	RateLimitPerTenant int
+	RateLimitFailOpen  bool
+	TrustedProxyHops   int
+
+	DatabaseURL   string
+	DatabaseURLRO string
+	StickyWindow  time.Duration
+
+	DepTimeout       time.Duration
+	DepMaxConcurrent int
+	DepMaxRetries    int
+	RetryBudget      float64
+	BreakerThreshold int
+	BreakerOpen      time.Duration
+	ShedMaxInFlight  int
+	ShedEnabled      bool
+
+	OTLPEndpoint     string
+	TraceSampleRatio float64
+	TracingEnabled   bool
+	LogLevel         string
+	// BadVersionErrorPct — "kötü sürüm" simülasyonu: redirect'lerin yüzde kaçı 500 dönsün.
+	// Canary analizinin bunu YAKALAMASI gerekiyor (P12-01). Gerçek hayatta bu bir bug'dır;
+	// burada bir bayrak, çünkü kasıtlı bir bug yazmak onu yeniden üretilebilir kılar.
+	BadVersionErrorPct int
+
+	APIKeys          string // "tenant:tier:key,..." — üretimde DB/sır yöneticisi
+	AuthRequired     bool
+	TierLimits       string // "free=100,pro=1000,enterprise=5000" (pencere başına)
+	ResolveDNS       bool   // hedef host'u çözüp özel adres mi diye bak (P13-05)
+	NotFoundLimit    int    // 404 taramasına özel limit (P13-06)
+	DBMaxConns       int32
+	DBQueryTimeout   time.Duration
+	StatementTimeout string // sunucu tarafı ifade timeout'u; boş = KAPALI (bkz. P02-06)
+	MigrateTarget    int64  // hangi migration sürümüne kadar koşulsun (P02-05 alıştırması)
+	ListLimit        int
+
+	RedisAddr            string
+	RedisTimeout         time.Duration
+	KafkaBrokers         string
+	KafkaTopic           string
+	KafkaDLQTopic        string
+	KafkaGroup           string
+	ProducerMaxBuffered  int
+	ConsumerBatchTimeout time.Duration
+	QueueSize            int
+	BatchSize            int
+	FlushInterval        time.Duration
+	ClickWriteTimeout    time.Duration
+	StatsDays            int
+	ServiceName          string
+	AnalyticsURL         string
+	L1Enabled            bool
+	L1Capacity           int
+	L1TTL                time.Duration
+	InvalidationChan     string
+	CacheCapacity        int
+	CacheTTL             time.Duration
+	CacheNegativeTTL     time.Duration
+
+	// TRAP_* — seviye içi alıştırmalar. Varsayılan olarak KAPALI; README §7 açıklıyor.
+	TrapMetricLabelCode      bool // kısa kodu metrik label'ı yap → kardinalite patlaması
+	TrapLivenessStrict       bool // sağlık uçlarını iş zincirine sok (hız sınırı + timeout) → yük altında restart fırtınası
+	TrapReadyzChecksDB       bool // readiness'a DB kontrolü koy → DB kesintisinde TÜM pod'lar trafikten düşer (P02-10)
+	TrapMigrateInMain        bool // migration'ı her pod kendi main'inde koşsun → N replikada yarış (P02-07)
+	TrapNoSingleflight       bool // stampede koruması kapalı → TTL dolan sıcak anahtar DB'yi döver (P03-05)
+	TrapNoNegative           bool // negatif önbellek kapalı → var olmayan kod taraması hep DB'ye iner (P03-06)
+	TrapNoJitter             bool // TTL jitter kapalı → tüm anahtarlar aynı anda dolar (P04-04)
+	TrapDebugKeys            bool // /debug/keys ucu KEYS * çalıştırsın → Redis'i tek komutla kilitle (P04-07)
+	TrapUpdateDelayMs        int  // DB update ile önbellek silme arasına gecikme koy → cache-aside yarışı (P04-05)
+	TrapUnboundedQueue       bool // sınırsız analitik kuyruğu → düşürme yerine OOM (P05-02)
+	TrapRedirect301          bool // 302 yerine 301 → tarayıcı önbellekler, tıklama hiç sayılmaz (P05-06)
+	TrapCommitBeforeWrite    bool // offset'i yazmadan önce commit et → tüketici ölürse veri kaybı (P06-01)
+	TrapNoDLQ                bool // bozuk mesajı DLQ'ya taşıma → crashloop ve sonsuz lag (P06-04)
+	TrapListNPlusOne         bool // liste yanıtında her link için AYRI stats çağrısı → N+1 (P07-06)
+	TrapReadyAlways          bool // readiness her zaman 200 → bozuk pod trafik alır (P07-08)
+	TrapIgnoreXFF            bool // XFF'i yok say → herkes ingress IP'sinde tek kovada (P08-03a)
+	TrapTrustAnyXFF          bool // XFF'in ilk değerine güven → limit taklitle atlatılır (P08-03b)
+	TrapFixedWindow          bool // sabit pencere sayacı → sınırda 2x burst geçer (P08-04)
+	TrapGlobalLimit          bool // tek global anahtar → Redis'te hot key (P08-05)
+	TrapPreparedStatements   bool // pgx'i prepared statement moduna zorla → Pooler ile patlar (P09-03)
+	TrapNoSticky             bool // yazma sonrası yapışkan okuma kapalı → read-your-writes ihlali (P09-01)
+	TrapNaiveRetry           bool // bütçesiz, jitter'sız retry → hata anında yükü katlar (P10-01)
+	TrapReadyChecksRedis     bool // readiness Redis'e bakar → kısa kesinti tüm pod'ları düşürür (P10-02)
+	TrapNoDepTimeout         bool // bağımlılık timeout'u yok → yavaş bağımlılıkta goroutine/bellek şişer (P10-05)
+	TrapNoBreaker            bool // devre kesici kapalı → bozuk bağımlılığa istek yağdırmaya devam (P10-04)
+	TrapNoTracePropagation   bool // trace bağlamını Kafka header'ına koyma → tüketici span'ları yetim (P11-02)
+	TrapRegexPerRequest      bool // istek başına regex derle → CPU hot spot, profille bulunur (P11-08)
+	TrapTenantLabel          bool // tenant'ı metrik label'ı yap → kardinalite patlaması (P11-06)
+	TrapBreakingMigration    bool // kolonu doğrudan yeniden adlandır → eski pod'lar rollout sırasında patlar (P12-02)
+	TrapHeaderTenant         bool // kiracıyı yine header'dan al → kimlik doğrulama etkisiz (P13-01)
+	TrapDropTenantFilter     bool // tek sorguda tenant filtresini unut → SESSİZ veri sızıntısı (P13-02)
+	TrapNoDNSCheck           bool // DNS çözümü yapma → özel adrese çözülen host geçer (P13-05)
+	TrapNoInvalidationPubSub bool // L1 var ama yayın yok → 03'teki tutarsızlık geri gelir (P14-02)
+}
+
+func Load() Config {
+	return Config{
+		Addr:               env("ADDR", ":8080"),
+		ReadHeaderTimeout:  envDur("READ_HEADER_TIMEOUT", 3*time.Second),
+		ReadTimeout:        envDur("READ_TIMEOUT", 10*time.Second),
+		WriteTimeout:       envDur("WRITE_TIMEOUT", 15*time.Second),
+		IdleTimeout:        envDur("IDLE_TIMEOUT", 60*time.Second),
+		HandlerTimeout:     envDur("HANDLER_TIMEOUT", 5*time.Second),
+		ShutdownGrace:      envDur("SHUTDOWN_GRACE", 20*time.Second),
+		MaxBodyBytes:       int64(envInt("MAX_BODY_BYTES", 8*1024)),
+		CodeLength:         envInt("CODE_LENGTH", 7),
+		CodeMaxAttempts:    envInt("CODE_MAX_ATTEMPTS", 5),
+		RateLimitPerSec:    float64(envInt("RATE_LIMIT_PER_SEC", 200)),
+		RateLimitBurst:     envInt("RATE_LIMIT_BURST", 400),
+		RateLimitWindow:    envDur("RATE_LIMIT_WINDOW", 10*time.Second),
+		RateLimitPerIP:     envInt("RATE_LIMIT_PER_IP", 300), // pencere BAŞINA, pod başına değil
+		RateLimitPerTenant: envInt("RATE_LIMIT_PER_TENANT", 2000),
+		RateLimitFailOpen:  envBool("RATE_LIMIT_FAIL_OPEN", true), // bilinçli seçim — P08-01
+		TrustedProxyHops:   envInt("TRUSTED_PROXY_HOPS", 1),       // yalnızca ingress-nginx
+
+		DatabaseURL: env("DATABASE_URL", "postgres://linkly:linkly@pg-pooler-rw:5432/linkly?sslmode=disable"),
+		// Boşsa okuma/yazma ayrımı KAPALI: her şey primary'den. Bu, 09'un tüm sorunlarını
+		// kapatmanın da en hızlı yoludur — ve ölçekleme kazancını da kapatır.
+		DatabaseURLRO: env("DATABASE_URL_RO", ""),
+		// Yazdıktan sonra bu süre boyunca okumaları da primary'den yap (P09-01'in çözümü).
+		// 0 = kapalı: script bunu açıp kapatarak farkı ölçüyor.
+		StickyWindow: envDur("STICKY_WINDOW", 2*time.Second),
+
+		DepTimeout:       envDur("DEP_TIMEOUT", 2*time.Second),
+		DepMaxConcurrent: envInt("DEP_MAX_CONCURRENT", 24),
+		DepMaxRetries:    envInt("DEP_MAX_RETRIES", 2),
+		RetryBudget:      float64(envInt("RETRY_BUDGET_PCT", 10)) / 100,
+		BreakerThreshold: envInt("BREAKER_THRESHOLD", 8),
+		BreakerOpen:      envDur("BREAKER_OPEN", 5*time.Second),
+		ShedMaxInFlight:  envInt("SHED_MAX_INFLIGHT", 200),
+		ShedEnabled:      envBool("SHED_ENABLED", true),
+
+		OTLPEndpoint: env("OTLP_ENDPOINT", "alloy.monitoring.svc:4317"),
+		// %5 head sampling: 20 istekten biri. Düşük tutmanın sebebi P11-03 — %100 sampling
+		// collector'ı ve Tempo'yu boğar, üstelik faydası doğrusal DEĞİLDİR.
+		TraceSampleRatio:   float64(envInt("TRACE_SAMPLE_PCT", 5)) / 100,
+		TracingEnabled:     envBool("TRACING_ENABLED", true),
+		LogLevel:           env("LOG_LEVEL", "info"),
+		BadVersionErrorPct: envInt("BAD_VERSION_ERROR_PCT", 0),
+
+		APIKeys:          env("API_KEYS", ""),
+		AuthRequired:     envBool("AUTH_REQUIRED", true),
+		TierLimits:       env("TIER_LIMITS", "free=100,pro=1000,enterprise=5000"),
+		ResolveDNS:       envBool("RESOLVE_DNS", true),
+		NotFoundLimit:    envInt("NOT_FOUND_LIMIT", 50),
+		DBMaxConns:       int32(envInt("DB_MAX_CONNS", 25)),
+		DBQueryTimeout:   envDur("DB_QUERY_TIMEOUT", 3*time.Second),
+		StatementTimeout: env("STATEMENT_TIMEOUT", ""),       // BİLEREK boş: P02-06 bunun yokluğunu ölçüyor
+		MigrateTarget:    int64(envInt("MIGRATE_TARGET", 1)), // 2 = tenant index'i (P02-05 çözümü)
+		ListLimit:        envInt("LIST_LIMIT", 100),
+
+		RedisAddr:            env("REDIS_ADDR", "redis:6379"),
+		RedisTimeout:         envDur("REDIS_TIMEOUT", 500*time.Millisecond),
+		KafkaBrokers:         env("KAFKA_BROKERS", "redpanda:9092"),
+		KafkaTopic:           env("KAFKA_TOPIC", "clicks"),
+		KafkaDLQTopic:        env("KAFKA_DLQ_TOPIC", "clicks-dlq"),
+		KafkaGroup:           env("KAFKA_GROUP", "analytics"),
+		ProducerMaxBuffered:  envInt("PRODUCER_MAX_BUFFERED", 50000),
+		ConsumerBatchTimeout: envDur("CONSUMER_BATCH_TIMEOUT", 500*time.Millisecond),
+		QueueSize:            envInt("ANALYTICS_QUEUE_SIZE", 20000),
+		BatchSize:            envInt("ANALYTICS_BATCH_SIZE", 500),
+		FlushInterval:        envDur("ANALYTICS_FLUSH_INTERVAL", time.Second),
+		ClickWriteTimeout:    envDur("ANALYTICS_WRITE_TIMEOUT", 5*time.Second),
+		StatsDays:            envInt("STATS_DAYS", 30),
+		ServiceName:          env("SERVICE_NAME", "linkly"),
+		AnalyticsURL:         env("ANALYTICS_URL", "http://analytics:8080"),
+		// L1: en sıcak anahtarlar için pod içi önbellek. TTL KISA — yayın kaçarsa bayatlık
+		// penceresi bu kadar (gerekçe: internal/cache/tiered.go).
+		L1Enabled:        envBool("L1_ENABLED", true),
+		L1Capacity:       envInt("L1_CAPACITY", 5000),
+		L1TTL:            envDur("L1_TTL", 10*time.Second),
+		InvalidationChan: env("INVALIDATION_CHANNEL", "linkly:invalidate"),
+		CacheCapacity:    envInt("CACHE_CAPACITY", 50000),
+		CacheTTL:         envDur("CACHE_TTL", 60*time.Second),
+		CacheNegativeTTL: envDur("CACHE_NEGATIVE_TTL", 10*time.Second),
+
+		TrapMetricLabelCode:      envBool("TRAP_METRIC_LABEL_CODE", false),
+		TrapLivenessStrict:       envBool("TRAP_LIVENESS_STRICT", false),
+		TrapReadyzChecksDB:       envBool("TRAP_READYZ_CHECKS_DB", false),
+		TrapMigrateInMain:        envBool("TRAP_MIGRATE_IN_MAIN", false),
+		TrapNoSingleflight:       envBool("TRAP_NO_SINGLEFLIGHT", false),
+		TrapNoNegative:           envBool("TRAP_NO_NEGATIVE_CACHE", false),
+		TrapNoJitter:             envBool("TRAP_NO_TTL_JITTER", false),
+		TrapDebugKeys:            envBool("TRAP_DEBUG_KEYS", false),
+		TrapUpdateDelayMs:        envInt("TRAP_UPDATE_DELAY_MS", 0),
+		TrapUnboundedQueue:       envBool("TRAP_UNBOUNDED_QUEUE", false),
+		TrapRedirect301:          envBool("TRAP_REDIRECT_301", false),
+		TrapCommitBeforeWrite:    envBool("TRAP_COMMIT_BEFORE_WRITE", false),
+		TrapNoDLQ:                envBool("TRAP_NO_DLQ", false),
+		TrapListNPlusOne:         envBool("TRAP_LIST_N_PLUS_ONE", false),
+		TrapReadyAlways:          envBool("TRAP_READY_ALWAYS", false),
+		TrapIgnoreXFF:            envBool("TRAP_IGNORE_XFF", false),
+		TrapTrustAnyXFF:          envBool("TRAP_TRUST_ANY_XFF", false),
+		TrapFixedWindow:          envBool("TRAP_FIXED_WINDOW", false),
+		TrapGlobalLimit:          envBool("TRAP_GLOBAL_LIMIT", false),
+		TrapPreparedStatements:   envBool("TRAP_PREPARED_STATEMENTS", false),
+		TrapNoSticky:             envBool("TRAP_NO_STICKY", false),
+		TrapNaiveRetry:           envBool("TRAP_NAIVE_RETRY", false),
+		TrapReadyChecksRedis:     envBool("TRAP_READY_CHECKS_REDIS", false),
+		TrapNoDepTimeout:         envBool("TRAP_NO_DEP_TIMEOUT", false),
+		TrapNoBreaker:            envBool("TRAP_NO_BREAKER", false),
+		TrapNoTracePropagation:   envBool("TRAP_NO_KAFKA_PROPAGATION", false),
+		TrapRegexPerRequest:      envBool("TRAP_REGEX_PER_REQUEST", false),
+		TrapTenantLabel:          envBool("TRAP_TENANT_LABEL", false),
+		TrapBreakingMigration:    envBool("TRAP_BREAKING_MIGRATION", false),
+		TrapHeaderTenant:         envBool("TRAP_HEADER_TENANT", false),
+		TrapDropTenantFilter:     envBool("TRAP_DROP_TENANT_FILTER", false),
+		TrapNoDNSCheck:           envBool("TRAP_NO_DNS_CHECK", false),
+		TrapNoInvalidationPubSub: envBool("TRAP_NO_INVALIDATION_PUBSUB", false),
+	}
+}
+
+func env(k, d string) string {
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
+	return d
+}
+
+func envInt(k string, d int) int {
+	if v, err := strconv.Atoi(os.Getenv(k)); err == nil {
+		return v
+	}
+	return d
+}
+
+func envDur(k string, d time.Duration) time.Duration {
+	if v, err := time.ParseDuration(os.Getenv(k)); err == nil {
+		return v
+	}
+	return d
+}
+
+func envBool(k string, d bool) bool {
+	if v, err := strconv.ParseBool(os.Getenv(k)); err == nil {
+		return v
+	}
+	return d
+}

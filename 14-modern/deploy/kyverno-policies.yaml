@@ -1,0 +1,67 @@
+# Kyverno — kuralları YAZIYA değil, KAPIYA dönüştür.
+#
+# EN: Every rule in this file is something an earlier level learned the hard way and then wrote
+#     in a README. A README is a hope; an admission policy is a guarantee. The difference shows
+#     up on the day someone who never read that README deploys something.
+# TR: Bu dosyadaki her kural, önceki bir seviyenin zor yoldan öğrenip README'ye yazdığı bir şey.
+#     README bir temennidir; kabul politikası bir garantidir. Fark, o README'yi hiç okumamış
+#     birinin bir şey dağıttığı gün ortaya çıkar.
+# [Topic · Konu: Policy as code, admission control]
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: linkly-ladder-baseline
+  annotations:
+    policies.kyverno.io/description: >-
+      Merdivende öğrenilen kurallar: :latest yasak (P12-04), bellek limiti zorunlu (P00-08),
+      probe zorunlu (P00-04/P07-08), root olarak çalışma yasak.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: disallow-latest-tag
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: ["lvl*"]
+      validate:
+        message: ":latest etiketi yasak — sürüm belirsiz ve geri alınamaz olur (P12-04)"
+        pattern:
+          spec:
+            containers:
+              - image: "!*:latest"
+    - name: require-memory-limit
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: ["lvl*"]
+      validate:
+        message: "Bellek limiti zorunlu — limitsiz bir konteyner node'u düşürebilir (P00-08)"
+        pattern:
+          spec:
+            containers:
+              - resources:
+                  limits:
+                    memory: "?*"
+    - name: require-probes
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: ["lvl*"]
+      exclude:
+        any:
+          - resources:
+              kinds: [Pod]
+              selector:
+                matchLabels:
+                  app.kubernetes.io/name: migrate     # Job'ın readiness'i olmaz
+      validate:
+        message: "readinessProbe zorunlu — probe'suz pod hazır olmadan trafik alır (P00-04, P07-08)"
+        pattern:
+          spec:
+            containers:
+              - readinessProbe:
+                  "?*": "?*"

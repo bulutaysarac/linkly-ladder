@@ -41,19 +41,19 @@ Bir seviyeyi öğrendiysen hepsini öğrendin. `tools/lint-skeleton.sh` sapmayı
 |---|---|---|---|---|
 | 00 | [`00-naive`](00-naive) | Tek dosya, tek pod, bellek | — | Çöker, unutur, ölçeklenmez, kördür |
 | 01 | [`01-hardened`](01-hardened) | Tek süreç ama düzgün | mutex, probe, graceful shutdown, timeout, metrics | Hâlâ unutur ve ölçeklenmez |
-| 02 | `02-postgres` | Kalıcılık ve yatay ölçek | Postgres, stateless N replika | Her redirect DB'ye; pool biter |
-| 03 | `03-local-cache` | Süreç içi önbellek | LRU + TTL + singleflight | Pod'lar arası tutarsızlık |
-| 04 | `04-redis-cache` | Paylaşılan önbellek | Redis cache-aside | Redis SPOF, hot key |
-| 05 | `05-async-analytics` | Yazmayı okuma yolundan çıkar | Bounded kuyruk + batch writer | At-most-once kayıp |
-| 06 | `06-event-stream` | Olay akışı | Redpanda + consumer | Duplicate, lag, poison |
-| 07 | `07-services-autoscaling` | Servisleri ayır | 3 servis, HPA, KEDA | Darboğaz DB'ye kayar |
-| 08 | `08-rate-limiting` | Gürültülü komşu | Dağıtık limiter | Limiter'ın kendi bağımlılığı |
-| 09 | `09-database-scaling` | DB darboğazı | CNPG, Pooler, PITR | Replikasyon gecikmesi |
-| 10 | `10-resilience` | Hata izolasyonu | timeout, retry, breaker, shedding | Ayar karmaşıklığı |
-| 11 | `11-observability-deep` | Neden yavaş? | trace, exemplar, SLO, profil | Sampling, kardinalite |
-| 12 | `12-delivery` | Güvenli dağıtım | Argo CD, Rollouts canary | Migration/rollback uyumu |
-| 13 | `13-security-tenancy` | Kim, neye, ne kadar | JWT, RLS, NetworkPolicy, Kyverno | Operasyonel sürtünme |
-| 14 | `14-modern` | Son hal | Redis HA, L1+L2, gRPC, kapasite modeli | "Yolun devamı" listesi |
+| 02 | [`02-postgres`](02-postgres) | Kalıcılık ve yatay ölçek | Postgres, stateless N replika | Her redirect DB'ye; pool biter |
+| 03 | [`03-local-cache`](03-local-cache) | Süreç içi önbellek | LRU + TTL + singleflight | Pod'lar arası tutarsızlık |
+| 04 | [`04-redis-cache`](04-redis-cache) | Paylaşılan önbellek | Redis cache-aside | Redis SPOF, hot key |
+| 05 | [`05-async-analytics`](05-async-analytics) | Yazmayı okuma yolundan çıkar | Bounded kuyruk + batch writer | At-most-once kayıp |
+| 06 | [`06-event-stream`](06-event-stream) | Olay akışı | Redpanda + consumer | Duplicate, lag, poison |
+| 07 | [`07-services-autoscaling`](07-services-autoscaling) | Servisleri ayır | 3 servis, HPA, KEDA | Darboğaz DB'ye kayar |
+| 08 | [`08-rate-limiting`](08-rate-limiting) | Gürültülü komşu | Dağıtık limiter | Limiter'ın kendi bağımlılığı |
+| 09 | [`09-database-scaling`](09-database-scaling) | DB darboğazı | CNPG, Pooler, PITR | Replikasyon gecikmesi |
+| 10 | [`10-resilience`](10-resilience) | Hata izolasyonu | timeout, retry, breaker, shedding | Ayar karmaşıklığı |
+| 11 | [`11-observability-deep`](11-observability-deep) | Neden yavaş? | trace, exemplar, SLO, profil | Sampling, kardinalite |
+| 12 | [`12-delivery`](12-delivery) | Güvenli dağıtım | Argo CD, Rollouts canary | Migration/rollback uyumu |
+| 13 | [`13-security-tenancy`](13-security-tenancy) | Kim, neye, ne kadar | JWT, RLS, NetworkPolicy, Kyverno | Operasyonel sürtünme |
+| 14 | [`14-modern`](14-modern) | Son hal | Redis HA, L1+L2, gRPC, kapasite modeli | "Yolun devamı" listesi |
 
 ## Her seviyede aynı komutlar
 
@@ -75,9 +75,8 @@ make verify-prev  # önceki seviyenin sorunları burada çözülmüş mü?
 | `platform/` (kind 4 node, Calico, ingress, Prometheus, Grafana, Loki, Alloy, 16 dashboard) | ✅ çalışıyor |
 | `ladder.mk`, `tools/lint-skeleton.sh`, `tools/newlevel.sh`, `tools/ladder-matrix` | ✅ |
 | `docs/` (API kontratı, seviye şablonu, sorun şablonu, ADR'ler) | ✅ |
-| `00-naive` + 10 reproduce scripti | ✅ hepsi gerçek cluster'da doğrulandı |
-| `01-hardened` + 8 reproduce scripti + birim testler | ✅ 8/8 reproduce oluyor; `make verify-prev` tam yeşil |
-| `02-postgres` … `14-modern` | ⏳ sırada |
+| 15 seviyenin tamamı (`00-naive` … `14-modern`) | ✅ kod + deploy + README + reproduce scriptleri yazıldı |
+| Doğrulama (`make repro`, `make verify-prev`) | 🔄 00/01/02 tam doğrulandı, 03+ sürüyor |
 
 ## Faz A ölçüm sonuçları
 
@@ -93,13 +92,30 @@ make verify-prev  # önceki seviyenin sorunları burada çözülmüş mü?
 tepe heap **185 MB / 62 872 link** → OOMKilled · sağlık ucu iş zincirine sokulunca
 **77 readiness Unhealthy** olayı (pod ölmeden Endpoints'ten düşüyor).
 
+## Sayılarla
+
+| | |
+|---|---|
+| Seviye | 15 (`00-naive` … `14-modern`) |
+| Reproduce scripti | **108** (`PNN-XX.sh`, her biri REPRODUCED/NOT-REPRODUCED döner) |
+| `TRAP_*` alıştırma bayrağı | 33 |
+| Go satırı (yorumlar dahil) | ~58 000 |
+| Türkçe README | ~4 800 satır |
+| Paylaşılan Grafana dashboard'u | 16 (`$level` dropdown'lı, tek set) |
+| k6 senaryosu · chaos şablonu | 9 · 10 |
+
 ## Kurulum
 
 ```bash
 brew install kind helm k6 kustomize jq
 # Docker Desktop: 6 CPU / 10 GB (Settings → Resources)
-cd platform && make minimal
+cd platform && make minimal          # 00-05 için yeterli
+make keda cnpg chaos                 # 06-10
+make tempo argo security             # 11-14
 ```
+
+Her seviye kendi bileşenlerini `deploy/` içinde taşır; platform yalnızca **operatörleri ve
+gözlemlenebilirlik yığınını** kurar.
 
 Kurumsal ağdaysan (Cloudflare Gateway / Zscaler gibi TLS araya girmesi) `make cluster` adımı kök CA'yı
 otomatik olarak node'lara kurar (`platform/kind/trust-ca.sh`); olmadan image çekilemez.

@@ -1,0 +1,142 @@
+# Argo Rollouts — redirect-svc için canary + OTOMATİK ANALİZ.
+#
+# EN: A rolling update is "replace pods and hope". A canary with analysis is "replace 10%, MEASURE,
+#     then decide". The difference is not the traffic split — it is that a machine, not a human
+#     watching a dashboard, makes the promote/abort decision within seconds. P12-01 measures
+#     exactly this: the same bad version, with and without analysis.
+# TR: Rolling update "pod'ları değiştir ve umut et"tir. Analizli canary ise "%10'unu değiştir,
+#     ÖLÇ, sonra karar ver"dir. Fark trafik dağılımı değil — kararı bir dashboard'a bakan insanın
+#     değil, saniyeler içinde bir MAKİNENİN vermesidir. P12-01 tam olarak bunu ölçüyor: aynı kötü
+#     sürüm, analizli ve analizsiz.
+# [Topic · Konu: Canary, otomatik geri alma]
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: redirect-success-rate
+spec:
+  args:
+    - name: namespace
+  metrics:
+    - name: error-rate
+      # İlk ölçümden önce 30 sn bekle: yeni pod'un ısınması ve metriklerin toplanması için.
+      # Bu bekleme olmadan analiz, HENÜZ VERİ YOKKEN karar vermeye çalışır.
+      initialDelay: 30s
+      interval: 20s
+      count: 4
+      successCondition: result[0] <= 0.02
+      failureLimit: 1
+      provider:
+        prometheus:
+          address: http://kps-kube-prometheus-stack-prometheus.monitoring.svc:9090
+          query: |
+            sum(rate(http_requests_total{namespace="{{args.namespace}}",route="/{code}",code=~"5.."}[1m]))
+            /
+            clamp_min(sum(rate(http_requests_total{namespace="{{args.namespace}}",route="/{code}"}[1m])), 0.001)
+    - name: latency-p99
+      initialDelay: 30s
+      interval: 20s
+      count: 4
+      successCondition: result[0] <= 0.3
+      failureLimit: 2
+      provider:
+        prometheus:
+          address: http://kps-kube-prometheus-stack-prometheus.monitoring.svc:9090
+          query: |
+            histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace="{{args.namespace}}",route="/{code}"}[2m])) by (le))
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: redirect
+  labels:
+    app.kubernetes.io/name: redirect
+spec:
+  replicas: 3
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redirect
+  strategy:
+    canary:
+      # Adımlar: önce %10 ile ANALİZ, sonra %50, sonra tam. Her duraklama bir KARAR NOKTASIDIR.
+      steps:
+        - setWeight: 10
+        - analysis:
+            templates:
+              - templateName: redirect-success-rate
+            args:
+              - name: namespace
+                value: lvl14
+        - setWeight: 50
+        - pause: { duration: 30s }
+        - analysis:
+            templates:
+              - templateName: redirect-success-rate
+            args:
+              - name: namespace
+                value: lvl14
+      # Analiz başarısız olursa OTOMATİK geri al. İnsan müdahalesi beklemek, hatanın
+      # yayılmasına izin vermektir.
+      abortScaleDownDelaySeconds: 30
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: redirect
+    spec:
+      terminationGracePeriodSeconds: 45
+      containers:
+        - name: redirect
+          image: localhost:5001/linkly-ladder/14-redirect-svc:IMAGE_TAG
+          ports: [{ name: http, containerPort: 8080 }]
+          envFrom: [{ secretRef: { name: postgres } }]
+          env:
+            - { name: SERVICE_NAME, value: redirect }
+            - { name: REDIS_ADDR, value: "redis:6379" }
+            - { name: KAFKA_BROKERS, value: "redpanda:9092" }
+            - { name: DB_MAX_CONNS, value: "20" }
+            - { name: SHUTDOWN_GRACE, value: "20s" }
+            - { name: OTLP_ENDPOINT, value: "alloy.monitoring.svc:4317" }
+            - { name: TRACE_SAMPLE_PCT, value: "5" }
+            - { name: LOG_LEVEL, value: "info" }
+            - name: DATABASE_URL_RO
+              valueFrom: { secretKeyRef: { name: postgres, key: DATABASE_URL_RO } }
+            - { name: STICKY_WINDOW, value: "2s" }
+            - { name: RATE_LIMIT_WINDOW, value: "10s" }
+            - { name: RATE_LIMIT_PER_IP, value: "300" }
+            - { name: RATE_LIMIT_PER_TENANT, value: "2000" }
+            - { name: TRUSTED_PROXY_HOPS, value: "1" }
+            # API anahtarları: üretimde bir sır yöneticisinden ya da veritabanından gelir.
+            # Burada Secret'tan — ve o Secret artık SealedSecret ile şifreli git'te (P13-04).
+            - name: API_KEYS
+              valueFrom: { secretKeyRef: { name: linkly-api-keys, key: API_KEYS } }
+            # Yönlendirme PUBLIC bir uçtur: kısa linke tıklayan kişinin API anahtarı olmaz.
+            # Kimlik doğrulama YİNE DE kurulu (anahtar gönderilirse kiracı ve tier çözülür);
+            # yalnızca ZORUNLU değil. "Herkese açık" ile "kimliksiz" aynı şey değildir.
+            - { name: AUTH_REQUIRED, value: "false" }
+            - { name: TIER_LIMITS, value: "free=100,pro=1000,enterprise=5000" }
+            - { name: RESOLVE_DNS, value: "true" }
+            - { name: NOT_FOUND_LIMIT, value: "50" }
+            # L1+L2: en sıcak anahtarlar pod belleğinde. TTL kısa ve bu BİLİNÇLİ —
+            # pub/sub yayını kaçarsa bayatlık penceresi tam olarak bu kadar (P14-02).
+            - { name: L1_ENABLED, value: "true" }
+            - { name: L1_CAPACITY, value: "5000" }
+            - { name: L1_TTL, value: "10s" }
+            - { name: INVALIDATION_CHANNEL, value: "linkly:invalidate" }
+            - { name: DEP_TIMEOUT, value: "2s" }
+            - { name: DEP_MAX_CONCURRENT, value: "24" }
+            - { name: SHED_MAX_INFLIGHT, value: "200" }
+            # P12-01: "kötü sürüm" bu değişkenle üretilir (varsayılan 0 = sağlıklı)
+            - { name: BAD_VERSION_ERROR_PCT, value: "0" }
+          resources:
+            requests: { cpu: 150m, memory: 64Mi }
+            limits: { memory: 256Mi }
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 2
+            failureThreshold: 2
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 6
+          lifecycle: { preStop: { sleep: { seconds: 5 } } }

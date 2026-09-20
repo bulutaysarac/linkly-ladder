@@ -1,0 +1,139 @@
+# SLO ve çok pencereli burn-rate alarmları — ELLE yazıldı.
+#
+# EN: A generator (Sloth, etc.) would hide the arithmetic behind an abstraction. The arithmetic IS
+#     the lesson, so it is written out here.
+#
+#     An SLO is not a target you hope to hit; it is a BUDGET you are allowed to spend.
+#     99.9% over 30 days = 43 minutes of errors are ACCEPTABLE. Burn rate asks: how fast are we
+#     spending that budget compared to how fast we are allowed to?
+#       burn rate 1  = spending exactly at budget; the budget lasts exactly 30 days
+#       burn rate 14 = the whole 30-day budget is gone in ~2 days  → page someone NOW
+#       burn rate 6  = gone in ~5 days                             → page, but less violently
+#       burn rate 1  = gone in 30 days                             → open a ticket, fix this week
+#
+#     Why TWO windows per alert? The long window says "this is big enough to matter"; the short
+#     window says "it is STILL happening". Without the short window the alert keeps firing long
+#     after recovery; without the long one it fires on every 30-second blip. This is exactly the
+#     failure of a plain threshold alert (P11-04).
+# TR: Bir üreteç (Sloth vb.) aritmetiği bir soyutlamanın arkasına saklardı. Aritmetiğin KENDİSİ
+#     ders olduğu için burada açıkça yazıldı.
+#
+#     SLO, tutturmayı umduğun bir hedef değil; harcamana izin verilen bir BÜTÇEDİR.
+#     30 günde %99.9 = 43 dakikalık hata KABUL EDİLEBİLİR. Burn rate şunu sorar: bu bütçeyi ne
+#     hızla harcıyoruz, ne hızla harcayabileceğimize kıyasla?
+#       burn rate 1  = tam bütçe hızında; bütçe tam 30 günde biter
+#       burn rate 14 = 30 günlük bütçe ~2 günde biter  → ŞİMDİ birini uyandır
+#       burn rate 6  = ~5 günde biter                  → uyandır ama daha sakin
+#       burn rate 1  = 30 günde biter                  → ticket aç, bu hafta düzelt
+#
+#     Neden alarm başına İKİ pencere? Uzun pencere "bu yeterince büyük" der; kısa pencere
+#     "HÂLÂ oluyor" der. Kısa pencere olmadan alarm, düzeldikten çok sonra bile çalmaya devam
+#     eder; uzun pencere olmadan her 30 saniyelik sıçramada çalar. Düz eşik alarmının başarısızlığı
+#     tam olarak budur (P11-04).
+# [Topic · Konu: SLO, error budget, multi-window burn rate]
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: linkly-slo
+  labels:
+    app.kubernetes.io/name: linkly
+    release: kps
+spec:
+  groups:
+    - name: linkly-slo-sli
+      interval: 30s
+      rules:
+        # SLI: hata oranı. Her pencere için ayrı bir kayıt kuralı — alarmlar bunları kullanır,
+        # böylece sorgu tek yerde tanımlı kalır ve alarmlar okunabilir olur.
+        - record: slo:sli_error:ratio_rate5m
+          expr: |
+            sum(rate(http_requests_total{namespace="lvl14",route="/{code}",code=~"5.."}[5m]))
+            /
+            clamp_min(sum(rate(http_requests_total{namespace="lvl14",route="/{code}"}[5m])), 0.001)
+          labels: { sloth_slo: redirect-availability }
+        - record: slo:sli_error:ratio_rate30m
+          expr: |
+            sum(rate(http_requests_total{namespace="lvl14",route="/{code}",code=~"5.."}[30m]))
+            /
+            clamp_min(sum(rate(http_requests_total{namespace="lvl14",route="/{code}"}[30m])), 0.001)
+          labels: { sloth_slo: redirect-availability }
+        - record: slo:sli_error:ratio_rate1h
+          expr: |
+            sum(rate(http_requests_total{namespace="lvl14",route="/{code}",code=~"5.."}[1h]))
+            /
+            clamp_min(sum(rate(http_requests_total{namespace="lvl14",route="/{code}"}[1h])), 0.001)
+          labels: { sloth_slo: redirect-availability }
+        - record: slo:sli_error:ratio_rate6h
+          expr: |
+            sum(rate(http_requests_total{namespace="lvl14",route="/{code}",code=~"5.."}[6h]))
+            /
+            clamp_min(sum(rate(http_requests_total{namespace="lvl14",route="/{code}"}[6h])), 0.001)
+          labels: { sloth_slo: redirect-availability }
+        # Hata bütçesi: 1 - hedef. %99.9 → 0.001
+        - record: slo:error_budget:ratio
+          expr: vector(0.001)
+          labels: { sloth_slo: redirect-availability }
+        # Kalan bütçe (30 günlük pencere) — panelde yüzde olarak gösterilir.
+        - record: slo:period_error_budget_remaining:ratio
+          expr: |
+            1 - (
+              (sum(increase(http_requests_total{namespace="lvl14",route="/{code}",code=~"5.."}[30d]))
+               / clamp_min(sum(increase(http_requests_total{namespace="lvl14",route="/{code}"}[30d])), 1))
+              / 0.001
+            )
+          labels: { sloth_slo: redirect-availability }
+
+    - name: linkly-slo-alerts
+      rules:
+        # PAGE: hızlı yanma. 1 saatlik pencere 14x, 5 dakikalık pencere de 14x aşarsa.
+        # 14.4x → 30 günlük bütçenin %2'si 1 saatte gider. Bu, gece 3'te uyandırmayı hak eder.
+        - alert: LinklyRedirectErrorBudgetBurnFast
+          expr: |
+            slo:sli_error:ratio_rate1h{sloth_slo="redirect-availability"} > (14.4 * 0.001)
+            and
+            slo:sli_error:ratio_rate5m{sloth_slo="redirect-availability"} > (14.4 * 0.001)
+          for: 2m
+          labels:
+            severity: page
+            slo: redirect-availability
+          annotations:
+            summary: "Hata bütçesi HIZLA tükeniyor (14.4x)"
+            description: "1s ve 5dk pencerelerinin ikisi de 14.4x burn rate üstünde. 30 günlük bütçenin %2'si son 1 saatte harcandı."
+            runbook: "Önce son dağıtıma bak (12 · Rollout), sonra bağımlılıklara (11 · Resilience → breaker state)."
+        # PAGE: orta hız. 6 saat 6x + 30 dakika 6x.
+        - alert: LinklyRedirectErrorBudgetBurnMedium
+          expr: |
+            slo:sli_error:ratio_rate6h{sloth_slo="redirect-availability"} > (6 * 0.001)
+            and
+            slo:sli_error:ratio_rate30m{sloth_slo="redirect-availability"} > (6 * 0.001)
+          for: 15m
+          labels:
+            severity: page
+            slo: redirect-availability
+          annotations:
+            summary: "Hata bütçesi orta hızda tükeniyor (6x)"
+            description: "6s ve 30dk pencereleri 6x burn rate üstünde — bütçe ~5 günde biter."
+        # TICKET: yavaş kanama. Uyandırmaz ama görmezden de gelinmez.
+        - alert: LinklyRedirectErrorBudgetBurnSlow
+          expr: |
+            slo:sli_error:ratio_rate6h{sloth_slo="redirect-availability"} > (1 * 0.001)
+            and
+            slo:sli_error:ratio_rate30m{sloth_slo="redirect-availability"} > (1 * 0.001)
+          for: 1h
+          labels:
+            severity: ticket
+            slo: redirect-availability
+          annotations:
+            summary: "Hata bütçesi yavaş tükeniyor (1x)"
+            description: "Bu hızda bütçe 30 günde biter. Uyandırmıyoruz; bu hafta düzeltilmeli."
+        # KARŞILAŞTIRMA için: klasik eşik alarmı. P11-04 bunun neden kötü olduğunu ölçüyor.
+        # BİLEREK burada: iki alarmın aynı olaya nasıl farklı tepki verdiğini yan yana görmek için.
+        - alert: LinklyNaiveErrorRateThreshold
+          expr: |
+            slo:sli_error:ratio_rate5m{sloth_slo="redirect-availability"} > 0.01
+          labels:
+            severity: none
+            comparison: "naive-threshold"
+          annotations:
+            summary: "(karşılaştırma) 5 dakikalık hata oranı %1 üstünde"
+            description: "Bu alarm BİLEREK kötü: 30 saniyelik bir sıçramada çalar, yavaş kanamada susar."

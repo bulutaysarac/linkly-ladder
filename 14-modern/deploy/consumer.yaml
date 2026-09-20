@@ -1,0 +1,90 @@
+# analytics-consumer — AYRI süreç, AYRI deployment. P05-03'ün istediği izolasyon.
+# EN: Its own CPU limit, its own connection pool, its own restart policy and its own scaling
+#     decision. When it falls behind, the redirect path does not notice — that is the entire
+#     reason it exists as a separate binary rather than a goroutine.
+# TR: Kendi CPU limiti, kendi bağlantı havuzu, kendi yeniden başlatma politikası ve kendi
+#     ölçeklenme kararı. Geri kaldığında redirect yolu fark etmez — ayrı bir binary olmasının
+#     tek sebebi bu.
+apiVersion: v1
+kind: Service
+metadata:
+  name: analytics
+  labels:
+    app.kubernetes.io/name: analytics
+spec:
+  selector:
+    app.kubernetes.io/name: analytics
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: analytics
+  labels:
+    app.kubernetes.io/name: analytics
+spec:
+  # P06-03: tek partition olduğu için 1'den fazla tüketici İŞE YARAMAZ. Script bunu ölçüyor.
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: analytics
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: analytics
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: analytics
+          image: localhost:5001/linkly-ladder/14-analytics-consumer:IMAGE_TAG
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - secretRef:
+                name: postgres
+          env:
+            - name: KAFKA_BROKERS
+              value: redpanda:9092
+            - name: KAFKA_TOPIC
+              value: clicks
+            - name: KAFKA_DLQ_TOPIC
+              value: clicks-dlq
+            - name: KAFKA_GROUP
+              value: analytics
+            - name: CONSUMER_BATCH_TIMEOUT
+              value: "500ms"
+            - name: DB_MAX_CONNS
+              value: "10"          # kendi havuzu: uygulamanınkinden AYRI ve daha küçük
+            - name: SHUTDOWN_GRACE
+              value: "20s"
+            # TRAP'ler varsayılan kapalı: TRAP_COMMIT_BEFORE_WRITE · TRAP_NO_DLQ
+          resources:
+            requests: { cpu: 100m, memory: 64Mi }
+            limits: { memory: 256Mi }
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            failureThreshold: 6
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: analytics
+  labels:
+    app.kubernetes.io/name: analytics
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: analytics
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 10s
