@@ -1,0 +1,55 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  levels:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      # İskelet lint önce koşar: tekdüzelik bu projenin birinci kuralı, sapma = hata.
+      - name: İskelet lint (tüm seviyeler)
+        run: make lint-skeleton
+
+      # go.work kökünden `go build ./...` ÇALIŞMAZ (her seviye ayrı modül) — modüllerde tek tek dolaş.
+      - name: vet + test (her modül ayrı)
+        run: |
+          for l in [0-9][0-9]-*; do
+            echo "== $l"
+            (cd "$l" && go vet ./... && go test -race ./...) || exit 1
+          done
+
+      - name: Reproduce scriptleri sözdizimi
+        run: |
+          for f in [0-9][0-9]-*/problems/P*.sh platform/lib/*.sh tools/*.sh; do
+            bash -n "$f" || exit 1
+          done
+
+      - name: Dashboard üreteci
+        run: python3 platform/dashboards/gen.py && test "$(ls platform/dashboards/out/*.json | wc -l)" -ge 16
+
+      - name: k6 senaryoları derleniyor mu
+        run: |
+          curl -sL https://github.com/grafana/k6/releases/download/v0.54.0/k6-v0.54.0-linux-amd64.tar.gz | tar xz --strip-components=1
+          for s in platform/k6/scenarios/*.js; do ./k6 inspect "$s" >/dev/null || exit 1; done
+
+  images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Her seviyenin image'ı derleniyor mu
+        run: |
+          for l in [0-9][0-9]-*; do
+            for svc in "$l"/cmd/*/; do
+              s=$(basename "$svc")
+              echo "== $l / $s"
+              docker build -q --build-arg SVC="$s" -t "linkly-ladder/$(basename "$l")-$s:ci" "$l" || exit 1
+            done
+          done
