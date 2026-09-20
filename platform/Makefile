@@ -6,7 +6,7 @@ INGRESS_URL := https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/d
 METRICS_URL := https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
 SHELL := /bin/bash
 
-.PHONY: help cluster registry trust-ca core cnpg tempo obs dashboards minimal standard full chaos keda destroy status
+.PHONY: help cluster registry trust-ca core cnpg tempo argo obs dashboards minimal standard full chaos keda destroy status
 
 help: ## Hedefler
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -95,3 +95,14 @@ tempo: ## Grafana Tempo (trace) + Alloy OTLP alıcısı (11+)
 # NOT: Sloth (SLO→kural üreteci) BİLEREK kullanılmıyor. Üreteç, burn-rate matematiğini bir
 # soyutlamanın arkasına saklıyor; bu merdivende kuralları ELLE yazmak daha öğretici — pencereler,
 # çarpanlar ve neden iki pencere gerektiği 11-observability-deep/deploy/slo.yaml'da görünür.
+
+argo: ## Argo CD + Argo Rollouts + Gitea (cluster içi git) — 12+
+	@helm repo add argo https://argoproj.github.io/argo-helm >/dev/null 2>&1 || true
+	@helm repo add gitea-charts https://dl.gitea.com/charts/ >/dev/null 2>&1 || true
+	@helm repo update >/dev/null
+	@helm upgrade --install argocd argo/argo-cd -n argocd --create-namespace \
+	   -f helm/argocd.values.yaml --wait --timeout 15m
+	@helm upgrade --install rollouts argo/argo-rollouts -n argo-rollouts --create-namespace \
+	   --set controller.resources.requests.cpu=50m --set controller.resources.requests.memory=100Mi \
+	   --set dashboard.enabled=false --wait --timeout 10m
+	@echo "✔ argocd + rollouts → http://argocd.localtest.me (admin / $$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' 2>/dev/null | base64 -d))"

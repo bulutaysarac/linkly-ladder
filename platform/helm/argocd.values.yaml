@@ -1,0 +1,36 @@
+# Argo CD — laptop ölçeğinde kısılmış. HA yok, Dex yok, Redis HA yok.
+global:
+  domain: argocd.localtest.me
+configs:
+  params:
+    server.insecure: true   # ingress TLS'siz (13'te cert-manager gelecek)
+  cm:
+    # Uygulamaların GitOps kaynağı cluster İÇİNDEKİ Gitea olacak — GitHub'a bağımlı olmadan
+    # drift/self-heal derslerini koşabilmek için.
+    timeout.reconciliation: 30s
+server:
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    hostname: argocd.localtest.me
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+controller:
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 768Mi }
+repoServer:
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+applicationSet:
+  enabled: false
+notifications:
+  enabled: false
+dex:
+  enabled: false
+redis:
+  resources:
+    requests: { cpu: 25m, memory: 64Mi }
+    limits: { memory: 192Mi }
