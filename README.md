@@ -40,7 +40,7 @@ Bir seviyeyi öğrendiysen hepsini öğrendin. `tools/lint-skeleton.sh` sapmayı
 | # | Klasör | Slogan | Yeni gelen | Getirdiği acı |
 |---|---|---|---|---|
 | 00 | [`00-naive`](00-naive) | Tek dosya, tek pod, bellek | — | Çöker, unutur, ölçeklenmez, kördür |
-| 01 | `01-hardened` | Tek süreç ama düzgün | mutex, probe, graceful shutdown, timeout, metrics | Hâlâ unutur ve ölçeklenmez |
+| 01 | [`01-hardened`](01-hardened) | Tek süreç ama düzgün | mutex, probe, graceful shutdown, timeout, metrics | Hâlâ unutur ve ölçeklenmez |
 | 02 | `02-postgres` | Kalıcılık ve yatay ölçek | Postgres, stateless N replika | Her redirect DB'ye; pool biter |
 | 03 | `03-local-cache` | Süreç içi önbellek | LRU + TTL + singleflight | Pod'lar arası tutarsızlık |
 | 04 | `04-redis-cache` | Paylaşılan önbellek | Redis cache-aside | Redis SPOF, hot key |
@@ -76,7 +76,8 @@ make verify-prev  # önceki seviyenin sorunları burada çözülmüş mü?
 | `ladder.mk`, `tools/lint-skeleton.sh`, `tools/newlevel.sh`, `tools/ladder-matrix` | ✅ |
 | `docs/` (API kontratı, seviye şablonu, sorun şablonu, ADR'ler) | ✅ |
 | `00-naive` + 10 reproduce scripti | ✅ hepsi gerçek cluster'da doğrulandı |
-| `01-hardened` … `14-modern` | ⏳ sırada |
+| `01-hardened` + 8 reproduce scripti + birim testler | ✅ kod/deploy/README hazır, doğrulama sürüyor |
+| `02-postgres` … `14-modern` | ⏳ sırada |
 
 ## Kurulum
 

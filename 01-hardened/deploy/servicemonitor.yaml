@@ -1,0 +1,16 @@
+# P00-09: uygulama artık /metrics sunuyor; Prometheus'a nereden toplayacağını söylüyoruz.
+# Bu olmadan metrik "var" ama görünmez — App RED ve App Business panelleri boş kalır.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: linkly
+  labels:
+    app.kubernetes.io/name: linkly
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: linkly
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 10s

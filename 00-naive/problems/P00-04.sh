@@ -1,26 +1,44 @@
 #!/usr/bin/env bash
 source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.sh"
-# P00-04 · Rollout sırasında hata dalgası (readiness + graceful shutdown yok)
+# P00-04 · Rollout sırasında hata dalgası (readiness probe + graceful shutdown yok)
 #
-# ÖLÇÜM NOTU: yükü TEK VU ile veriyoruz. Nedeni P00-01: paralel istek mutex'siz map'i çökertir ve
-# hata oranı %99'a fırlar — o zaman "rollout mu çökme mi kaybettirdi?" ayırt edilemez. Tek VU'da
-# eşzamanlı yazım yok, yani ölçtüğümüz tek şey rollout penceresi.
+# ÖLÇÜM NOTU 1: yük TEK VU ile verilir (~1700 rps yeterli). Paralel istek P00-01'i tetikler, hata
+#   oranı %99'a fırlar ve "rollout mu çökme mi kaybettirdi?" ayırt edilemez.
+# ÖLÇÜM NOTU 2: k6'nın tek `http_req_failed` oranı yanıltır. Rollout'tan SONRAKİ 404'ler P00-02'dir
+#   (yeni pod'un belleği boş); rollout penceresinin kendisi 5xx üretir. Sadece 5xx'e bakıyoruz.
+# ÖLÇÜM NOTU 3: tek rollout YARIŞA bağlıdır — bazen eski pod son isteğini bitirir, yeni pod anında
+#   dinlemeye başlar ve pencere hiç yakalanmaz. Bu yüzden ROLLOUTS kez tekrarlıyoruz. Yarışı
+#   "bazen olmuyor" diye yok saymak, üretimde "bazen oluyor" demektir.
+ROLLOUTS=${ROLLOUTS:-3}
 ensure_healthy
 ensure_fresh_pod
-pod=$(pod_name); before=$(restarts_of "$pod")
-step "Tek akışlı sürekli redirect yükü (40 sn) — çökmeyi tetiklemeden"
-( k6run redirect --vus 1 --duration 40s >/tmp/p0004.k6 2>&1 ) &
+
+step "Yapısal durum: pod'un trafik almaya hazır olduğunu kim söylüyor?"
+probes=$(kubectl -n "$NS" get deploy linkly -o jsonpath='{.spec.template.spec.containers[0].readinessProbe}')
+prestop=$(kubectl -n "$NS" get deploy linkly -o jsonpath='{.spec.template.spec.containers[0].lifecycle.preStop}')
+note "readinessProbe: ${probes:-YOK — konteyner başlar başlamaz Endpoint'e ekleniyor}"
+note "preStop hook:   ${prestop:-YOK — pod, ingress'in listesinden düşmeden ölmeye başlıyor}"
+
+step "Tek akışlı sürekli redirect yükü (${ROLLOUTS} rollout boyunca)"
+dur=$(( 15 + ROLLOUTS * 15 ))
+( k6run redirect --vus 1 --duration "${dur}s" >/tmp/p0004.k6 2>&1 ) &
 kpid=$!
-sleep 14
-step "rollout restart — eski pod trafikten çekilmeden ölüyor mu, yeni pod hazır olmadan trafik alıyor mu?"
-kubectl -n "$NS" rollout restart deploy/linkly >/dev/null
+sleep 12
+for i in $(seq 1 "$ROLLOUTS"); do
+  step "rollout restart #$i/$ROLLOUTS"
+  kubectl -n "$NS" rollout restart deploy/linkly >/dev/null
+  kubectl -n "$NS" rollout status deploy/linkly --timeout=60s >/dev/null 2>&1 || true
+  sleep 5
+done
 wait $kpid || true
+
 fr=$(k6_failed_rate); reqs=$(k6_reqs); e5=$(k6_5xx); e404=$(k6_404)
 newpod=$(pod_name); crashed=$(restarts_of "$newpod")
 grafana_hint "15 · k6 → 'failed rate' ; 01 · Pods & Resources → pod değişimi aynı anda"
 note "k6: $reqs istek · 5xx=$e5 · 404=$e404 · toplam failed oranı=$fr  (detay: /tmp/p0004.k6)"
-note "AYRIM: 5xx = rollout penceresi (bu sorun) · 404 = yeni pod'un belleği boş (P00-02, ayrı sorun)."
-(( ${crashed:-0} > 0 )) && warn "bu tur sırasında süreç de çöktü (P00-01) — ölçüm karışmış olabilir, tekrar dene"
-note "Sebep: readinessProbe yok → yeni pod hazır olmadan Endpoint'e girer; preStop/graceful shutdown yok → eski pod işlenmekte olan istekleri bırakır."
-(( e5 > 0 )) && reproduced "rollout penceresinde $e5 istek 5xx aldı — kesintisiz dağıtım yok (ayrıca $e404 adet 404: P00-02)"
-not_reproduced "rollout sırasında hiç 5xx olmadı — probe + graceful shutdown var (01). (404=$e404 hâlâ P00-02'nin işi)"
+note "AYRIM: 5xx = rollout penceresi (bu sorun) · 404 = yeni pod'un belleği boş (P00-02, ayrı sorun)"
+(( ${crashed:-0} > 0 )) && warn "bu tur sırasında süreç de çöktü (P00-01) — ölçüm karışmış olabilir"
+(( e5 > 0 )) && reproduced "$ROLLOUTS rollout'ta $e5 istek 5xx aldı — kesintisiz dağıtım yok (ayrıca $e404 adet 404: P00-02)"
+warn "Bu turda 5xx yakalanmadı — yarışı kazandın. Yapısal boşluk (probe yok, preStop yok) duruyor:"
+warn "ROLLOUTS=6 make repro P=P00-04 ile tekrar dene, ya da 'kubectl delete pod --force' ile sert öldür."
+not_reproduced "rollout penceresinde 5xx görülmedi (404=$e404 hâlâ P00-02'nin işi)"

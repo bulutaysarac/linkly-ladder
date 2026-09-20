@@ -154,6 +154,16 @@ platform/
 | cert-manager, sealed-secrets, Kyverno | ilgili chart'lar | 13 | TLS, sır yönetimi, policy |
 | Linkerd, Gateway API, VPA | — | 14 | Opsiyonel/stretch |
 
+### 2.1.1 Bu ortamda karşılaşılan gerçek engeller (Faz A'da çözüldü)
+
+| Engel | Belirti | Çözüm |
+|---|---|---|
+| Kurumsal TLS araya girmesi (Cloudflare Gateway) | Node'lar image çekemiyor: `x509: certificate signed by unknown authority` | `platform/kind/trust-ca.sh` — kök CA'yı canlı el sıkışmadan çıkarıp her node'un güven deposuna kurar, containerd'yi yeniler. `make cluster` otomatik çağırır |
+| ingress-nginx yanlış node'a düşüyor | Host'tan 80'e bağlanılıyor ama yanıt yok (kind port map yalnızca control-plane'de) | `manifests/ingress-nginx-patch.yaml` — `nodeSelector: ingress-ready=true` + control-plane toleration |
+| cAdvisor `container` label'ı üretmiyor (cgroup v1) | `container!=""` filtreli tüm PromQL sorguları BOŞ döner | Tüm sorgular `image!="",image!~".*pause.*"` filtresine geçti (her iki ortamda da çalışır) |
+| `container_cpu_cfs_throttled_*` metriği hiç yok | Throttling paneli boş | Ortam sınırı olarak işaretlendi; **07'de (P07-04) alternatif ölçüm gerekecek** |
+| Docker Desktop yeniden başlatması | Tüm pod'lar `Unknown`, kubelet yeniden senkronize olana kadar | Beklemek yeterli; `make up` tekrar koşulabilir |
+
 ### 2.2 Profiller (16 GB Mac gerçeği)
 
 Docker Desktop'a **6 CPU / 10 GB** ver. Aynı anda tek seviye çalıştır (`make down` alışkanlığı).
@@ -676,13 +686,13 @@ Toplam ~3–4 ay. **Faz A bittiğinde planı yeniden gözden geçir**: bazı sev
 
 ## 8. İlk adım (Faz A checklist)
 
-- [ ] `brew install kind helm k6` · Docker Desktop 6 CPU / 10 GB
-- [ ] `platform/`: kind cluster (Calico, port map, registry) → ingress-nginx → metrics-server → kube-prometheus-stack (remote-write receiver, exemplars, sidecar) → Loki + Alloy
-- [ ] `ladder.mk` (tüm hedefler) + `tools/newlevel.sh` + `tools/lint-skeleton.sh`
-- [ ] `platform/k6/lib` + tüm senaryo adları (boş olanlar bile iskelet olarak) · `platform/dashboards/` tam set (`$level` değişkenli; panelleri erken seviyede boş kalır)
-- [ ] `platform/chaos/` şablon adları
-- [ ] `docs/LEVEL-TEMPLATE.md` (4–5 sabit metin dahil), `PROBLEM-TEMPLATE.md`, `API.md`
-- [ ] `00-naive`: kod + deploy + README + `problems/P00-01..10.sh` → hepsi REPRODUCED
-- [ ] `01-hardened`: kod + deploy + dashboards + README + `problems/` + `make verify-prev` → P00-01/04/05/06/07/09/10 NOT-REPRODUCED
+- [x] `brew install kind helm k6 kustomize` · Docker Desktop 6 CPU / 10 GB
+- [x] `platform/`: kind cluster (Calico, port map, registry) → ingress-nginx → metrics-server → kube-prometheus-stack (remote-write receiver, exemplars, sidecar) → Loki + Alloy
+- [x] `ladder.mk` (tüm hedefler) + `tools/newlevel.sh` + `tools/lint-skeleton.sh`
+- [x] `platform/k6/lib` + 9 senaryo · `platform/dashboards/` 16 dashboard (`$level` değişkenli)
+- [x] `platform/chaos/` 10 şablon
+- [x] `docs/LEVEL-TEMPLATE.md` (4–5 sabit metin dahil), `PROBLEM-TEMPLATE.md`, `API.md`, 2 ADR
+- [x] `00-naive`: kod + deploy + README + `problems/P00-01..10.sh` → hepsi REPRODUCED (gerçek cluster'da ölçüldü)
+- [x] `01-hardened`: kod (internal/{config,metrics,shortcode,store,httpapi,ratelimit}) + birim testler + deploy (probe/PDB/ServiceMonitor) + README + `problems/P01-01..08.sh` + SOLVES
 - [ ] `tools/ladder-matrix` v0 (iki seviye × 18 sorun) → kök README matrisi
 - [ ] Faz A retrospektifi: şablon/kontrat düzeltmeleri, sonra Faz B

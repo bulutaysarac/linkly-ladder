@@ -1,0 +1,13 @@
+# PodDisruptionBudget: gönüllü kesintilerde (node drain, cluster upgrade) en az 1 pod ayakta kalsın.
+# UYARI: 1 replikada bu BUDGET İŞE YARAMAZ — drain'i engeller ama kesintiyi önleyemez, çünkü
+# taşınacak başka pod yok. Gerçek koruma 02'de gelir (N replika). Burada olmasının sebebi,
+# "PDB koydum, güvendeyim" yanılgısını ölçülebilir kılmak: P01-03 tam olarak bunu gösteriyor.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: linkly
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: linkly

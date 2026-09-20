@@ -13,8 +13,7 @@ CONNS=${CONNS:-300}
 ensure_healthy
 pod=$(pod_name)
 step "Doğrudan pod'a bağlan (ingress'i atla), yarım bir istek gönder ve $WAIT sn bekle"
-kubectl -n "$NS" port-forward "pod/$pod" 18081:8080 >/dev/null 2>&1 &
-pf=$!; sleep 3
+port_forward "$pod" 18081
 result=$(python3 - "$WAIT" "$CONNS" <<'PYEOF'
 import socket, sys, time
 wait, conns = int(sys.argv[1]), int(sys.argv[2])
@@ -22,13 +21,17 @@ wait, conns = int(sys.argv[1]), int(sys.argv[2])
 s = socket.create_connection(("127.0.0.1", 18081), timeout=5)
 s.sendall(b"POST /api/links HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: 500\r\n\r\n{")
 time.sleep(wait)
+# Üç olası sonuç:
+#   b""          → sunucu bağlantıyı KAPATTI (timeout var)
+#   veri geldi   → sunucu YANIT verdi (408/413/503 — yine bir timeout/limit devrede)
+#   socket.timeout → sunucu hâlâ sessizce BEKLİYOR (hiçbir koruma yok) ← aradığımız hata
 s.settimeout(3)
 closed = False
 try:
-    if s.recv(1024) == b"":
-        closed = True          # sunucu kapattı → timeout var
+    data = s.recv(1024)
+    closed = True              # kapattı ya da yanıt verdi: her iki halde de kendini koruyor
 except socket.timeout:
-    closed = False             # hâlâ açık, sunucu bekliyor → timeout YOK
+    closed = False             # hâlâ açık ve sessiz → korumasız
 except OSError:
     closed = True
 s.close()
@@ -48,9 +51,9 @@ for c in held:
     except OSError: pass
 PYEOF
 )
-kill $pf 2>/dev/null || true; wait $pf 2>/dev/null || true
+port_forward_stop
 state=${result%% *}; held=${result##* }
-note "Yarım istek $WAIT sn sonra: sunucu bağlantıyı $([[ $state == CLOSED ]] && echo KAPATTI || echo AÇIK TUTUYOR)"
+note "Yarım istek $WAIT sn sonra: sunucu $([[ $state == CLOSED ]] && echo 'KAPATTI ya da yanıt verdi (koruma var)' || echo 'hâlâ sessizce BEKLİYOR (koruma yok)')"
 note "Aynı anda tutulabilen yarım bağlantı sayısı: $held (her biri bir goroutine + bir FD)"
 note "ReadHeaderTimeout/IdleTimeout olsaydı sunucu saniyeler içinde kapatırdı."
 grafana_hint "01 · Pods & Resources → 'Goroutine' (01'den itibaren; 00'da metrik yok → P00-09)"

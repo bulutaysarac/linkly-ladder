@@ -29,7 +29,20 @@ promq() { curl -sfG "$PROM_URL/api/v1/query" --data-urlencode "query=$1" | jq -r
 # Sorgu hiç seri döndürmüyor mu? (metrik yok)
 prom_absent() { [[ "$(curl -sfG "$PROM_URL/api/v1/query" --data-urlencode "query=$1" | jq -r '.data.result | length')" == "0" ]]; }
 
-create_link() { curl -sf -XPOST "$BASE_URL/api/links" -H 'Content-Type: application/json' -d "{\"url\":\"$1\"}" | jq -r .code; }
+# create_link: BAŞARISIZLIK NORMALDİR. Bir üst seviye aynı isteği bilerek reddedebilir (01'de
+# javascript: → 400). `curl -f` böyle bir durumda 22 ile çıkıp `set -e` yüzünden scripti öldürüyordu;
+# o zaman script "NOT-REPRODUCED" diyemiyor, ERROR veriyordu. Artık kod yoksa BOŞ döner.
+create_link() {
+  local body
+  body=$(curl -s -XPOST "$BASE_URL/api/links" -H 'Content-Type: application/json' \
+           -d "{\"url\":\"$1\"}" 2>/dev/null) || true
+  printf '%s' "$body" | jq -r '.code // empty' 2>/dev/null || true
+}
+# Oluşturma denemesinin HTTP durumu (reddedildi mi, neden?) — doğrulama testleri bunu okur.
+create_status() {
+  curl -s -o /dev/null -w '%{http_code}' -XPOST "$BASE_URL/api/links" \
+    -H 'Content-Type: application/json' -d "{\"url\":\"$1\"}" 2>/dev/null || echo 000
+}
 status_of()   { curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$BASE_URL/$1"; }
 header_of()   { curl -sI --max-time 5 "$BASE_URL/$1" | tr -d '\r' | awk -v h="$2" 'tolower($1)==tolower(h)":"{ $1=""; sub(/^ /,""); print }'; }
 
@@ -128,6 +141,22 @@ replicas_of() { kubectl -n "$NS" get deploy -l "$APP_SELECTOR" -o jsonpath='{.it
 peak_working_set_mb() { promq "max_over_time(max(container_memory_max_usage_bytes{namespace=\"$NS\",image!=\"\",image!~\".*pause.*\"})[${1:-15m}:15s]) / 1024 / 1024" | cut -d. -f1; }
 exit_code_of() { kubectl -n "$NS" get pod "$1" -o jsonpath='{.status.containerStatuses[0].lastState.terminated.exitCode}' 2>/dev/null; }
 working_set_mb() { promq "sum(container_memory_working_set_bytes{namespace=\"$NS\",image!=\"\",image!~\".*pause.*\"}) / 1024 / 1024" | cut -d. -f1; }
+
+# Pod'a doğrudan bağlan (ingress'i atla): "korumayı kim veriyor, uygulama mı önündeki katman mı?"
+# sorusunu ayırt etmek için şart. Temizlik ortak: `wait` öldürülen işin 143'ünü döndürür ve
+# `set -e` altında scripti sessizce öldürür — bu yüzden her yerde `|| true`.
+PF_PID=""
+port_forward() {
+  local pod=$1 lport=$2
+  kubectl -n "$NS" port-forward "pod/$pod" "$lport:8080" >/dev/null 2>&1 &
+  PF_PID=$!
+  for _ in $(seq 1 15); do
+    curl -sf -o /dev/null --max-time 2 "http://127.0.0.1:$lport/healthz" && break
+    curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$lport/" && break
+    sleep 1
+  done
+}
+port_forward_stop() { [[ -n "$PF_PID" ]] && { kill "$PF_PID" 2>/dev/null || true; wait "$PF_PID" 2>/dev/null || true; PF_PID=""; }; return 0; }
 
 pod_name()    { kubectl -n "$NS" get pod -l "$APP_SELECTOR" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null; }
 restarts_of() { kubectl -n "$NS" get pod "$1" -o jsonpath='{.status.containerStatuses[0].restartCount}' 2>/dev/null || echo 0; }

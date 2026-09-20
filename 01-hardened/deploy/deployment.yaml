@@ -1,0 +1,70 @@
+# Seviye 01: hâlâ TEK replika ve bellek içi store — ama artık probe'lu, graceful ve ölçülebilir.
+# Buradaki her satırın karşılığı 00'da ölçülmüş bir sorundur; yorumlar hangisi olduğunu söylüyor.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: linkly
+  labels:
+    app.kubernetes.io/name: linkly
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0        # P00-04: eski pod, yenisi hazır olmadan çekilmesin
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: linkly
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: linkly
+    spec:
+      # P00-04: SIGTERM sonrası süreç readiness'i düşürüp isteklerini bitirene kadar zaman tanı.
+      terminationGracePeriodSeconds: 40
+      containers:
+        - name: linkly
+          image: localhost:5001/linkly-ladder/01-linkly:IMAGE_TAG
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: SHUTDOWN_GRACE
+              value: "20s"
+            - name: RATE_LIMIT_PER_SEC
+              value: "5000"     # tek pod, yerel kova. 02'de bunun NEDEN yanlış olduğunu ölçeceğiz (P02-04)
+            - name: RATE_LIMIT_BURST
+              value: "10000"
+            # TRAP bayrakları varsayılan kapalı; README §7 açıklıyor. Açmak için:
+            #   kubectl -n lvl01 set env deploy/linkly TRAP_METRIC_LABEL_CODE=true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          # P00-04: readiness "trafik alabilirim" der. Kapatma sırasında ÖNCE bu düşer,
+          # pod Endpoints'ten çıkar, sonra sunucu kapanır.
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 2
+            timeoutSeconds: 2
+            failureThreshold: 2
+          # Liveness SADECE "süreç kurtarılamaz mı?" sorusunu sorar. Bağımlılık kontrolü BURAYA
+          # konmaz: bir Redis kesintisi tüm pod'ları restart fırtınasına sokar (P01-07 / P10-02).
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          # P00-04: pod, Endpoints'ten çıkması yayılana kadar hizmete devam etsin.
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
