@@ -1,0 +1,9 @@
+# target: app.kubernetes.io/name=postgres
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata: { name: pg-loss-50, namespace: ${NS} }
+spec:
+  action: loss
+  mode: all
+  selector: { namespaces: ["${NS}"], labelSelectors: { app.kubernetes.io/name: postgres } }
+  loss: { loss: "50", correlation: "25" }

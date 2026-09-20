@@ -1,0 +1,11 @@
+# target: app.kubernetes.io/part-of=linkly-ladder
+# node-freeze Chaos Mesh değil: uygulamanın koştuğu worker'ı docker pause ile dondurur (make chaos bunu YAML olarak
+# uygulayamaz; problems scripti doğrudan `docker pause kind-worker2` çağırır). Bu dosya adın kayıt altında olması için var.
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: node-freeze-doc, namespace: ${NS} }
+data:
+  howto: |
+    node=$(kubectl -n ${NS} get pod -l app.kubernetes.io/part-of=linkly-ladder -o jsonpath='{.items[0].spec.nodeName}')
+    docker pause $node     # ~40 s sonra NotReady, 5 dk sonra pod'lar evict
+    docker unpause $node

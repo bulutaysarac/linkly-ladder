@@ -1,0 +1,10 @@
+# target: app.kubernetes.io/name=analytics
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata: { name: consumer-kill-30s, namespace: ${NS} }
+spec:
+  action: pod-kill
+  mode: one
+  selector: { namespaces: ["${NS}"], labelSelectors: { app.kubernetes.io/name: analytics } }
+  duration: "10m"
+  scheduler: { cron: "@every 30s" }

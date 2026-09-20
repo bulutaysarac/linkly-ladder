@@ -1,0 +1,14 @@
+# kind'ın port map'i control-plane node'unda (80/443 → host). Controller başka node'a düşerse
+# host'tan hiçbir şey cevap vermez. Bu yama controller'ı ingress-ready=true node'una sabitler.
+spec:
+  template:
+    spec:
+      nodeSelector:
+        ingress-ready: "true"
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Equal
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/master
+          operator: Equal
+          effect: NoSchedule

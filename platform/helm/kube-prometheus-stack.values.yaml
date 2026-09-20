@@ -1,0 +1,84 @@
+# kube-prometheus-stack — Prometheus + Grafana + Alertmanager + KSM + node-exporter. Mac'e göre kısılmış.
+fullnameOverride: kps
+grafana:
+  adminPassword: ladder
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    hosts: [grafana.localtest.me]
+  defaultDashboardsEnabled: true
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      folderAnnotation: grafana_folder
+      provider:
+        foldersFromFilesStructure: true
+      searchNamespace: ALL
+    datasources:
+      enabled: true
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      uid: loki
+      url: http://loki.monitoring.svc:3100
+      access: proxy
+      jsonData:
+        derivedFields:
+          - name: trace_id
+            matcherRegex: '"trace_id":"(\w+)"'
+            url: '$${__value.raw}'
+            datasourceUid: tempo
+    - name: Tempo
+      type: tempo
+      uid: tempo
+      url: http://tempo.monitoring.svc:3200
+      access: proxy
+  grafana.ini:
+    dashboards:
+      min_refresh_interval: 5s
+    users:
+      default_theme: dark
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+prometheus:
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    hosts: [prometheus.localtest.me]
+  prometheusSpec:
+    retention: 2d
+    scrapeInterval: 15s
+    evaluationInterval: 15s
+    enableRemoteWriteReceiver: true          # k6 -o experimental-prometheus-rw
+    enableFeatures: [exemplar-storage]       # 11: exemplar → Tempo
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    resources:
+      requests: { cpu: 200m, memory: 512Mi }
+      limits: { memory: 1536Mi }
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          resources: { requests: { storage: 8Gi } }
+alertmanager:
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    hosts: [alertmanager.localtest.me]
+  alertmanagerSpec:
+    resources: { requests: { cpu: 10m, memory: 64Mi }, limits: { memory: 128Mi } }
+# kind'da bunlar localhost'a bağlı; hedefler kırmızı görünmesin
+kubeEtcd: { enabled: false }
+kubeControllerManager: { enabled: false }
+kubeScheduler: { enabled: false }
+kubeProxy: { enabled: false }
+prometheus-node-exporter:
+  resources: { requests: { cpu: 20m, memory: 32Mi }, limits: { memory: 128Mi } }
+kube-state-metrics:
+  resources: { requests: { cpu: 20m, memory: 64Mi }, limits: { memory: 256Mi } }
+prometheusOperator:
+  resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { memory: 256Mi } }

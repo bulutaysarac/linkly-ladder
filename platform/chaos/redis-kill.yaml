@@ -1,0 +1,8 @@
+# target: app.kubernetes.io/name=redis
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata: { name: redis-kill, namespace: ${NS} }
+spec:
+  action: pod-kill
+  mode: all
+  selector: { namespaces: ["${NS}"], labelSelectors: { app.kubernetes.io/name: redis } }

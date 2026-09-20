@@ -1,0 +1,8 @@
+# target: app.kubernetes.io/part-of=linkly-ladder
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata: { name: pod-kill-app, namespace: ${NS} }
+spec:
+  action: pod-kill
+  mode: one
+  selector: { namespaces: ["${NS}"], labelSelectors: { app.kubernetes.io/part-of: linkly-ladder } }

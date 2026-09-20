@@ -1,0 +1,10 @@
+# target: cnpg.io/instanceRole=replica
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata: { name: replica-delay, namespace: ${NS} }
+spec:
+  action: delay
+  mode: all
+  selector: { namespaces: ["${NS}"], labelSelectors: { cnpg.io/instanceRole: replica } }
+  delay: { latency: "3s" }
+  direction: from

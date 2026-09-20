@@ -1,0 +1,17 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: linkly
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: lvl00.localtest.me
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: linkly
+                port:
+                  name: http

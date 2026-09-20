@@ -1,0 +1,9 @@
+# target: app.kubernetes.io/name=redis
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata: { name: redis-delay-3s, namespace: ${NS} }
+spec:
+  action: delay
+  mode: all
+  selector: { namespaces: ["${NS}"], labelSelectors: { app.kubernetes.io/name: redis } }
+  delay: { latency: "3s", jitter: "300ms" }
