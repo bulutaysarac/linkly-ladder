@@ -76,8 +76,22 @@ make verify-prev  # önceki seviyenin sorunları burada çözülmüş mü?
 | `ladder.mk`, `tools/lint-skeleton.sh`, `tools/newlevel.sh`, `tools/ladder-matrix` | ✅ |
 | `docs/` (API kontratı, seviye şablonu, sorun şablonu, ADR'ler) | ✅ |
 | `00-naive` + 10 reproduce scripti | ✅ hepsi gerçek cluster'da doğrulandı |
-| `01-hardened` + 8 reproduce scripti + birim testler | ✅ kod/deploy/README hazır, doğrulama sürüyor |
+| `01-hardened` + 8 reproduce scripti + birim testler | ✅ 8/8 reproduce oluyor; `make verify-prev` tam yeşil |
 | `02-postgres` … `14-modern` | ⏳ sırada |
+
+## Faz A ölçüm sonuçları
+
+| | 00-naive | 01-hardened |
+|---|---|---|
+| Kendi sorunları | 10/10 REPRODUCED | 8/8 REPRODUCED |
+| `make verify-prev` | — | 7/7 NOT-REPRODUCED (P00-01/04/05/06/07/09/10) |
+| Bilerek açık bırakılan | — | P00-02 kalıcılık · P00-03 ölçek · P00-08 bellek → 02 |
+| Birim test | yok (bilerek) | `go test -race ./...` yeşil |
+
+Örnek ölçümler: 4 karakterlik kod 10 000 linkte **3 çakışma** (beklenen 3.4) · 3 replikada
+**%66 404** · rollout penceresinde **142×5xx** ayrı, restart sonrası **38 734×404** ayrı sayıldı ·
+tepe heap **185 MB / 62 872 link** → OOMKilled · sağlık ucu iş zincirine sokulunca
+**77 readiness Unhealthy** olayı (pod ölmeden Endpoints'ten düşüyor).
 
 ## Kurulum
 
