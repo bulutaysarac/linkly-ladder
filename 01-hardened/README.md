@@ -121,15 +121,22 @@ beklemek şart; beklemezsen tüm istekler tek pod'a düşer ve yanlış negatif 
 
 ### P01-03 · Tek replika + PDB = güvenlik yanılsaması
 
-**Belirti:** Node drain edildiğinde ya drain bloke olur ya da servis kesintiye uğrar. PDB
-"minAvailable: 1" diyor ama kimseyi kurtarmıyor.
+**Belirti:** İki uçlu açmaz. Normal `kubectl drain` **bloke olur** (`error when evicting pods ...:
+global timeout reached`), yani node bakımı yapamazsın. Zorlarsan servis kesintiye uğrar.
 **Neden:** PDB *gönüllü* kesintilerde en az N pod'un ayakta kalmasını ister. Tek replikada
-"ayakta kalacak başka pod" yok: ya budget drain'i engeller ya da pod ölür ve kesinti olur.
-Yüksek erişilebilirlik bir nesne değil, bir **yedeklilik** meselesidir. [Topic · Konu: HA, PDB, drain]
+`disruptionsAllowed=0`: ayakta kalacak başka pod yok, o yüzden her tahliye reddedilir.
+PDB erişilebilirlik **üretmez**; yalnızca var olan yedekliliği korur. Yedeklilik yoksa koruyacak
+bir şey de yoktur — sadece bakımı kilitler. [Topic · Konu: HA, PDB, yedeklilik]
 
 **Reproduce (adım adım):**
-1. `CONFIRM=1 make repro P=P01-03` — yük altında pod'un node'unu drain eder, sonra uncordon eder
-2. Script drain çıktısını ve k6'nın gördüğü 5xx sayısını basar
+1. `CONFIRM=1 make repro P=P01-03` — yük altında iki ucu da gösterir:
+   **(a)** normal drain → `disruptionsAllowed=0` yüzünden tahliye reddedilir, drain timeout'a düşer
+   **(b)** operatörün gerçekte yaptığı: zorla sil → pod ölür, yedeği yok → 5xx
+2. Sonunda node uncordon edilir
+
+**İlk koşuşta çıkan gerçek çıktı:** `minAvailable=1 · izin verilen kesinti=0` →
+`error when evicting pods/"linkly-…" -n "lvl01": global timeout reached: 45s`. Yani PDB sözünü
+tuttu: kimse ölmedi — ama node'a da dokunamadın.
 
 **Grafana:** `02 · App RED` → 5xx; `01 · Pods & Resources` → "Pod fazları" (Pending).
 **Nerede çözülüyor:** 02 (3 replika + anti-affinity). PDB'nin kendisi 02'de anlam kazanır.
@@ -142,8 +149,13 @@ Yüksek erişilebilirlik bir nesne değil, bir **yedeklilik** meselesidir. [Topi
 **Neden:** Store'da eviction yok, TTL yok, üst sınır yok. [Topic · Konu: Bounded resources]
 
 **Reproduce (adım adım):**
-1. `make repro P=P01-04` — 60 sn link üretir, öncesi/sonrası heap ve `links_total` okur
+1. `make repro P=P01-04` — 90 sn link üretir; **tepe** heap, tepe `links_total` ve tepe working set okur
 2. Uzun sürüm: `DURATION=240s URL_SIZE=8000 make repro P=P01-04` → OOMKilled (P00-08'in aynısı, 256Mi limitte)
+
+**Ölçüm notu:** "Öncesi/sonrası heap" ölçmek yanıltır — süreç test sırasında OOM olup yeniden
+doğarsa son ölçüm sıfırdan başlar ve *büyüme yok* gibi görünür (ilk denemede tam olarak bu oldu,
+script NOT-REPRODUCED verdi). Bu yüzden pencere içindeki **tepe** değere ve `OOMKilled` kanıtına
+bakıyoruz. Aynı tuzağa P00-08'de de düşmüştük: **anlık ölçüm, ölüp dirilen bir süreci göremez.**
 
 **Grafana:** `01 · Pods & Resources` → "Heap alloc", "Bellek working set" (limit çizgisiyle).
 **Nerede çözülüyor:** 02 (durum DB'de) · 03 (bounded LRU). 01'in kazancı: eğriyi görüp **alarm
@@ -189,18 +201,31 @@ metrikten trace'e atlayacağız — kardinalite ödemeden).
 
 ### P01-07 · TRAP · Sağlık uçlarını iş zincirinin arkasına koymak
 
-**Belirti:** Trafik dalgasında pod'lar restart etmeye başlar. Uygulama aslında sağlıklıdır;
-öldüren şey **probe'un kendisidir**.
+**Belirti:** Trafik dalgasında pod **kendi yükü yüzünden** load balancer'dan düşer, yeterince
+uzun sürerse restart eder. Uygulama aslında sağlıklıdır; onu devre dışı bırakan **probe'un kendisidir**.
 **Neden:** `/healthz` ve `/readyz` iş zincirine (hız sınırı + timeout) dahil edilirse, yük arttığında
 probe 429/timeout alır → kubelet konteyneri öldürür → yük kalan pod'lara biner → onlar da ölür.
 Yük artışı kendi kendine bir **kesintiye** dönüşür. [Topic · Konu: Probe semantiği, kaskad]
 
 **Reproduce (adım adım):**
-1. `make repro P=P01-07` — `TRAP_LIVENESS_STRICT=true` + limiti 30 rps yapar, 60 sn yük verir
-2. Restart sayısını ve `Liveness probe failed` olaylarını sayar, sonra tuzağı kapatır
+1. `make repro P=P01-07` — `TRAP_LIVENESS_STRICT=true` + limiti 30 rps yapar, **150 sn** yük verir
+2. `Unhealthy` olaylarını (liveness ve readiness ayrı ayrı) ve restart sayısını sayar, sonra tuzağı kapatır
 3. Birim test karşılığı: `internal/httpapi/trap_test.go` — tuzak kapalıyken `/healthz` 200, açıkken 429
 
-**Grafana:** `01 · Pods & Resources` → "Restart sayısı"; `10 · Rate limit` → "reject/s".
+**Ölçüm notu:** Yük, probe'un **toleransından uzun** sürmeli. Bu deployment'ta liveness
+`failureThreshold: 6 × periodSeconds: 10` = 60 sn tolerans; ilk denemede yükü tam 60 sn verdiğimiz
+için restart olmadı ve script NOT-REPRODUCED dedi. Tolerans, tasarımın parçasıdır: probe'un ne
+kadar sabırlı olduğunu bilmeden "probe çalışıyor mu?" sorusuna cevap veremezsin.
+Ayrıca readiness de aynı kovadan içer: pod daha restart olmadan **Endpoints'ten düşer**.
+
+**Ölçülen tur (150 sn yük, 30 rps limit):** `Unhealthy(readiness) 77 olay · Unhealthy(liveness) 2 olay · restart 0`.
+Dikkat: baskın etki **restart değil, readiness**. Pod daha ölmeden Endpoints'ten düşüyor — yani
+ingress ona trafik göndermeyi bırakıyor. Tek replikada bu doğrudan **kesinti** demek; N replikada
+ise düşen pod'un yükü diğerlerine biner, onların da probe'ları düşer: **kaskad**. Liveness'ın restart
+üretmesi için 6 ardışık hata (60 sn) gerekiyordu — yani en görünür belirti (restart) aslında en
+*geç* gelen belirti. "Restart yok, demek ki sorun yok" demek bu yüzden yanlış.
+
+**Grafana:** `01 · Pods & Resources` → "Restart sayısı" ve **"hazır endpoint sayısı"**; `10 · Rate limit` → "reject/s".
 **Düzeltme (varsayılan):** Sağlık uçları zincirin dışında. Liveness yalnızca "süreç kurtarılamaz mı?"
 sorusunu sorar; **bağımlılık kontrolü liveness'a girmez** — aynı tuzağın büyük hâli 10'da (P10-02).
 

@@ -4,6 +4,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 ensure_healthy
 need_confirm "replica sayısı geçici olarak 3'e çıkacak"
 orig=$(replicas_of)
+on_cleanup "kubectl -n \"$NS\" scale deploy -l \"$APP_SELECTOR\" --replicas=$orig"
 scale 3; wait_endpoints 3
 code=$(create_link "https://example.com/sharded")
 miss=0; tot=60

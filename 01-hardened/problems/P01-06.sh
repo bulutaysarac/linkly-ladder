@@ -5,6 +5,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # üretir; Prometheus'un belleği seri sayısıyla büyür ve bir noktada sorgular da Prometheus da yavaşlar.
 ensure_healthy
 N=${N:-400}
+on_cleanup 'kubectl -n "$NS" set env deploy/linkly TRAP_METRIC_LABEL_CODE-'
 step "Tuzağı aç: TRAP_METRIC_LABEL_CODE=true"
 kubectl -n "$NS" set env deploy/linkly TRAP_METRIC_LABEL_CODE=true >/dev/null
 kubectl -n "$NS" rollout status deploy/linkly --timeout=120s >/dev/null

@@ -51,6 +51,22 @@ restarts()    { kpods -o jsonpath='{range .items[*]}{.status.containerStatuses[0
 last_reason() { kpods -o jsonpath='{range .items[*]}{.status.containerStatuses[0].lastState.terminated.reason}{"\n"}{end}' | grep -v '^$' | sort -u | paste -sd, -; }
 wait_ready()  { for d in $(kubectl -n "$NS" get deploy -o name); do kubectl -n "$NS" rollout status "$d" --timeout=180s >/dev/null; done; }
 
+# Deney sonrası temizlik GARANTİSİ. Bir reproduce scripti yarıda hata verirse cluster'ı bozuk
+# bırakmamalı: cordon'lu node, düşük replika, açık kalmış TRAP env'i sonraki deneyleri sessizce
+# çürütür. Gerçekte oldu: P01-03 drain'de hata verip uncordon'a ulaşamadı, 3 node cordon'lu kaldı
+# ve P01-07 "rollout timeout" diye patladı — sebebi kendi kodunda değil, ÖNCEKİ deneydeydi.
+CLEANUP_CMDS=()
+on_cleanup() { CLEANUP_CMDS+=("$1"); }
+run_cleanup() {
+  local c
+  for (( i=${#CLEANUP_CMDS[@]}-1 ; i>=0 ; i-- )); do
+    c="${CLEANUP_CMDS[i]}"
+    eval "$c" >/dev/null 2>&1 || true
+  done
+  CLEANUP_CMDS=()
+}
+trap run_cleanup EXIT INT TERM
+
 # Gerçekten hizmet veriyor mu? (Running olmak yetmez: crashloop'taki pod da anlık Running görünür.)
 serving() {
   local c

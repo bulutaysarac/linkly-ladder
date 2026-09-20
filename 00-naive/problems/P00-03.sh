@@ -5,6 +5,7 @@ ensure_healthy
 step "3 replikaya çık, 1 link oluştur, 30 kez oku"
 need_confirm "replica sayısı değişecek"
 orig=$(replicas_of)
+on_cleanup "kubectl -n \"$NS\" scale deploy -l \"$APP_SELECTOR\" --replicas=$orig"
 scale 3
 wait_endpoints 3
 code=$(create_link "https://example.com/sharding")

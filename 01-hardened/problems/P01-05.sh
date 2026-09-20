@@ -5,6 +5,8 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 ensure_healthy
 need_confirm "limit düşürülüp replica 3'e çıkacak (deney sonunda geri alınır)"
 orig=$(replicas_of)
+on_cleanup 'kubectl -n "$NS" set env deploy/linkly RATE_LIMIT_PER_SEC=5000 RATE_LIMIT_BURST=10000'
+on_cleanup "kubectl -n \"$NS\" scale deploy -l \"$APP_SELECTOR\" --replicas=$orig"
 LIMIT=${LIMIT:-50}
 step "Limiti pod başına $LIMIT rps'e çek, TEK pod ile geçen trafiği ölç"
 kubectl -n "$NS" set env deploy/linkly RATE_LIMIT_PER_SEC="$LIMIT" RATE_LIMIT_BURST="$LIMIT" >/dev/null
