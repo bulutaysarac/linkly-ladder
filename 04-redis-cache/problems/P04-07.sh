@@ -11,7 +11,7 @@ kubectl -n "$NS" set env deploy/linkly TRAP_DEBUG_KEYS=true >/dev/null
 kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null || true
 for _ in $(seq 1 20); do serving && break; sleep 2; done
 step "Önbelleği doldur (anahtar sayısı ne kadar çoksa kilit o kadar uzun)"
-for i in $(seq 1 ${N:-4000}); do c=$(create_link "https://example.com/k/$i"); [[ -n "$c" ]] && status_of "$c" >/dev/null; done
+for i in $(seq 1 ${N:-4000}); do c=$(create_link "https://example.com/k/$i"); [[ -n "$c" ]] && status_of "$c" >/dev/null || true; done
 keys=$(kubectl -n "$NS" exec "$rpod" -c redis -- redis-cli DBSIZE 2>/dev/null | tr -d '\r') || true
 note "Redis'teki anahtar sayısı: ${keys:-?}"
 step "Sürekli redirect yükü altında /debug/keys çağır"

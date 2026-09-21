@@ -19,7 +19,9 @@ step "boş ve bozuk URL kabul ediliyor mu?"
 for u in "" "not-a-url" "   "; do
   st=$(create_status "$u"); c=$(create_link "$u")
   note "'<$u>' → HTTP $st"
-  [[ -n "$c" ]] && { warn "KABUL EDİLDİ: '<$u>' → kod $c"; bad=1; }
+  # `|| true` ŞART: bu, döngü gövdesinin SON komutu. Son yinelemede koşul sağlanmazsa döngü 1
+  # döner ve `set -e` scripti tam burada bitirir — karar satırına hiç varılmaz (HATA görünür).
+  [[ -n "$c" ]] && { warn "KABUL EDİLDİ: '<$u>' → kod $c"; bad=1; } || true
 done
 
 step "Büyük gövde: önce ingress üzerinden, sonra DOĞRUDAN pod'a"

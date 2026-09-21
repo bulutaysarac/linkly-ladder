@@ -8,7 +8,7 @@ on_cleanup "kubectl -n \"$NS\" scale deploy -l \"$APP_SELECTOR\" --replicas=$ori
 scale 3; wait_endpoints 3
 code=$(create_link "https://example.com/sharded")
 miss=0; tot=60
-for i in $(seq 1 $tot); do [[ "$(status_of "$code")" == 404 ]] && miss=$((miss+1)); done
+for i in $(seq 1 $tot); do [[ "$(status_of "$code")" == 404 ]] && miss=$((miss+1)) || true; done
 sleep 12
 step "Aynı gerçeği metrikten oku: hangi pod kaç tane not_found saydı?"
 curl -sG "$PROM_URL/api/v1/query" --data-urlencode \

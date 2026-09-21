@@ -20,7 +20,7 @@ stale_after_delete() {
   for i in $(seq 1 40); do status_of "$code" >/dev/null; done
   curl -s -o /dev/null -XDELETE "$BASE_URL/api/links/$code" -H "Authorization: Bearer $AKEY"
   sleep 1
-  for i in $(seq 1 40); do [[ "$(status_of "$code")" == 30* ]] && alive=$((alive+1)); done
+  for i in $(seq 1 40); do [[ "$(status_of "$code")" == 30* ]] && alive=$((alive+1)) || true; done
   echo "$alive"
 }
 step "(1) Pub/sub yayını AÇIK (varsayılan)"

@@ -11,7 +11,7 @@ wait_endpoints 3
 code=$(create_link "https://example.com/sharding")
 note "kod $code yalnızca TEK bir pod'un belleğinde"
 miss=0; tot=60
-for i in $(seq 1 $tot); do [[ "$(status_of "$code")" == 404 ]] && miss=$((miss+1)); done
+for i in $(seq 1 $tot); do [[ "$(status_of "$code")" == 404 ]] && miss=$((miss+1)) || true; done
 grafana_hint "03 · App Business → 'redirect 404 by pod'"
 note "$tot okumadan $miss tanesi 404 (linkin olmadığı pod'lara düştü)"
 note "eski replika sayısına dönmek için: kubectl -n $NS scale deploy/linkly --replicas=$orig"

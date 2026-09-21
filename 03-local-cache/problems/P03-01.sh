@@ -15,7 +15,7 @@ curl -s -o /dev/null -XDELETE "$BASE_URL/api/links/$code"
 db_gone=$(status_of "yoxxxxx")
 step "Silmeden hemen sonra 60 kez oku — kaçı hâlâ yönlendiriyor?"
 alive=0; tot=60
-for i in $(seq 1 $tot); do [[ "$(status_of "$code")" == 30* ]] && alive=$((alive+1)); done
+for i in $(seq 1 $tot); do [[ "$(status_of "$code")" == 30* ]] && alive=$((alive+1)) || true; done
 sleep 12
 hitpods=$(curl -sG "$PROM_URL/api/v1/query" --data-urlencode \
   "query=count(count by (pod) (cache_ops_total{namespace=\"$NS\",result=\"hit\"}))" | jq -r '.data.result[0].value[1] // "0"')

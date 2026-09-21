@@ -8,7 +8,7 @@ N=${N:-3000}
 step "$N farklı linke eşit dağılımlı okuma — hepsi her pod'un önbelleğine girsin"
 codes=$(mktemp)
 for i in $(seq 1 "$N"); do create_link "https://example.com/mem/$i" >> "$codes"; done
-for round in 1 2; do while read -r c; do [[ -n "$c" ]] && status_of "$c" >/dev/null; done < "$codes"; done
+for round in 1 2; do while read -r c; do [[ -n "$c" ]] && status_of "$c" >/dev/null; done < "$codes" || true; done
 rm -f "$codes"
 sleep 12
 step "Pod başına önbellek kayıt sayısı ve heap"

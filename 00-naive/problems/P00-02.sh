@@ -5,7 +5,7 @@ ensure_healthy
 step "Link oluştur, pod'u sil, aynı kodu iste"
 code=$(create_link "https://example.com/persist-test")
 # Ön koşulu KANITLA: silmeden önce link gerçekten çalışıyor olmalı, yoksa "kayboldu" iddiası boş.
-for _ in $(seq 1 10); do pre=$(status_of "$code"); [[ "$pre" == 30* ]] && break; sleep 2; done
+for _ in $(seq 1 10); do pre=$(status_of "$code"); [[ "$pre" == 30* ]] && break; sleep 2 || true; done
 note "oluşturulan kod: $code → silmeden önce GET: $pre"
 [[ "$pre" == 30* ]] || { warn "ön koşul sağlanamadı (link baştan çalışmıyor) — deney geçersiz"; exit 2; }
 need_confirm "pod silinecek"
