@@ -3,8 +3,16 @@ import { seedLinks, redirect, pick, summaryLine } from '../lib/ladder.js';
 export const options = {
   scenarios: {
     stairs: {
-      executor: 'ramping-arrival-rate', startRate: 50, timeUnit: '1s', preAllocatedVUs: 100, maxVUs: 1000,
-      stages: [100, 200, 400, 800, 1600].flatMap((r) => [{ target: r, duration: '10s' }, { target: r, duration: '30s' }]),
+      executor: 'ramping-arrival-rate', startRate: 25, timeUnit: '1s', preAllocatedVUs: 60, maxVUs: 400,
+      // ÖLÇÜLDÜ: bu kümede tek seviyenin redirect kapasitesi ~650 istek/s. Eski merdiven 1600'e
+      // kadar çıkıyordu — yani kapasitenin 2.5 katı. Sonuç ölçüm değil YIKIMDI: kuyruk büyüyor,
+      // probe'lar zaman aşımına uğruyor, pod'lar yeniden başlıyor ve ARDINDAN GELEN her script
+      // "ortam bozuk" diyor (P07-02'den sonra 07'nin 6 scripti böyle düştü).
+      // Yük, ölçtüğün sistemi ÖLDÜRMEMELİ; kapasiteyi bulmak için ona YAKLAŞMAK yeterli.
+      // Gerekirse RATES ile üstüne çık: RATES=100,200,400,800 make repro P=...
+      stages: (__ENV.RATES || '50,100,200,400').split(',')
+        .map((r) => parseInt(r, 10))
+        .flatMap((r) => [{ target: r, duration: '10s' }, { target: r, duration: '30s' }]),
     },
   },
 };
