@@ -21,7 +21,28 @@ set -uo pipefail
 L=${1:?seviye numarası gerekli (00..14)}
 n=$((10#$L))
 
-on()  { kubectl -n "$1" scale deploy --all --replicas="${3:-1}" >/dev/null 2>&1; [[ -n "${2:-}" ]] && kubectl -n "$1" scale statefulset --all --replicas=1 >/dev/null 2>&1; return 0; }
+# AÇTIĞIN BİLEŞENİN HAZIR OLMASINI BEKLE.
+# Neden: CNPG ve Kyverno birer ADMISSION WEBHOOK sunar. Operatör pod'u henüz ayağa kalkmamışken
+# `kubectl apply` yapan bir `make up`, "failed calling webhook ... connection refused" ile düşer
+# ve seviye hiç kurulmaz — gece turunda 09 tam olarak böyle iki kez düştü. Ölçekleme komutunun
+# dönmesi, bileşenin ÇALIŞIYOR olması demek değildir.
+wait_ns_ready() {
+  local ns=$1 i bad
+  for i in $(seq 1 60); do
+    bad=$(kubectl -n "$ns" get pods --no-headers 2>/dev/null \
+          | awk '$3!="Completed" {split($2,a,"/"); if (a[1]!=a[2]) c++} END{print c+0}')
+    [[ "${bad:-0}" == "0" ]] && return 0
+    sleep 3
+  done
+  echo "  uyarı: $ns 3 dk içinde hazır olmadı"
+  return 0
+}
+on()  {
+  kubectl -n "$1" scale deploy --all --replicas="${3:-1}" >/dev/null 2>&1
+  [[ -n "${2:-}" ]] && kubectl -n "$1" scale statefulset --all --replicas=1 >/dev/null 2>&1
+  wait_ns_ready "$1"
+  return 0
+}
 off() { kubectl -n "$1" scale deploy --all --replicas=0 >/dev/null 2>&1; kubectl -n "$1" scale statefulset --all --replicas=0 >/dev/null 2>&1; return 0; }
 
 # Chaos Mesh: 02'den itibaren (pg-delay, pg-loss, redis-delay...)
