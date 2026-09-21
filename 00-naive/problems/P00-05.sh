@@ -36,7 +36,7 @@ rm -f "$tmp"
 note "$total üretim, $uniq benzersiz kod → $collisions çakışma"
 if [[ -n "$dupe" ]]; then
   step "Çakışan kod '$dupe' şu an kime ait?"
-  curl -s "$BASE_URL/api/links/$dupe" | head -c 200; echo
+  { curl -s "$BASE_URL/api/links/$dupe" | head -c 200; } || true; echo
   note "Bu kodu İKİ kullanıcı aldı; kayıtta yalnızca sonuncusu var. İlkinin linki hata vermeden yok oldu."
 fi
 grafana_hint "03 · App Business → 'create sonuçları' (collision serisi 00'da YOK — ölçemiyor olman da bir kanıt)"

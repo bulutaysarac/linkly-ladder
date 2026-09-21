@@ -24,6 +24,6 @@ note "Dikkat: NetworkPolicy yalnızca CNI destekliyorsa çalışır — bu clust
 note "Politika yazıp CNI'ın desteklemediği bir cluster'da çalıştırmak, güvenlik YANILSAMASIDIR."
 note "Eksik kalan: egress kuralları. Şu an pod'lar İNTERNETE serbestçe çıkabilir; gerçek bir"
 note "sertleştirmede dışarı çıkış da beyaz listelenir (veri sızdırma yolu)."
-echo "${logs:-}" | grep -q 'POSTGRES_ENGELLENDI' \
+{ echo "${logs:-}" | grep -q 'POSTGRES_ENGELLENDI'; } \
   && reproduced "yetkisiz pod Postgres'e ulaşamadı — varsayılan-reddet + izin listesi çalışıyor"
 not_reproduced "yetkisiz pod veritabanına ULAŞABİLDİ (${logs:-log yok}) — NetworkPolicy eksik ya da CNI desteklemiyor"

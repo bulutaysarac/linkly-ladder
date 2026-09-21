@@ -21,7 +21,7 @@ step "Sorgu planı: index mi, seq scan mi?"
 # NOT: planın tamamını arıyoruz. `head -6` "Parallel Seq Scan" satırını kesebiliyordu —
 # ölçtüğün kanıtı, okunabilirlik uğruna kırpma.
 plan=$(psql "EXPLAIN (ANALYZE, BUFFERS) SELECT code FROM links WHERE tenant='acme' ORDER BY created_at DESC LIMIT 100")
-echo "$plan" | head -8 | sed 's/^/    /'
+{ echo "$plan" | head -8 | sed 's/^/    /'; } || true
 scan_line=$(echo "$plan" | grep -i "Seq Scan" | head -1)
 seq_before=$(promq "sum(pg_stat_user_tables_seq_scan{namespace=\"$NS\",relname=\"links\"})")
 step "API üzerinden list — kullanıcının hissettiği süre"
