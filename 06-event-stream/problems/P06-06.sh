@@ -25,7 +25,16 @@ run_kill_test() {
     kubectl -n "$NS" delete pod -l app.kubernetes.io/name=$CONSUMER --force --grace-period=0 >/dev/null 2>&1 || true
   done
   kubectl -n "$NS" rollout status deploy/$CONSUMER --timeout=120s >/dev/null 2>&1 || true
-  sleep 40
+  # Sabit bekleme YETMİYOR: sert öldürülen bir tüketicinin grubu yeniden dengelemesi (rebalance)
+  # oturum zaman aşımı kadar sürebiliyor ve iki kill = iki rebalance. İlk ölçümde 2000 tıklamanın
+  # 0'ı sayılmıştı — tüketici hâlâ dengelenirken okuduk. Sayım DURULANA kadar bekle.
+  local prev=-1 stable=0 cur
+  for _ in $(seq 1 60); do
+    cur=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0')
+    if [[ "$cur" == "$prev" ]]; then stable=$(( stable + 1 )); else stable=0; fi
+    (( stable >= 4 )) && break          # 4 ardışık ölçümde (12 sn) değişmiyorsa durulmuştur
+    prev=$cur; sleep 3
+  done
   a=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0')
   echo $(( a - b ))
 }

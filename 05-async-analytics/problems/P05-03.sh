@@ -23,6 +23,11 @@ note "toplu yazma p99=$(awk -v v="$batch" 'BEGIN{printf "%.0f", v*1000}') ms · 
 note "Paylaşılan üç kaynak: pod CPU'su, DB bağlantı havuzu, veritabanının kendisi."
 note "Çözüm 06+07: tüketiciyi AYRI BİR SÜREÇ ve ayrı bir deployment yap — kendi havuzu, kendi"
 note "CPU limiti, kendi ölçeklenmesi. İzolasyon bir arayüz meselesi değil, bir SÜREÇ meselesidir."
-awk -v a="$base_p99" -v b="$busy_p99" 'BEGIN{exit !(b >= a)}' \
-  && reproduced "yazıcı çalışırken okuma yolu etkileniyor (p99 $(awk -v v="$base_p99" 'BEGIN{printf "%.0f", v}')→$(awk -v v="$busy_p99" 'BEGIN{printf "%.0f", v*1000}') ms, havuz bekleme $(awk -v v="$busy_acq" 'BEGIN{printf "%.1f", v*1000}') ms)"
-not_reproduced "yazıcı okuma yolunu etkilemedi — tüketici ayrı süreçte (07)"
+# `b >= a` bir kanıt değil: p99 iki koşu arasında zaten oynar ve bu eşik GÜRÜLTÜYLE geçilir.
+# 06'da yazıcı ayrı bir süreç ve ayrı bir havuz kullanıyor — yani bu script orada NOT-REPRODUCED
+# demeli. Ayırt edici işaret paylaşılan kaynak: AYNI bağlantı havuzunda bekleme.
+# Kural: iddian "X, Y'yi etkiliyor" ise, eşiğin X olmadığında oluşmayacak bir şeyi ölçmeli.
+awk -v a="$base_p99" -v b="$busy_p99" -v aa="$base_acq" -v ba="$busy_acq" \
+    'BEGIN{exit !( b > a*1.3 && ba > aa*2 && ba > 0.001 )}' \
+  && reproduced "yazıcı çalışırken okuma yolu etkileniyor (p99 $(awk -v v="$base_p99" 'BEGIN{printf "%.0f", v*1000}')→$(awk -v v="$busy_p99" 'BEGIN{printf "%.0f", v*1000}') ms, havuz bekleme $(awk -v v="$base_acq" 'BEGIN{printf "%.1f", v*1000}')→$(awk -v v="$busy_acq" 'BEGIN{printf "%.1f", v*1000}') ms — AYNI havuz)"
+not_reproduced "yazıcı okuma yolunu etkilemedi (p99 ve havuz beklemesi ayırt edici biçimde artmadı) — yazıcı ayrı süreçte/havuzda (06)"

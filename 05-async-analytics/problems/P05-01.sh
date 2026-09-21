@@ -42,5 +42,12 @@ grafana_hint "07 · Analytics → 'events by result' (dropped/written) + 'k6 tı
 note "Fark şurada: drain, PLANLI kapanışı kurtarır; plansız ölümü kurtaramaz."
 note "Kalıcı çözüm 06: olayı süreç belleğinden çıkar, dayanıklı bir loga yaz (en az bir kez) ve"
 note "tüketiciyi idempotent yap. Orada yeni sorun 'çift sayma' olacak — garanti seçmek, sorun seçmektir."
-(( lost_hard > 0 )) && reproduced "sert ölümde $lost_hard tıklama kayboldu (graceful kapanışta kayıp: $lost_soft)"
-not_reproduced "sert ölümde bile kayıp yok — olaylar dayanıklı bir yere yazılıyor (06)"
+# EŞİK NEDEN ORAN: "tamponu kaybetmek" ile "uçuştaki birkaç isteği kaybetmek" aynı şey değil.
+# 06'da olaylar broker'a gidiyor ve üretici hemen gönderiyor; sert ölümde yine de birkaç kayıt
+# uçuşta olabilir. Eşik 0 olursa bu script 06'da da "REPRODUCED" der ve merdivenin kontratını
+# (bir sonraki seviye bunu ÇÖZER) yanlışlıkla kırar. Ölçtüğün şey bir TAMPON kaybı olmalı: %10.
+loss_pct=$(awk -v l="$lost_hard" -v n="$N" 'BEGIN{printf "%.1f", (n>0? l*100/n : 0)}')
+note "sert ölüm kaybı: %$loss_pct (eşik: %10 — altı 'uçuştaki istek', üstü 'tampon kaybı')"
+awk -v l="$lost_hard" -v n="$N" 'BEGIN{exit !(n>0 && l*100/n > 10)}' \
+  && reproduced "sert ölümde $lost_hard/$N tıklama (%$loss_pct) kayboldu — tampon süreç belleğindeydi (graceful kapanışta kayıp: $lost_soft)"
+not_reproduced "sert ölümde kayıp %$loss_pct — tampon kaybı yok, olaylar dayanıklı bir yere yazılıyor (06)"

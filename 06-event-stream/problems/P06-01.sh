@@ -22,12 +22,22 @@ clicks "$code" "$N" 20
 note "$N tıklama üretildi, hepsi topic'te bekliyor (tüketici kapalı)"
 step "Tüketiciyi aç ve birikimi işlerken ÖLDÜR — commit edilmemiş partiler yeniden teslim edilecek"
 kubectl -n "$NS" scale deploy/$CONSUMER --replicas=1 >/dev/null
+# Öldürmeden ÖNCE işlemeye zaman ver: sert öldürülen tüketicinin grubu yeniden dengelemesi
+# saniyeler sürüyor; hemen öldürürsen ortada commit edilmemiş parti değil, hiç başlamamış bir
+# tüketici olur ve tekrar teslim GÖZLENMEZ. Ölçmek istediğin durumu deneyin kendisi üretmeli.
 for i in 1 2 3; do
-  sleep 4
+  sleep 10
   kubectl -n "$NS" delete pod -l app.kubernetes.io/name=$CONSUMER --force --grace-period=0 >/dev/null 2>&1 || true
 done
 kubectl -n "$NS" rollout status deploy/$CONSUMER --timeout=120s >/dev/null 2>&1 || true
-sleep 40
+# Sayım DURULANA kadar bekle (rebalance + birikimin işlenmesi sabit bir süre değildir).
+prev=-1; stable=0
+for _ in $(seq 1 60); do
+  cur=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0')
+  if [[ "$cur" == "$prev" ]]; then stable=$(( stable + 1 )); else stable=0; fi
+  (( stable >= 4 )) && break
+  prev=$cur; sleep 3
+done
 after=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0')
 counted=$(( after - before ))
 dup=$(promq "sum(increase(consumer_records_total{namespace=\"$NS\",result=\"duplicate\"}[10m]))")

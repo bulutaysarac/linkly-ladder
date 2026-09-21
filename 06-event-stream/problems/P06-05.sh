@@ -32,6 +32,12 @@ note "Bu bir tasarım tercihidir: Record() bloklasaydı broker kesintisi doğrud
 note "Sınırsız tamponlasaydık (varsayılan davranış!) bellek dolar, pod OOM olur ve yine site çökerdi."
 note "Kural: her asenkron sınırın (kuyruk, tampon, retry) bir ÜST SINIRI ve bir DÜŞÜRME politikası olmalı."
 kubectl -n "$NS" scale statefulset redpanda --replicas=1 >/dev/null
-(( e5 == 0 )) \
-  && reproduced "broker kesintisinde analitik durdu (tampon ${buffered%%.*}, düşürülen ${dropped%%.*}) ama redirect hiç 5xx üretmedi — izolasyon çalıştı"
-not_reproduced "broker kesintisi redirect'i etkiledi ($e5 adet 5xx) — üretici istek yolunu bloklamış olabilir"
+# "Hiç 5xx olmasın" yanlış eşik: broker'ı replicas=0 yapmak aynı zamanda bir POD KAPANIŞI
+# üretiyor ve o pencerede birkaç bağlantı düşüyor. Ölçtüğümüz iddia "üretici istek yolunu
+# BLOKLAMIYOR" — bunun karşılığı mutlak sıfır değil, ihmal edilebilir bir hata ORANI.
+reqs=$(k6_reqs)
+err_pct=$(awk -v e="$e5" -v r="$reqs" 'BEGIN{printf "%.2f", (r>0? e*100/r : 100)}')
+note "broker yokken hata oranı: %$err_pct ($e5 / $reqs istek) — eşik %1"
+awk -v p="$err_pct" 'BEGIN{exit !(p < 1.0)}' \
+  && reproduced "broker kesintisinde analitik durdu (tampon ${buffered%%.*}, düşürülen ${dropped%%.*}) ama redirect %$err_pct hata oranıyla sürdü — izolasyon çalıştı"
+not_reproduced "broker kesintisi redirect'i etkiledi (%$err_pct hata, $e5/$reqs) — üretici istek yolunu bloklamış olabilir"
