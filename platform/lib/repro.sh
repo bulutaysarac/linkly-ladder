@@ -24,10 +24,32 @@ not_reproduced() { printf '\n\033[1;32mNOT-REPRODUCED\033[0m %s — %s\n' "$PROB
 need_confirm()   { [[ "${CONFIRM:-}" == 1 ]] || { warn "yıkıcı adım ($*): CONFIRM=1 ile çalıştır"; exit 2; }; }
 grafana_hint()   { note "Grafana → $GRAFANA_URL/dashboards?query=Ladder → $1  (level=$NS)"; }
 
-# Prometheus anlık sorgu → ilk sonucun değeri (yoksa "0")
-promq() { curl -sfG "$PROM_URL/api/v1/query" --data-urlencode "query=$1" | jq -r '.data.result[0].value[1] // "0"'; }
+# Prometheus anlık sorgu → ilk sonucun değeri (yoksa "0").
+# DAYANIKLILIK: `curl -sf` bağlantı düşünce 52 ("empty reply") ile çıkıyor ve `promq` komut
+# ikamesi içinde çağrıldığı için `set -e` scripti ORADA öldürüyordu — ölçüm bitmiş olsa bile
+# sonuç "HATA" görünüyordu (P07-04/05). Ölçüm ALTYAPISININ tökezlemesi, deneyi iptal etmemeli.
+# Ama sessizce 0 da dönmemeli: iki denemede de alamazsa STDERR'e uyarı basar (stdout'a basarsa
+# değeri kirletir — bu fonksiyon hep `$( )` içinde çağrılıyor).
+_promq_raw() { curl -sfG --max-time 15 "$PROM_URL/api/v1/query" --data-urlencode "query=$1" 2>/dev/null; }
+promq() {
+  local out rc=0
+  out=$(_promq_raw "$1") || rc=$?
+  if (( rc != 0 )); then
+    sleep 2
+    rc=0; out=$(_promq_raw "$1") || rc=$?
+  fi
+  if (( rc != 0 )); then
+    printf '  \033[33mPrometheus sorgusu başarısız (curl %s), 0 sayıldı: %.60s\033[0m\n' "$rc" "$1" >&2
+    echo 0; return 0
+  fi
+  printf '%s' "$out" | jq -r '.data.result[0].value[1] // "0"'
+}
 # Sorgu hiç seri döndürmüyor mu? (metrik yok)
-prom_absent() { [[ "$(curl -sfG "$PROM_URL/api/v1/query" --data-urlencode "query=$1" | jq -r '.data.result | length')" == "0" ]]; }
+prom_absent() {
+  local out
+  out=$(_promq_raw "$1") || { sleep 2; out=$(_promq_raw "$1") || { echo "prom_absent: sorgu yapılamadı" >&2; return 1; }; }
+  [[ "$(printf '%s' "$out" | jq -r '.data.result | length')" == "0" ]]
+}
 
 # create_link: BAŞARISIZLIK NORMALDİR. Bir üst seviye aynı isteği bilerek reddedebilir (01'de
 # javascript: → 400). `curl -f` böyle bir durumda 22 ile çıkıp `set -e` yüzünden scripti öldürüyordu;
@@ -386,9 +408,15 @@ crash_line_of() {
 # k6: senaryo adı + ek argümanlar. Özet JSON'u $K6_SUMMARY'ye yazar.
 K6_SUMMARY=${K6_SUMMARY:-/tmp/k6-$NS-$PROBLEM_ID.summary.json}
 k6run() { local s=$1; shift; "$LADDER_ROOT/platform/lib/k6run.sh" "$s" --summary-export "$K6_SUMMARY" "$@"; }
-k6_failed_rate() { jq -r '.metrics.http_req_failed.value // .metrics.http_req_failed.rate // 0' "$K6_SUMMARY"; }
-k6_reqs()        { jq -r '.metrics.http_reqs.count // 0' "$K6_SUMMARY"; }
+# k6 özeti YOKSA (koşu hiç başlamadıysa) jq dosya bulamayıp hata veriyor ve `set -e` scripti
+# öldürüyor. Yokluk bir ölçüm sonucudur: 0 döndür ama STDERR'e söyle.
+_k6q() {
+  [[ -s "$K6_SUMMARY" ]] || { printf '  \033[33mk6 özeti yok (%s) — 0 sayıldı\033[0m\n' "$K6_SUMMARY" >&2; echo 0; return 0; }
+  jq -r "$1" "$K6_SUMMARY" 2>/dev/null || echo 0
+}
+k6_failed_rate() { _k6q '.metrics.http_req_failed.value // .metrics.http_req_failed.rate // 0'; }
+k6_reqs()        { _k6q '.metrics.http_reqs.count // 0'; }
 # 5xx ve 404'ü ayrı oku: biri altyapı kesintisi, diğeri uygulamanın "yok" demesi (bkz. platform/k6/lib/ladder.js).
-k6_5xx()         { jq -r '.metrics.http_5xx.count // 0' "$K6_SUMMARY"; }
-k6_404()         { jq -r '.metrics.http_404.count // 0' "$K6_SUMMARY"; }
-k6_429()         { jq -r '.metrics.http_429.count // 0' "$K6_SUMMARY"; }
+k6_5xx()         { _k6q '.metrics.http_5xx.count // 0'; }
+k6_404()         { _k6q '.metrics.http_404.count // 0'; }
+k6_429()         { _k6q '.metrics.http_429.count // 0'; }
