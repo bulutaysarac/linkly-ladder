@@ -40,7 +40,12 @@ kind: Cluster
 metadata:
   name: pg
 spec:
-  instances: 3          # 1 primary + 2 replika
+  # ÖLÇÜLDÜ: bu VM'de (12 GB) 3 CNPG instance + Redpanda + Redis + 3 uygulama servisi +
+  # gözlemlenebilirlik yığını birlikte belleği tüketiyor; kontrol düzlemi lider kiralamasını
+  # kaybediyor ve seviye hiç ölçülemiyor. 2 instance (1 primary + 1 replika) bu merdivendeki
+  # HER deneyi karşılıyor: failover (P09-02) bir replika ister, replika çakışması (P09-04) da.
+  # Üçüncü kopya yalnızca "daha fazla yedeklilik" demek — ölçtüğümüz şey o değil.
+  instances: 2          # 1 primary + 1 replika (ortam sınırı; bkz. yukarıdaki not)
   # Ortak chaos şablonları ve dashboard'lar bu etiketi arıyor (platform/chaos/pg-*.yaml).
   # CNPG kendi etiketlerini (cnpg.io/*) koyar; merdivenin TEKDÜZELİK kuralı gereği 02'den beri
   # kullandığımız adı da taşıtıyoruz. DİKKAT: `part-of: linkly-ladder` BİLEREK yok — o etiket

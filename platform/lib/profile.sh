@@ -47,11 +47,18 @@ if (( n >= 11 )); then kubectl -n monitoring scale statefulset tempo --replicas=
 if (( n >= 12 )); then on argocd with-sts; on argo-rollouts; else off argocd; off argo-rollouts; fi
 # cert-manager: 13'ten itibaren
 if (( n >= 13 )); then on cert-manager; else off cert-manager; fi
-# Kyverno: yalnızca AÇILIR, asla kapatılmaz.
+# Grafana: otomatik doğrulama turunda gerekmiyor (dashboard'lara insan bakar), ~200 MB.
+# 11+ açık kalsın ki gözlemlenebilirlik seviyeleri elle de incelenebilsin.
+if (( n >= 11 )); then kubectl -n monitoring scale deploy kps-grafana --replicas=1 >/dev/null 2>&1
+else                   kubectl -n monitoring scale deploy kps-grafana --replicas=0 >/dev/null 2>&1; fi
+# Kyverno: 13'ten önce KAPALI (ölçüldü: ~90 MB × 2 controller ve bu VM'de yer yok).
+# Politika YOKKEN Kyverno webhook'larını kendisi kaldırır, yani replikayı 0'a çekmek güvenli.
+# 13 politikaları uyguladıktan SONRA kapatma: webhook ortada kalır ve failurePolicy=Fail
+# kuralları küme genelinde pod oluşturmayı reddettirir.
 # Kyverno bir ADMISSION WEBHOOK'tur: replikayı 0'a çekmek webhook'u ortada bırakır ve
 # failurePolicy=Fail olan kurallar KÜME GENELİNDE pod oluşturmayı reddettirir. Yani "kaynak
 # tasarrufu" için kapatmak, bütün merdiveni çalışamaz hâle getirebilir. Kurulmamışsa bu satır
 # zaten hiçbir şey yapmaz (13'ten önce `platform && make security` çalıştırılmamış olur).
-if (( n >= 13 )); then on kyverno; fi
+if (( n >= 13 )); then on kyverno; else kubectl -n kyverno scale deploy --all --replicas=0 >/dev/null 2>&1; fi
 
 echo "profil: seviye $L → chaos=$(( n>=2 )) keda=$(( n>=7 )) cnpg=$(( n>=9 )) log=$(( n>=11 )) tempo=$(( n>=11 )) argo=$(( n>=12 )) güvenlik=$(( n>=13 ))"
