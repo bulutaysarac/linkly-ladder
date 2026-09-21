@@ -9,18 +9,25 @@ orig_prestop=$(kubectl -n "$NS" get deploy linkly -o jsonpath='{.spec.template.s
 # İkisini TEK patch'te geri al: API sunucusu preStop.sleep < grace şartını nesnenin SON hâlinde
 # doğruluyor; ayrı ayrı göndermek geçersiz bir ara hâl üretir ve reddedilir.
 on_cleanup "kubectl -n \"$NS\" patch deploy linkly --type=json -p '[{\"op\":\"replace\",\"path\":\"/spec/template/spec/terminationGracePeriodSeconds\",\"value\":$orig_grace},{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/lifecycle/preStop/sleep/seconds\",\"value\":$orig_prestop}]'"
+# P05-01 ile aynı ölçüm notu: kaybedebileceğin şey o an TAMPONDA olandır. Varsayılan 1 sn'lik
+# flush aralığında tampon neredeyse hep boş yakalanır ve "drain'e zaman verilmedi" senaryosu bile
+# kayıpsız görünür. Pencereyi 15 sn'ye açıyoruz ki grace ayarının etkisi ölçülebilsin.
+on_cleanup "kubectl -n \"$NS\" set env deploy/linkly ANALYTICS_FLUSH_INTERVAL- ANALYTICS_BATCH_SIZE-"
+kubectl -n "$NS" set env deploy/linkly ANALYTICS_FLUSH_INTERVAL=15s ANALYTICS_BATCH_SIZE=5000 >/dev/null
+kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null 2>&1 || true
+for _ in $(seq 1 30); do serving && break; sleep 2; done
 measure_loss() {
   local label=$1
   local code b a
   code=$(create_link "https://example.com/grace/$label")
   b=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0')
-  for i in $(seq 1 ${N:-400}); do status_of "$code" >/dev/null; done
+  clicks "$code" "${N:-2000}" 20
   kubectl -n "$NS" rollout restart deploy/linkly >/dev/null
   kubectl -n "$NS" rollout status deploy/linkly --timeout=200s >/dev/null 2>&1 || true
   for _ in $(seq 1 25); do serving && break; sleep 2; done
   sleep 8
   a=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0')
-  echo $(( b + ${N:-400} - a ))
+  echo $(( b + ${N:-2000} - a ))
 }
 step "Mevcut ayar (grace=${orig_grace}s, preStop=${orig_prestop}s, SHUTDOWN_GRACE=20s): drain'e zaman VAR"
 loss_ok=$(measure_loss ok)
