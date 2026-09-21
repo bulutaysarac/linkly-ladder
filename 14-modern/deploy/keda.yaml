@@ -22,7 +22,14 @@ spec:
   triggers:
     - type: kafka
       metadata:
-        bootstrapServers: redpanda:9092
+        # FQDN ŞART: KEDA operatörü KENDİ namespace'inde (keda) koşuyor ve buraya yazdığın adı
+        # ORADA çözmeye çalışıyor. `redpanda:9092` yazınca keda namespace'inde arıyor, bulamıyor
+        # ve "client has run out of available brokers / network is unreachable" diyor — ScaledObject
+        # Ready=False kalıyor, HPA hiç oluşmuyor ve tüketici ASLA ölçeklenmiyor. Sessiz arıza:
+        # `kubectl get scaledobject` READY sütununda False yazıyor ama kimse bakmıyorsa
+        # "otomatik ölçekleme var" sanırsın. (P06-02 bunu 07'de yakaladı: sistem kendi kendine
+        # toparlanmadı, çünkü toparlayacak mekanizma hiç kurulmamıştı.)
+        bootstrapServers: redpanda.lvl14.svc.cluster.local:9092
         consumerGroup: analytics
         topic: clicks
         lagThreshold: "500"
