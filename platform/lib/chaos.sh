@@ -15,8 +15,47 @@ apply_one() {
   fi
   NS="$NS" envsubst < "$f" | kubectl apply -f -
 }
+# Chaos nesnesini silerken FINALIZER'A TAKILMA.
+# EN: Chaos Mesh puts a finalizer on every chaos object; deleting it makes the controller ask the
+#     chaos-daemon on each target pod to undo the injection. If that daemon is unhealthy, the
+#     finalizer never completes and `kubectl delete` blocks FOREVER — in this ladder a cleanup step
+#     hung for 19 minutes and stalled the whole verification round without printing anything.
+#     Delete without waiting, then verify; if the object is still there, drop the finalizer by hand
+#     and say so. A cleanup that can hang is worse than a cleanup that can fail loudly.
+# TR: Chaos Mesh her chaos nesnesine bir finalizer koyar; silmek, controller'ın her hedef pod'daki
+#     chaos-daemon'dan enjeksiyonu geri almasını istemesi demektir. Daemon sağlıksızsa finalizer
+#     asla tamamlanmaz ve `kubectl delete` SONSUZA KADAR bekler — bu merdivende bir temizlik adımı
+#     19 dakika asılı kalıp hiçbir şey basmadan bütün doğrulama turunu durdurdu. Beklemeden sil,
+#     sonra DOĞRULA; nesne hâlâ duruyorsa finalizer'ı elle düşür ve bunu söyle.
+#     Asılı kalabilen bir temizlik, yüksek sesle başarısız olan bir temizlikten kötüdür.
+delete_one() {
+  local f="$LADDER_ROOT/platform/chaos/$1.yaml" kind name
+  [[ -f "$f" ]] || return 0
+  kind=$(awk '/^kind:/{print tolower($2); exit}' "$f")
+  # NOT: BSD awk'ta `match(s,re,arr)` (gawk uzantısı) YOK — sed ile al.
+  name=$(sed -n 's/.*name: *\([a-z0-9-]*\).*/\1/p' "$f" | head -1)
+  [[ -z "$name" ]] && name=$1
+  NS="$NS" envsubst < "$f" | kubectl delete --ignore-not-found --wait=false -f - >/dev/null 2>&1 || true
+  for _ in $(seq 1 20); do
+    kubectl -n "$NS" get "$kind" "$name" >/dev/null 2>&1 || return 0
+    sleep 2
+  done
+  echo "chaos $name 40 sn'de silinmedi (finalizer takılı) — finalizer düşürülüyor"
+  kubectl -n "$NS" patch "$kind" "$name" --type=merge -p '{"metadata":{"finalizers":[]}}' >/dev/null 2>&1 || true
+  kubectl -n "$NS" delete "$kind" "$name" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+}
+force_unstick() {
+  local k n
+  for k in networkchaos podchaos stresschaos iochaos; do
+    for n in $(kubectl -n "$NS" get "$k" -o name 2>/dev/null); do
+      kubectl -n "$NS" patch "$n" --type=merge -p '{"metadata":{"finalizers":[]}}' >/dev/null 2>&1 || true
+    done
+  done
+}
+
 case "$action" in
   apply)  apply_one "$C" ;;
-  delete) if [[ -n "$C" ]]; then NS="$NS" envsubst < "$LADDER_ROOT/platform/chaos/$C.yaml" | kubectl delete --ignore-not-found -f -;
-          else kubectl -n "$NS" delete networkchaos,podchaos,stresschaos,iochaos --all 2>/dev/null || true; fi ;;
+  delete) if [[ -n "$C" ]]; then delete_one "$C";
+          else kubectl -n "$NS" delete networkchaos,podchaos,stresschaos,iochaos --all --wait=false 2>/dev/null || true;
+               force_unstick; fi ;;
 esac
