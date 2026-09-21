@@ -25,11 +25,13 @@ on_cleanup "docker unpause $victim"
 # istekler ölü pod'lara yönlendirilip ASILI KALDI, yani 5xx üretmeden ÜRETKENLİK çöktü.
 # Bir arızanın işareti her zaman hata kodu değildir; bazen sadece "iş bitmiyor"dur.
 step "Taban: donma öncesi tamamlanan istek hızı"
-k6run redirect --vus 10 --duration 30s >/dev/null 2>&1 || true
+with_timeout 90 k6run redirect --vus 10 --duration 30s >/dev/null 2>&1 || true
 base_reqs=$(k6_reqs); base_rps=$(awk -v r="$base_reqs" 'BEGIN{printf "%.1f", r/30}')
 note "taban: $base_reqs istek / 30 sn = $base_rps istek/s"
 step "Node '$victim' donduruluyor — kubelet cevap veremeyecek"
-( k6run redirect --vus 10 --duration 120s >/tmp/p0707.k6 2>&1 ) & kpid=$!
+# Yükü zaman sınırıyla koş: donmuş bir node'da istekler asılı kalabiliyor ve k6'nın kendisi
+# de takılabiliyor. 43 dakikalık bir takılma yaşandı; bir deney adımı SINIRLI sürmeli.
+( with_timeout 200 k6run redirect --vus 10 --duration 120s >/tmp/p0707.k6 2>&1 ) & kpid=$!
 sleep 12
 docker pause "$victim" >/dev/null
 note "donduruldu. Kubernetes bunu ~40 sn sonra NotReady, ~5 dk sonra evict olarak görür."
@@ -40,7 +42,7 @@ for i in $(seq 1 20); do
 done
 sleep 20
 docker unpause "$victim" >/dev/null
-wait $kpid || true
+wait $kpid 2>/dev/null || true
 e5=$(k6_5xx); reqs=$(k6_reqs)
 grafana_hint "09 · Autoscaling → 'Pod dağılımı / node' · 02 · App RED → 5xx"
 froz_rps=$(awk -v r="$reqs" 'BEGIN{printf "%.1f", r/120}')

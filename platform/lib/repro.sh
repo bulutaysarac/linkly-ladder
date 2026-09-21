@@ -114,6 +114,19 @@ peak_avg() {
   awk '{n++; s+=$1; if ($1>p) p=$1} END{if (n==0||s==0){print "0 0 0"; exit} printf "%d %.1f %.1f", p, s/n, p/(s/n)}' "$1"
 }
 
+# Komutu ZAMAN SINIRIYLA çalıştır (macOS'ta `timeout` yok).
+# Neden: P07-07 bir node'u dondurup çözdükten sonra 43 dakika asılı kaldı — k6 bitmişti ama
+# script ilerlemiyordu. Bir deneyin adımları SINIRLI sürmeli; süresiz bekleyen bir adım,
+# doğrulama turunun tamamını durdurur ve hangi adımda takıldığını bile söylemez.
+with_timeout() {
+  local secs=$1; shift
+  ( "$@" ) & local pid=$!
+  ( sleep "$secs"; kill -TERM "$pid" 2>/dev/null; sleep 3; kill -KILL "$pid" 2>/dev/null ) & local watchdog=$!
+  local rc=0; wait "$pid" 2>/dev/null || rc=$?
+  kill "$watchdog" 2>/dev/null; wait "$watchdog" 2>/dev/null || true
+  return "$rc"
+}
+
 # Bir metrik YOKSA ölçüme başlama.
 # `promq` serisi olmayan bir sorguya "0" döndürür; yani var olmayan bir metrik ile gerçekten
 # sıfır olan bir metrik aşağı akışta AYNI görünür. Gerçekte oldu: 07-14'te postgres/redis
