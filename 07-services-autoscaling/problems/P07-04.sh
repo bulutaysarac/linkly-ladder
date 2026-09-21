@@ -22,14 +22,14 @@ on_cleanup "kubectl -n \"$NS\" scale deploy/redirect --replicas=2"
 # ve "throttle=0.00" çıktı. Karar da p99 farkına bakıyordu — iki ayrı 45 sn'lik koşunun p99'u
 # bu kümede zaten oynuyor, yani ölçüm gürültüyü okuyordu.
 # Doğrusu: TEK pod + dar kota + kotayı aşacak yük. Ölçü de p99 değil, throttling'in kendisi.
-TIGHT=${TIGHT:-200m}
+TIGHT=${TIGHT:-50m}   # ÖLÇÜLDÜ: 200m kotada bile kısıtlama 0 çıktı; uygulama o kadar CPU istemiyor
 on_cleanup "kubectl -n \"$NS\" set resources deploy/redirect --requests=cpu=${req:-150m}"
 step "TEK pod, dar kota ($TIGHT) ve kotayı aşacak yük"
 kubectl -n "$NS" scale deploy/redirect --replicas=1 >/dev/null; wait_endpoints 1
 kubectl -n "$NS" set resources deploy/redirect --requests=cpu=100m --limits=cpu=$TIGHT >/dev/null
 kubectl -n "$NS" rollout status deploy/redirect --timeout=180s >/dev/null 2>&1 || true
 wait_endpoints 1; sleep 5
-k6run redirect --vus 60 --duration 60s >/dev/null 2>&1 || true
+k6run redirect --vus 120 --duration 60s >/dev/null 2>&1 || true
 sleep 15
 tight_p99=$(num "$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[1m])) by (le))")")
 tight_cpu=$(promq "sum(rate(container_cpu_usage_seconds_total{namespace=\"$NS\",pod=~\"redirect.*\",image!=\"\",image!~\".*pause.*\"}[1m]))")
@@ -44,7 +44,7 @@ kubectl -n "$NS" set resources deploy/redirect --requests=cpu=100m --limits=cpu=
   kubectl -n "$NS" patch deploy redirect --type=json -p '[{"op":"remove","path":"/spec/template/spec/containers/0/resources/limits/cpu"}]' >/dev/null 2>&1
 kubectl -n "$NS" rollout status deploy/redirect --timeout=180s >/dev/null 2>&1 || true
 wait_endpoints 1; sleep 5
-k6run redirect --vus 60 --duration 60s >/dev/null 2>&1 || true
+k6run redirect --vus 120 --duration 60s >/dev/null 2>&1 || true
 sleep 15
 free_p99=$(num "$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[1m])) by (le))")")
 free_cpu=$(promq "sum(rate(container_cpu_usage_seconds_total{namespace=\"$NS\",pod=~\"redirect.*\",image!=\"\",image!~\".*pause.*\"}[1m]))")

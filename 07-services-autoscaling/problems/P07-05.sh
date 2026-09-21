@@ -18,14 +18,22 @@ step "İsteği büyüt ve çok replika iste — kapasiteyi kasıtlı olarak aş"
 # LİMİTİ DE BÜYÜT: Kubernetes `requests > limits` olan bir pod'u REDDEDER. İlk hâlde yalnızca
 # request 900m'e çekiliyordu ve limit 300m olduğu için API isteği geri çeviriyordu; script
 # `set -e` ile ölüyor, deney hiç kurulmuyordu (HATA).
-kubectl -n "$NS" set resources deploy/redirect --requests=cpu=900m --limits=cpu=1 >/dev/null
+# İSTEK DEĞERİ ORTAMA GÖRE: bu küme 4 node × 6 = 24 CPU "ayrılabilir" gösteriyor (gerçekte VM 6
+# çekirdek, ama scheduler'ın gördüğü sayı budur ve Pending kararını O verir). 10 × 900m = 9 CPU
+# rahat sığdı, PENDING=0 çıktı. Pod'u bir node'a SIĞMAYACAK kadar büyük iste: node başına
+# ayrılabilirin yarısından fazlası → 10 replikanın çoğu yer bulamaz.
+node_cpu=$(kubectl get nodes -o jsonpath='{.items[0].status.allocatable.cpu}' 2>/dev/null || echo 6)
+# node_cpu "6" gibi bir tam sayı (ya da "6000m"). Her iki biçimi de millicore'a çevir.
+case "$node_cpu" in *m) milli=${node_cpu%m} ;; *) milli=$(( node_cpu * 1000 )) ;; esac
+req=$(( milli * 60 / 100 ))                      # node'un %60'ı → iki pod aynı node'a sığmaz
+kubectl -n "$NS" set resources deploy/redirect --requests=cpu=${req}m --limits=cpu=$(( req + 500 ))m >/dev/null
 kubectl -n "$NS" scale deploy/redirect --replicas=10 >/dev/null
 sleep 45
 pending=$(kubectl -n "$NS" get pods -l "$APP_SELECTOR" --field-selector status.phase=Pending --no-headers 2>/dev/null | grep -c . || true)
 ready=$(kubectl -n "$NS" get deploy redirect -o jsonpath='{.status.readyReplicas}') || true
 reason=$(kubectl -n "$NS" get events --field-selector reason=FailedScheduling -o jsonpath='{range .items[-1:]}{.message}{end}' 2>/dev/null | head -c 160) || true
 grafana_hint "09 · Autoscaling → 'Pending pod' + 'Node CPU allocatable vs requests'"
-note "istenen replika=10 · hazır=${ready:-0} · PENDING=$pending"
+note "pod başına istek=${req}m (node ayrılabilir=${node_cpu}) · istenen replika=10 · hazır=${ready:-0} · PENDING=$pending"
 [[ -n "$reason" ]] && note "scheduler diyor ki: $reason"
 note "HPA'nın istediği ile kümenin verebildiği arasındaki fark burada görünür. HPA bunu bilmez;"
 note "desiredReplicas=10 der ve mutlu görünür. Gerçeği yalnızca Pending sayacı söyler."
