@@ -12,6 +12,13 @@ reps=$(kubectl -n "$NS" get deploy redirect -o jsonpath='{.status.readyReplicas}
 note "replika=$reps · farklı node=$nodes · dağılım kuralı: $(kubectl -n "$NS" get deploy redirect -o jsonpath='{.spec.template.spec.topologySpreadConstraints[0].whenUnsatisfiable}')"
 need_confirm "bir worker node DONDURULACAK (docker pause) — deney sonunda çözülür"
 victim=$(kubectl -n "$NS" get pods -l "$APP_SELECTOR" -o jsonpath='{.items[0].spec.nodeName}')
+# Temizlik yalnızca `docker unpause` DEĞİL: dondurulmuş bir node'da containerd'nin PLEG'i
+# ölüyor ve kubelet "container runtime is down" diyerek NotReady kalıyor — gerçekte oldu,
+# node 49 dakika NotReady kaldı ve kümenin geri kalanı (Chaos Mesh, Argo, KEDA) o node'a
+# düşen pod'larla birlikte çürüdü. Sonraki HER deney bozuk bir ortamı ölçtü.
+# Bir deney, kümeyi bulduğu gibi bırakmak zorundadır — "geri aldım" demek yetmez, DOĞRULA.
+on_cleanup "for i in \$(seq 1 30); do [ \"\$(kubectl get node $victim -o jsonpath='{.status.conditions[?(@.type==\"Ready\")].status}' 2>/dev/null)\" = True ] && break; sleep 5; done"
+on_cleanup "docker exec $victim systemctl restart containerd >/dev/null 2>&1 || true"
 on_cleanup "docker unpause $victim"
 # ÖNCE TABAN: donma sırasındaki sayıyı neyle kıyaslayacağız? İlk koşuda 120 saniyede yalnızca
 # 13 istek tamamlandı ve 5xx=0 çıktı — script "etkisiz kaldı" dedi. Oysa asıl kanıt tam da oydu:

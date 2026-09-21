@@ -233,7 +233,26 @@ ensure_baseline_scale() {
 # Neden gerekli: pod CrashLoopBackOff'a düştüğünde kubelet'in geri çekilme süresi 5 dk'ya kadar çıkar;
 # o pencerede yeni restart OLMAZ ve "restart arttı mı?" ölçümü yanlış negatif verir. Ayrıca pod'u
 # `delete` etmek (rollout restart değil) backoff sayacını sıfırlar: taze bir konteyner, restartCount=0.
+# Bu namespace'teki HER iş yükü pod'u hazır mı? (Completed job'lar hariç)
+# Neden: Redpanda 06'dan beri CrashLoopBackOff'taydı ve hiçbir script bunu sormadığı için
+# bütün stream deneyleri ÖLÜ bir broker'ı ölçtü — üstelik "75 bin üretici hatası" gibi
+# sonuçları bulgu sanarak rapor ettik. Bir deneyin ön koşulu da ölçülmesi gereken bir şeydir.
+ensure_deps_ready() {
+  local bad
+  bad=$(kubectl -n "$NS" get pods -o json 2>/dev/null | jq -r '
+    [ .items[]
+      | select(.status.phase != "Succeeded")
+      | select(.metadata.deletionTimestamp == null)
+      | select(any(.status.containerStatuses[]?; .ready | not))
+      | .metadata.name ] | join(", ")')
+  if [[ -n "${bad:-}" ]]; then
+    warn "hazır olmayan pod(lar): $bad — ortam bozukken ölçüm yapılmaz (make up / kubectl describe)"
+    exit 2
+  fi
+}
+
 ensure_healthy() {
+  ensure_deps_ready
   ensure_baseline_scale
   for attempt in 1 2 3; do
     if serving; then
