@@ -123,3 +123,7 @@ security: ## cert-manager + sealed-secrets + Kyverno (13+)
 	   --set cleanupController.enabled=false --set reportsController.enabled=false \
 	   --wait --timeout 15m
 	@echo "✔ cert-manager + sealed-secrets + kyverno"
+
+profile: ## Seviyeye göre bileşenleri aç/kapat: make profile L=07
+	@test -n "$(L)" || { echo "L=<seviye no> gerekli (00..14)"; exit 2; }
+	@lib/profile.sh $(L)
