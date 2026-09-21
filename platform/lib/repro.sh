@@ -213,8 +213,11 @@ last_reason() { kpods -o jsonpath='{range .items[*]}{.status.containerStatuses[0
 wait_ready() {
   local d r want got
   for d in $(kubectl -n "$NS" get deploy -o name 2>/dev/null); do
-    kubectl -n "$NS" rollout status "$d" --timeout=180s >/dev/null 2>&1 \
-      || kubectl -n "$NS" rollout status "$d" --timeout=180s >/dev/null 2>&1 || true
+    # 60 sn × 2: ÖLÇÜLDÜ, 180×2 ile takılı bir rollout tek başına 18 dakika yiyordu (namespace'te
+    # üç deployment var). Bu bir BEKLEME, ölçüm değil: kısa tut, sonraki `serving` kontrolü
+    # gerçek hazır olmayı zaten sınıyor.
+    kubectl -n "$NS" rollout status "$d" --timeout=60s >/dev/null 2>&1 \
+      || kubectl -n "$NS" rollout status "$d" --timeout=60s >/dev/null 2>&1 || true
   done
   # Argo Rollout'u `kubectl rollout status` TANIMIYOR (o yalnızca yerleşik türleri bilir) ve
   # `kubectl argo rollouts` eklentisi burada kurulu değil. 12+'da hazır olmayı beklemezsek
