@@ -125,7 +125,15 @@ erişim tek bir çekirdeğin sınırına dayanır. Ölçeklenemeyen şey anahtar
 [Topic · Konu: Hot key, sharding'in sınırı]
 
 **Reproduce (adım adım):**
-1. `make repro P=P04-03` — dağıtık yük ile `hot-key` yükünü Redis CPU'su ve p99 üzerinden kıyaslar
+1. `make repro P=P04-03` — Redis'in **tavanını doğrudan ölçer** (`redis-benchmark`: 100k anahtara
+   dağıtılmış GET vs **tek** anahtara GET), sonra `hot-key` yükünü verip uygulamanın o tavanın
+   yüzde kaçını kullandığını gösterir
+
+**Ölçüm dersi — "CPU arttı mı?" yanlış soru:** İlk hâl dağıtık yük ile sıcak yükün Redis CPU'sunu
+kıyaslıyordu. İkisi de **aynı sayıda komut** üretir; CPU da aynı çıkar ve script "sorun yok" der.
+Oysa sorun CPU'nun artması değil, **tavanın yeri**: tek anahtarın tavanı tek instance'ın tavanıdır
+ve sharding onu yükseltmez. *Ölçemediğin bir sınırı, sınırın kendisini ölçerek göster.* Bu kümede
+tavana çarpmıyoruz — ve bu dürüst bir sonuç: sorun "şu an yavaşız" değil, "büyüyünce çare yok".
 
 **Grafana:** `06 · Redis` → "Redis CPU", "ops/s".
 **Nerede çözülüyor:** 14 (L1). **Redis cluster bu sorunu çözmez** — sıcak anahtar tek shard'a düşer.
@@ -141,8 +149,14 @@ anahtar hiç ağa çıkmaz) ya da CDN/edge (en popüler linkler uygulamaya hiç 
 **tek** önbellek var: tüm pod'lar aynı anahtarların aynı anda dolduğunu aynı anda görür. Dalga
 bölünmez, **birleşir**. [Topic · Konu: Korelasyon, paylaşılan kaynak]
 
-**Reproduce (adım adım):** `make repro P=P04-04` — 400 anahtarı tek seferde ısıtır, jitter açık/kapalı
-**tepe/ortalama** oranını kıyaslar.
+**Reproduce (adım adım):** `make repro P=P04-04` — TTL'i 30 sn'ye çeker, 300 kodluk kümeyi
+ısıtır, jitter açık/kapalı 150'şer saniye yük verip **tepe/ortalama** oranını kıyaslar (~8 dk).
+Saniyelik seriler `/tmp/p0404-jitter.txt` ve `/tmp/p0404-nojitter.txt`.
+
+**Ölçüm notu (P03-07 ile aynı):** Darbe 1-2 saniye sürüyor, Prometheus 15 sn'de bir örnekliyor ve
+`rate()` onu düzlüyor. Script pod'un `/metrics` ucunu **saniyede bir** kendisi örnekliyor. Sayaç
+`cache_ops_total{result="miss"}`: TTL Redis tarafında dolduğu için uygulama "expired" değil **ıska**
+görür; ilk ısınma saniyeleri atlanır.
 
 **Grafana:** `05 · Postgres` → "DB queries by op"; `06 · Redis` → "evicted / expired keys".
 **Ders:** Paylaşmak, hizalanmayı da paylaşmaktır.
@@ -190,8 +204,14 @@ artık hiçbir işe yaramamaktadır — en sinsi arıza türü: görünürde sa�
 [Topic · Konu: Eviction politikası, sessiz bozulma]
 
 **Reproduce (adım adım):**
-1. `make repro P=P04-06` — 6000 link üretip okur, `cache_errors_total{op="set"}` ile
-   `redis_evicted_keys_total`'ı karşılaştırır
+1. `make repro P=P04-06` — `maxmemory`'yi deney süresince **4 MB**'a çeker, 1200 link × ~6 KB URL
+   üretip okur (20 paralel), `cache_errors_total{op="set"}` ile `redis_evicted_keys_total`'ı
+   karşılaştırır, sonunda ayarı geri alır
+
+**Ölçüm dersi — deneyi ölçeğe uydur:** İlk hâl 6000 *küçük* link ile 64 MB'lık Redis'i doldurmayı
+umuyordu; ~3 MB yazıp "doldurma gözlenmedi" diyordu. Ya veriyi büyüt ya sınırı küçült — burada
+ikisi de yapılıyor ki deney dakikalar değil saniyeler sürsün. Sınırı geçici olarak küçültmek
+meşrudur, **değiştirdiğini söylediğin sürece**.
 
 **Grafana:** `06 · Redis` → "memory vs maxmemory", "evicted / expired keys"; `04 · Cache` → "cache load error".
 **Ayırt etme kuralı:** `eviction = 0` **ve** `SET hatası > 0` → politika `noeviction`.

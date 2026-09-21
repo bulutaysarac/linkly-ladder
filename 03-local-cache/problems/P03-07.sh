@@ -16,21 +16,6 @@ ensure_healthy
 on_cleanup "kubectl -n \"$NS\" set env deploy/linkly TRAP_NO_TTL_JITTER- CACHE_TTL-"
 on_cleanup "port_forward_stop"
 
-# Tek pod'un "expired" sayacını saniyede bir örnekle → saniyelik farkların dizisi.
-# result="expired": TTL dolduğu için yapılan ıska. İlk ısınmanın ıskalarını (result="miss")
-# saymaz — yani ölçtüğümüz şey TAM OLARAK TTL dolmaları.
-sample_expired() {
-  local port=$1 secs=$2 out=$3 prev="" cur i
-  : > "$out"
-  for ((i = 0; i < secs; i++)); do
-    cur=$(curl -s --max-time 2 "http://127.0.0.1:$port/metrics" \
-          | awk '/^cache_ops_total\{.*result="expired"/ {s += $2} END {print s + 0}')
-    [[ -n "$prev" && -n "$cur" ]] && awk -v a="$prev" -v b="$cur" 'BEGIN{d=b-a; print (d<0?0:d)}' >> "$out"
-    prev=$cur
-    sleep 1
-  done
-}
-
 warm_and_watch() {
   local out=$1 pod port=18307
   kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null
@@ -41,14 +26,11 @@ warm_and_watch() {
   # Darbeler yalnızca TTL dolmalarından gelir.
   SEED=300 k6run redirect --vus 20 --duration "${LOAD}s" >/dev/null 2>&1 &
   local k6pid=$!
-  sample_expired "$port" "$LOAD" "$out"
+  # result="expired": TTL dolduğu için yapılan ıska. İlk ısınmanın ıskalarını saymaz —
+  # yani ölçtüğümüz şey TAM OLARAK TTL dolmaları.
+  sample_series "$port" "$LOAD" "$out" '^cache_ops_total\{.*result="expired"'
   wait "$k6pid" 2>/dev/null || true
   port_forward_stop
-}
-
-# tepe/ortalama: kapasite tepeye göre planlanır, ortalamaya göre değil.
-peak_avg() {
-  awk '{n++; s+=$1; if ($1>p) p=$1} END{if (n==0||s==0){print "0 0 0"; exit} printf "%d %.1f %.1f", p, s/n, p/(s/n)}' "$1"
 }
 
 step "Jitter AÇIK (varsayılan, ±%20), TTL $TTLS — ${LOAD}s boyunca saniyede bir örnekleniyor"

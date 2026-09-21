@@ -2,26 +2,39 @@
 source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.sh"
 # P04-03 · Sıcak anahtar: tek bir link, tek bir Redis çekirdeği
 # Redis TEK İŞ PARÇACIKLIDIR. Trafiğin %95'i tek anahtara giderse, o anahtarı hangi sunucuya
-# koyarsan koy, tek bir çekirdeğin sınırına dayanırsın. Ölçeklenemeyen şey anahtar değil, ERİŞİMDİR.
+# koyarsan koy tek bir çekirdeğin sınırına dayanırsın. Ölçeklenemeyen şey anahtar değil, ERİŞİMDİR.
+#
+# ÖLÇÜM NOTU — neden "Redis CPU'su arttı mı?" diye BAKMIYORUZ:
+# İlk hâl dağıtık yük ile sıcak yükün Redis CPU'sunu kıyaslıyordu. İkisi de AYNI sayıda komut
+# üretir; CPU da doğal olarak aynı çıkar ve script "sorun yok" der. Oysa sorun CPU'nun artması
+# değil, TAVANIN YERİ: tek anahtarın tavanı tek instance'ın tavanıdır ve sharding onu yükseltmez.
+# Bu yüzden tavanı DOĞRUDAN ölçüyoruz (redis-benchmark) ve uygulamanın ona ne kadar yaklaştığını
+# gösteriyoruz. Ölçemediğin bir sınırı, sınırın KENDİSİNİ ölçerek göster.
 ensure_healthy
-step "Referans: dağıtık yük"
-k6run redirect --vus 60 --duration 40s >/dev/null 2>&1 || true
-sleep 12
-spread_cpu=$(promq "max_over_time(sum(rate(container_cpu_usage_seconds_total{namespace=\"$NS\",pod=~\"redis.*\",image!=\"\",image!~\".*pause.*\"}[30s]))[3m:15s])")
-spread_p99=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[1m])) by (le))")
-note "dağıtık: Redis CPU tepe=$(awk -v v="$spread_cpu" 'BEGIN{printf "%.2f", v}') çekirdek · p99=$(awk -v v="$spread_p99" 'BEGIN{printf "%.0f", v*1000}') ms"
-step "Aynı yükün %95'i TEK anahtara"
+rpod=$(dep_pod app.kubernetes.io/name=redis) || exit 2   # bağımlılık hazır değilse ölçüm anlamsız
+bench() { kubectl -n "$NS" exec "$rpod" -c redis -- redis-benchmark -q -t get -n "${2:-100000}" -c 50 -r "$1" 2>/dev/null \
+            | awk -F'[: ]+' '/^GET/ {print $2}' | tr -d '\r'; }
+step "Tavanı DOĞRUDAN ölç: 100k anahtara dağıtılmış GET vs TEK anahtara GET (ağ dışı, pod içinde)"
+spread_ceiling=$(bench 100000)
+single_ceiling=$(bench 0)
+note "dağıtık GET tavanı: ${spread_ceiling:-?} ops/s"
+note "TEK anahtar GET tavanı: ${single_ceiling:-?} ops/s"
+note "İkisi birbirine yakınsa mesaj şudur: sınır ANAHTARDA değil, INSTANCE'ta. Yani sharding"
+note "(anahtarları dağıtmak) sıcak anahtarı kurtarmaz — o anahtar yine tek bir shard'da kalır."
+step "Uygulama tarafı: aynı yükün %95'i tek anahtara"
 HOT_SHARE=0.95 k6run hot-key --vus 60 --duration 40s >/dev/null 2>&1 || true
 sleep 12
+hot_ops=$(promq "max_over_time(sum(rate(redis_commands_processed_total{namespace=\"$NS\"}[30s]))[3m:15s])")
 hot_cpu=$(promq "max_over_time(sum(rate(container_cpu_usage_seconds_total{namespace=\"$NS\",pod=~\"redis.*\",image!=\"\",image!~\".*pause.*\"}[30s]))[3m:15s])")
 hot_p99=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[1m])) by (le))")
-ops=$(promq "max_over_time(sum(rate(redis_commands_processed_total{namespace=\"$NS\"}[30s]))[3m:15s])")
 grafana_hint "06 · Redis → 'Redis CPU' + 'ops/s' · 02 · App RED → 'p99 by route'"
-note "hot-key: Redis CPU tepe=$(awk -v v="$hot_cpu" 'BEGIN{printf "%.2f", v}') çekirdek · p99=$(awk -v v="$hot_p99" 'BEGIN{printf "%.0f", v*1000}') ms · Redis ops/s tepe=$(awk -v v="$ops" 'BEGIN{printf "%.0f", v}')"
-note "Redis'i ölçeklemek (cluster/sharding) BU sorunu çözmez: sıcak anahtar tek shard'a düşer."
+note "uygulamanın ürettiği: $(awk -v v="$hot_ops" 'BEGIN{printf "%.0f", v}') ops/s · Redis CPU=$(awk -v v="$hot_cpu" 'BEGIN{printf "%.2f", v}') çekirdek · redirect p99=$(awk -v v="$hot_p99" 'BEGIN{printf "%.0f", v*1000}') ms"
+note "tavanın $(awk -v a="$hot_ops" -v b="${single_ceiling:-1}" 'BEGIN{printf "%%%.1f", (b>0? a*100/b : 0)}')'i kullanılıyor — bu kümede tavana ÇARPMIYORUZ."
+note "Bu dürüst bir sonuçtur: sorun 'şu an yavaşız' değil, 'büyüyünce ÇARE YOK'. Tavanı bilmek,"
+note "ona çarpmadan önce karar vermeni sağlar — kapasite planlaması tam olarak budur."
 note "Gerçek çözümler: (a) anahtarı çoğalt (key:1..N, rastgele oku) — tutarlılık maliyeti,"
 note "                 (b) pod içinde L1 tut (14) — en sıcak anahtar hiç ağa çıkmaz,"
 note "                 (c) CDN/edge — en popüler linkler uygulamaya hiç ulaşmaz."
-awk -v a="$spread_cpu" -v b="$hot_cpu" 'BEGIN{exit !(b >= a)}' \
-  && reproduced "sıcak anahtar Redis'i tek çekirdeğe sıkıştırdı (CPU $(awk -v v="$spread_cpu" 'BEGIN{printf "%.2f", v}') → $(awk -v v="$hot_cpu" 'BEGIN{printf "%.2f", v}'), ops/s $(awk -v v="$ops" 'BEGIN{printf "%.0f", v}'))"
-not_reproduced "sıcak anahtar Redis'i zorlamadı — L1 devrede olabilir (14)"
+awk -v s="${single_ceiling:-0}" -v d="${spread_ceiling:-0}" 'BEGIN{exit !(s > 0 && d > 0 && s < d*1.3 && s > d*0.7)}' \
+  && reproduced "tek anahtar tavanı ${single_ceiling} ops/s ≈ dağıtık tavan ${spread_ceiling} ops/s — sınır instance'ta, sharding sıcak anahtarı kurtarmaz (uygulama şu an $(awk -v v="$hot_ops" 'BEGIN{printf "%.0f", v}') ops/s)"
+not_reproduced "tek anahtar tavanı dağıtık tavandan belirgin farklı (${single_ceiling:-?} vs ${spread_ceiling:-?}) — ölçüm gürültülü olabilir, tekrar dene"

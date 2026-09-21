@@ -99,7 +99,15 @@ dönüş. Grafik testere dişine benzer.
 istekler zorunlu olarak DB'ye iner. [Topic · Konu: Soğuk başlangıç, kapasite planlaması]
 
 **Reproduce (adım adım):**
-1. `make repro P=P03-02` — 300 linkle ısıtır, yük altında `rollout restart` yapar, tepeyi ölçer
+1. `make repro P=P03-02` — 300 linkle ısıtır, 180 sn'lik yük altında **önce kararlı hâli**, sonra
+   `rollout restart` penceresini ayrı ayrı ölçer ve ikisini kıyaslar
+
+**Ölçüm dersi — "tepe" tek başına kanıt değil:** İlk hâl tüm koşunun tepesini (`max_over_time`)
+alıp sondaki orana bölüyordu. O tepe rollout'tan değil, **yükün kendi soğuk başlangıcından**
+geliyordu: k6 `setup()` her koşuda yeni kodlar üretir, ilk okumaları zorunlu olarak DB'ye iner.
+Script rollout'u hiç yapmasa da "REPRODUCED" derdi — nitekim 04'te (paylaşılan önbellek)
+yanlışlıkla dedi ve `verify-prev`'i kırdı. *Bir olayın etkisini ölçeceksen, pencereni o olaya
+hizala; "en büyük değer" nereden geldiğini söylemez.*
 
 **Grafana:** `04 · Cache` → "cache miss vs DB qps"; `05 · Postgres` → "DB queries by op".
 **Nerede çözülüyor:** 04 (önbellek pod'un dışında; pod ölse de yaşar).
@@ -134,12 +142,17 @@ gördüğü örneklem küçülür, ısınma N kat uzar. [Topic · Konu: Önbelle
 1. `CONFIRM=1 make repro P=P03-04` — 1 replika ve çok replika ile aynı yükü koşup hit oranını kıyaslar
    (4000 kodluk çalışma kümesi, 20 VU × 60 sn; script replika sayısını deney sonunda geri alır)
 
-**Ölçüm notu — bu deneyi iki kez yanlış kurduk, ikisi de ders:**
+**Ölçüm notu — bu deneyi üç kez yanlış kurduk, üçü de ders:**
 - Çalışma kümesi 200 kodken etki ölçülemiyordu. Etkinin büyüklüğü `N × K / toplam istek`: pod sayısı
-  N ve çalışma kümesi K küçükse fark gürültüye karışır. K'yi 4000'e çıkarınca fark 20+ puan oldu.
+  N ve çalışma kümesi K küçükse fark gürültüye karışır. K 4000'e çıkarıldı.
 - `increase(cache_ops_total[3m])` iki ölçümü birbirine karıştırıyordu: ölçekleme + restart + yük,
   iki ölçüm arasında 3 dakikadan kısa sürüyor ve pencere bir öncekinin verisini de topluyordu.
-  Artık sayacın kendisi yükten **önce ve sonra** okunup fark alınıyor — pencere hizalama derdi yok.
+  Artık sayacın kendisi yükten **önce ve sonra** okunup fark alınıyor.
+- **Hit oranı yanlış ölçüydü.** Payı (ısınma maliyeti) ve paydası (toplam istek) aynı anda oynar;
+  iki koşuda oluşturulan link sayısı biraz farklı olunca oran da değişir. 04'te (paylaşılan
+  önbellek) bu yüzden "oran düştü" dedi ve `verify-prev`'i kırdı. Artık **ıska sayısı** ölçülüyor:
+  kaç `(pod, anahtar)` çifti ısıtıldı? Pod içi önbellekte bu sayı pod sayısıyla **çarpılır**,
+  paylaşılan önbellekte **sabit** kalır. *Doğru ölçü, iddianı doğrudan sayan ölçüdür.*
 
 **Grafana:** `04 · Cache` → "hit ratio by pod".
 **Nerede çözülüyor:** 04 (sorun tamamen ortadan kalkar). Ara çözüm **consistent hashing**'dir
