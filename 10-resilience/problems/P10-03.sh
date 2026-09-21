@@ -15,7 +15,7 @@ note "handler=${ht:-5s} · bağımlılık=${dt:-2s} · sorgu=${qt:-3s}"
 note "Doğru sıra: handler > bağımlılık ≥ sorgu. Sorgu timeout'u handler'dan BÜYÜKSE, handler"
 note "vazgeçtikten sonra sorgu çalışmaya devam eder — tam olarak bu sorunun kaynağı."
 step "Postgres'e 2 sn gecikme + client tarafı 1 sn timeout ile yük"
-"$LADDER_ROOT/platform/lib/chaos.sh" apply pg-delay-2s >/dev/null 2>&1 || warn "Chaos Mesh yok"
+chaos_apply pg-delay-2s
 sleep 5
 k6run mixed --vus 30 --duration 45s -e K6_TIMEOUT=1s >/dev/null 2>&1 || true
 sleep 10

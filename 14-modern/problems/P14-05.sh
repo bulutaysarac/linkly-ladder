@@ -17,10 +17,10 @@ step "GAME DAY başlıyor: üç arıza üst üste"
 ( k6run mixed --vus 25 --duration 150s >/tmp/p1405.k6 2>&1 ) & kpid=$!
 sleep 15
 note "  [00:15] Redis'e 200 ms gecikme"
-"$LADDER_ROOT/platform/lib/chaos.sh" apply redis-delay-200ms >/dev/null 2>&1 || true
+chaos_apply redis-delay-200ms
 sleep 30
 note "  [00:45] Postgres'e %30 paket kaybı"
-"$LADDER_ROOT/platform/lib/chaos.sh" apply pg-loss-30 >/dev/null 2>&1 || true
+chaos_apply pg-loss-30
 sleep 30
 note "  [01:15] bir redirect pod'u öldürülüyor"
 victim=$(kubectl -n "$NS" get pod -l "$APP_SELECTOR" -o jsonpath='{.items[0].metadata.name}')

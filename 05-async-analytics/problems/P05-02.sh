@@ -16,12 +16,7 @@ for _ in $(seq 1 20); do serving && break; sleep 2; done
 # Yani ölçtüğümüz şey kuyruk değil, kendi kurulum sıramızdı.
 step "Önce ısıt: sıcak kodu oluştur ve önbelleğe al (gecikme yokken)"
 k6run hot-key --vus 20 --duration 20s >/dev/null 2>&1 || true
-if "$LADDER_ROOT/platform/lib/chaos.sh" apply pg-delay-2s >/dev/null 2>&1; then
-  on_cleanup "$LADDER_ROOT/platform/lib/chaos.sh delete pg-delay-2s"
-  note "Postgres'e 2 sn gecikme enjekte edildi (yazıcı yetişemeyecek)"
-else
-  warn "Chaos Mesh yok; yalnızca yüksek yükle deneniyor"
-fi
+chaos_apply pg-delay-2s   # yazıcı yetişemeyecek
 step "Yoğun tıklama yükü — kuyruk dolacak"
 # SEED=1: gecikme altında her create 2 sn sürüyor; setup tek link oluştursun ki yüke zaman kalsın.
 SEED=1 HOT_SHARE=1 k6run hot-key --vus 80 --duration 45s >/dev/null 2>&1 || true

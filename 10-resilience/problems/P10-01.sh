@@ -19,7 +19,7 @@ run() {
   echo "${calls%%.*} ${retries%%.*} $p99"
 }
 step "Postgres'e %30 paket kaybı enjekte et"
-"$LADDER_ROOT/platform/lib/chaos.sh" apply pg-loss-30 >/dev/null 2>&1 || warn "Chaos Mesh yok"
+chaos_apply pg-loss-30
 sleep 5
 step "(1) BÜTÇELİ retry (varsayılan: 2 deneme, trafiğin %10'u)"
 read -r c1 r1 p1 <<< "$(run)"

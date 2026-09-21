@@ -10,10 +10,7 @@ step "Ayarlar"
 note "client tarafı DB_QUERY_TIMEOUT: $(kubectl -n "$NS" get deploy linkly -o jsonpath='{range .spec.template.spec.containers[0].env[?(@.name=="DB_QUERY_TIMEOUT")]}{.value}{end}')"
 note "sunucu tarafı STATEMENT_TIMEOUT: '${st:-<boş — KAPALI>}'"
 step "Postgres'e 2 sn gecikme enjekte et (Chaos Mesh)"
-if ! "$LADDER_ROOT/platform/lib/chaos.sh" apply pg-delay-2s; then
-  warn "Chaos Mesh kurulu değil: cd platform && make chaos"; exit 2
-fi
-on_cleanup "$LADDER_ROOT/platform/lib/chaos.sh delete pg-delay-2s"
+chaos_apply pg-delay-2s
 sleep 5
 k6run mixed --vus 40 --duration 60s || true
 sleep 12

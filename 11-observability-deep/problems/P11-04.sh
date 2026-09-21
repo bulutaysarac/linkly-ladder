@@ -11,7 +11,7 @@ step "Tanımlı alarmlar"
 curl -sG "$PROM_URL/api/v1/rules" 2>/dev/null \
   | jq -r '.data.groups[]?.rules[]? | select(.type=="alerting") | select(.name|test("Linkly")) | "    \(.name) [\(.labels.severity // "-")]"' 2>/dev/null | sort -u
 step "Kısa bir hata sıçraması üret (~30 sn)"
-"$LADDER_ROOT/platform/lib/chaos.sh" apply pg-loss-50 >/dev/null 2>&1 || warn "Chaos Mesh yok"
+chaos_apply pg-loss-50
 ( k6run mixed --vus 20 --duration 35s >/dev/null 2>&1 || true )
 "$LADDER_ROOT/platform/lib/chaos.sh" delete pg-loss-50 >/dev/null 2>&1 || true
 note "sıçrama bitti, alarmlar değerlendiriliyor..."

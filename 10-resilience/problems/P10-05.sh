@@ -9,7 +9,7 @@ ensure_healthy
 on_cleanup "kubectl -n \"$NS\" set env deploy/redirect TRAP_NO_DEP_TIMEOUT-"
 on_cleanup "$LADDER_ROOT/platform/lib/chaos.sh delete redis-delay-3s"
 step "Redis'e 3 sn gecikme enjekte et (ölmedi, YAVAŞLADI)"
-"$LADDER_ROOT/platform/lib/chaos.sh" apply redis-delay-3s >/dev/null 2>&1 || warn "Chaos Mesh yok"
+chaos_apply redis-delay-3s
 sleep 5
 step "(1) Timeout VAR (varsayılan)"
 k6run redirect --vus 30 --duration 45s >/dev/null 2>&1 || true

@@ -14,10 +14,7 @@ VUS=${VUS:-60}
 ensure_healthy
 on_cleanup "kubectl -n \"$NS\" set env deploy/linkly TRAP_NO_SINGLEFLIGHT- CACHE_TTL-"
 step "Doldurma maliyetini gerçekçi yap: Postgres'e 200 ms gecikme (Chaos Mesh)"
-if ! "$LADDER_ROOT/platform/lib/chaos.sh" apply pg-delay-200ms; then
-  warn "Chaos Mesh kurulu değil: cd platform && make chaos"; exit 2
-fi
-on_cleanup "$LADDER_ROOT/platform/lib/chaos.sh delete pg-delay-200ms"
+chaos_apply pg-delay-200ms
 sleep 5
 gets() { promq "sum(db_queries_total{namespace=\"$NS\",op=\"get\"})"; }
 run_hot() {

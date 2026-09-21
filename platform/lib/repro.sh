@@ -46,6 +46,25 @@ create_status() {
 status_of()   { curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$BASE_URL/$1"; }
 header_of()   { curl -sI --max-time 5 "$BASE_URL/$1" | tr -d '\r' | awk -v h="$2" 'tolower($1)==tolower(h)":"{ $1=""; sub(/^ /,""); print }'; }
 
+# Chaos uygula ve temizliğini kaydet; UYGULANAMADIYSA scripti DURDUR.
+# Neden: yaygın `|| warn "Chaos Mesh yok"` kalıbı iki farklı durumu aynı kefeye koyuyordu —
+#   (2) Chaos Mesh kurulu değil
+#   (3) bu seviyede hedef pod YOK (etiket uyuşmuyor)
+# İkincisi bir YAPILANDIRMA HATASIDIR. Sessizce geçilirse script arızayı hiç enjekte etmeden
+# ölçüm yapar ve "sorun yok" der. Gerçekte oldu: 09-14'te Postgres CNPG'ye geçti, pod'lar
+# `app.kubernetes.io/name=postgres` etiketini taşımıyordu ve pg-loss/pg-delay deneylerinin
+# hepsi sessizce arızasız koştu. Ölçemediğin şeyi "yok" sanma; enjekte edemediğin arızayı da.
+chaos_apply() {
+  local c=$1 out rc=0
+  out=$("$LADDER_ROOT/platform/lib/chaos.sh" apply "$c" 2>&1) || rc=$?
+  case $rc in
+    0) on_cleanup "$LADDER_ROOT/platform/lib/chaos.sh delete $c"; note "chaos uygulandı: $c"; return 0 ;;
+    2) warn "Chaos Mesh kurulu değil: cd platform && make chaos"; exit 2 ;;
+    3) warn "chaos hedefi bu seviyede yok ($c) — ETİKET UYUŞMUYOR, arıza enjekte edilemedi"; exit 2 ;;
+    *) warn "chaos uygulanamadı ($c): $out"; exit 2 ;;
+  esac
+}
+
 # Bilinen bir koda N tıklama üret (varsayılan 10 paralel).
 # Neden paralel: sıralı `for + curl` döngüsü ~20-40 istek/s'te kalıyor. "Tampon/ kuyruk doluyken
 # öldür" türü deneylerde bu hız yetersiz — tüketici üretimden hızlı çalışıyorsa hiç birikim olmaz

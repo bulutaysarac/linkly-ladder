@@ -9,7 +9,7 @@ ensure_healthy
 on_cleanup "kubectl -n \"$NS\" set env deploy/redirect TRAP_NO_BREAKER-"
 on_cleanup "$LADDER_ROOT/platform/lib/chaos.sh delete pg-loss-50"
 step "Postgres'e %50 paket kaybı (ağır arıza)"
-"$LADDER_ROOT/platform/lib/chaos.sh" apply pg-loss-50 >/dev/null 2>&1 || warn "Chaos Mesh yok"
+chaos_apply pg-loss-50
 sleep 5
 step "(1) Devre kesici AÇIK (varsayılan)"
 k6run mixed --vus 25 --duration 50s >/dev/null 2>&1 || true

@@ -21,10 +21,7 @@ kubectl -n "$NS" set env deploy/redirect TRAP_NO_STICKY=true >/dev/null
 kubectl -n "$NS" set env deploy/api TRAP_NO_STICKY=true >/dev/null
 kubectl -n "$NS" rollout status deploy/redirect --timeout=180s >/dev/null 2>&1 || true
 kubectl -n "$NS" rollout status deploy/api --timeout=180s >/dev/null 2>&1 || true
-if "$LADDER_ROOT/platform/lib/chaos.sh" apply replica-delay >/dev/null 2>&1; then
-  on_cleanup "$LADDER_ROOT/platform/lib/chaos.sh delete replica-delay"
-  note "replikalara ağ gecikmesi enjekte edildi"
-fi
+chaos_apply replica-delay
 sleep 8
 k6run read-your-writes --vus 10 --duration 30s || true
 v_off=$(promq "sum(increase(ryw_violations_total{namespace=\"$NS\"}[3m]))")
