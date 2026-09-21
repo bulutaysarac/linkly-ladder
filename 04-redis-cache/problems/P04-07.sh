@@ -22,7 +22,7 @@ for i in 1 2 3; do
   note "  KEYS çağrısı $i → $(echo "$out" | head -c 120)"
 done
 wait $kpid || true
-p99=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le))")
+p99=$(num "$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le))")")
 maxp99=$(promq "max_over_time(histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[30s])) by (le))[3m:15s])")
 grafana_hint "06 · Redis → 'commands by type' (KEYS görünürse alarm) + 'App → Redis latency p99'"
 note "redirect p99=$(awk -v v="$p99" 'BEGIN{printf "%.0f", v*1000}') ms · pencere içi TEPE p99=$(awk -v v="$maxp99" 'BEGIN{printf "%.0f", v*1000}') ms"

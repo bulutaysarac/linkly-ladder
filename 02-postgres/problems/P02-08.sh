@@ -9,14 +9,14 @@ psql() { kubectl -n "$NS" exec "$pgpod" -c postgres -- psql -U linkly -d linkly 
 step "Referans: trafiğin dağıldığı durum (mixed)"
 k6run mixed --vus 60 --duration 40s >/dev/null 2>&1 || true
 sleep 10
-spread_p99=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[1m])) by (le))")
+spread_p99=$(num "$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[1m])) by (le))")")
 note "dağıtık yükte redirect p99: $(awk -v v="$spread_p99" 'BEGIN{printf "%.0f", v*1000}') ms"
 step "Aynı yük, trafiğin %90'ı TEK linke (hot key)"
 HOT_SHARE=0.9 k6run hot-key --vus 60 --duration 40s >/dev/null 2>&1 || true
 sleep 12
-hot_p99=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[1m])) by (le))")
-upd_p99=$(promq "histogram_quantile(0.99, sum(rate(db_query_duration_seconds_bucket{namespace=\"$NS\",op=\"increment_clicks\"}[1m])) by (le))")
-get_p99=$(promq "histogram_quantile(0.99, sum(rate(db_query_duration_seconds_bucket{namespace=\"$NS\",op=\"get\"}[1m])) by (le))")
+hot_p99=$(num "$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[1m])) by (le))")")
+upd_p99=$(num "$(promq "histogram_quantile(0.99, sum(rate(db_query_duration_seconds_bucket{namespace=\"$NS\",op=\"increment_clicks\"}[1m])) by (le))")")
+get_p99=$(num "$(promq "histogram_quantile(0.99, sum(rate(db_query_duration_seconds_bucket{namespace=\"$NS\",op=\"get\"}[1m])) by (le))")")
 locks=$(promq "sum(pg_locks_count{namespace=\"$NS\"})")
 dead=$(psql "SELECT n_dead_tup FROM pg_stat_user_tables WHERE relname='links'")
 grafana_hint "05 · Postgres → 'locks' + 'DB query p99 by op' (increment_clicks) + 'dead tuples'"

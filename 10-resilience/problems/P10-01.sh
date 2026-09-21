@@ -15,7 +15,7 @@ run() {
   local calls retries p99
   calls=$(promq "sum(increase(dependency_requests_total{namespace=\"$NS\",dep=\"postgres\"}[3m]))")
   retries=$(promq "sum(increase(retry_total{namespace=\"$NS\",dep=\"postgres\"}[3m]))")
-  p99=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\"}[2m])) by (le))")
+  p99=$(num "$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\"}[2m])) by (le))")")
   echo "${calls%%.*} ${retries%%.*} $p99"
 }
 step "Postgres'e %30 paket kaybı enjekte et"

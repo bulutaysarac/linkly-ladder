@@ -21,7 +21,7 @@ k6run mixed --vus 30 --duration 45s -e K6_TIMEOUT=1s >/dev/null 2>&1 || true
 sleep 10
 inflight=$(promq "max_over_time(sum(http_in_flight_requests{namespace=\"$NS\"})[3m:15s])")
 goroutines=$(promq "max_over_time(sum(go_goroutines{namespace=\"$NS\",pod=~\"redirect.*\"})[3m:15s])")
-dep_p99=$(promq "histogram_quantile(0.99, sum(rate(dependency_request_duration_seconds_bucket{namespace=\"$NS\",dep=\"postgres\"}[2m])) by (le))")
+dep_p99=$(num "$(promq "histogram_quantile(0.99, sum(rate(dependency_request_duration_seconds_bucket{namespace=\"$NS\",dep=\"postgres\"}[2m])) by (le))")")
 timeouts=$(promq "sum(increase(dependency_requests_total{namespace=\"$NS\",dep=\"postgres\",result=\"timeout\"}[3m]))")
 bulk=$(promq "sum(increase(dependency_requests_total{namespace=\"$NS\",dep=\"postgres\",result=\"bulkhead\"}[3m]))")
 grafana_hint "11 · Resilience → 'in-flight by pod' + 'dependency p99 by dep' · 01 · Pods → Goroutine"

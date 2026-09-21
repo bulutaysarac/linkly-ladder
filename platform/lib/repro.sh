@@ -127,6 +127,11 @@ with_timeout() {
   return "$rc"
 }
 
+# NaN'i sayıya çevir. histogram_quantile BOŞ pencerede NaN döner; awk'ta NaN ile yapılan HER
+# karşılaştırma yanlış çıkar ve script sessizce "etki yok" der (P07-01 tam olarak bunu yaptı:
+# "tepe p99=nan ms" basıp "burst latency'yi bozmadı" dedi). Sayı bekleyen yere sayı ver.
+num() { local v=${1:-}; case "$v" in ""|NaN|nan|+Inf|-Inf|null) printf '0' ;; *) printf '%s' "$v" ;; esac; }
+
 # Bir metrik YOKSA ölçüme başlama.
 # `promq` serisi olmayan bir sorguya "0" döndürür; yani var olmayan bir metrik ile gerçekten
 # sıfır olan bir metrik aşağı akışta AYNI görünür. Gerçekte oldu: 07-14'te postgres/redis

@@ -8,7 +8,7 @@ ensure_healthy
 step "Kötü client (tek IP, açgözlü) + normal client'lar (dağıtık IP) aynı anda"
 k6run abuser --duration 60s || true
 sleep 12
-normal_p99=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le))")
+normal_p99=$(num "$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le))")")
 rej_ip=$(promq "sum(increase(ratelimit_decisions_total{namespace=\"$NS\",decision=\"reject\",key_type=\"ip\"}[3m]))")
 rej_tn=$(promq "sum(increase(ratelimit_decisions_total{namespace=\"$NS\",decision=\"reject\",key_type=\"tenant\"}[3m]))")
 allow=$(promq "sum(increase(ratelimit_decisions_total{namespace=\"$NS\",decision=\"allow\"}[3m]))")

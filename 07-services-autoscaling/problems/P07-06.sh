@@ -19,6 +19,11 @@ done
 # (ilk koşuda "≈ -270" yazdı). Ölçtüğün şey bir SAYAÇ ise, seri kaybının farkı bozduğunu unutma.
 dbq() { promq "sum(db_queries_total{namespace=\"$NS\",pod=~\"api-.*\"})"; }
 delta() { awk -v a="${1:-0}" -v b="${2:-0}" 'BEGIN{d=b-a; print (d<0 ? 0 : int(d))}'; }
+# ISINDIRMA ŞART: ilk /api/links isteği havuzu açıyor ve 1.05 sn sürdü; N+1 açık koşu ise
+# 0.12 sn çıktı — yani script "N+1 daha HIZLI" gibi saçma bir sonuç üretti. İlk isteğin maliyeti
+# ölçtüğün şeyin değil, ÖLÇÜME BAŞLAMANIN maliyetidir.
+curl -s -o /dev/null -H "X-Tenant-ID: $TEN" "$BASE_API/api/links" || true
+curl -s -o /dev/null -H "X-Tenant-ID: $TEN" "$BASE_API/api/links" || true
 step "Varsayılan (tek sorgu): list süresi ve DB sorgu sayısı"
 q0=$(dbq)
 t_ok=$(curl -s -o /dev/null -w '%{time_total}' -H "X-Tenant-ID: $TEN" "$BASE_API/api/links")
@@ -30,6 +35,8 @@ step "Tuzağı aç: her link için AYRI stats sorgusu"
 kubectl -n "$NS" set env deploy/api TRAP_LIST_N_PLUS_ONE=true >/dev/null
 kubectl -n "$NS" rollout status deploy/api --timeout=180s >/dev/null || true
 sleep 5
+curl -s -o /dev/null -H "X-Tenant-ID: $TEN" "$BASE_API/api/links" || true   # yeni pod da soğuk
+curl -s -o /dev/null -H "X-Tenant-ID: $TEN" "$BASE_API/api/links" || true
 q2=$(dbq)
 t_bad=$(curl -s -o /dev/null -w '%{time_total}' -H "X-Tenant-ID: $TEN" "$BASE_API/api/links")
 sleep 12

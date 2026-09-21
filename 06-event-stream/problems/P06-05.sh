@@ -8,7 +8,7 @@ ensure_healthy
 step "Broker ayaktayken taban: redirect p99"
 k6run redirect --vus 20 --duration 30s >/dev/null 2>&1 || true
 sleep 10
-base_p99=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[1m])) by (le))")
+base_p99=$(num "$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[1m])) by (le))")")
 note "broker ayakta: redirect p99=$(awk -v v="$base_p99" 'BEGIN{printf "%.0f", v*1000}') ms"
 need_confirm "redpanda durdurulacak"
 step "Broker'ı durdur (replicas=0) ve AYNI yükü ver"
@@ -18,7 +18,7 @@ kubectl -n "$NS" scale statefulset redpanda --replicas=0 >/dev/null
 sleep 10
 k6run redirect --vus 20 --duration 40s >/dev/null 2>&1 || true
 sleep 8
-down_p99=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[1m])) by (le))")
+down_p99=$(num "$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[1m])) by (le))")")
 e5=$(k6_5xx)
 buffered=$(promq "max_over_time(sum(producer_buffered_records{namespace=\"$NS\"})[3m:15s])")
 dropped=$(promq "sum(increase(producer_records_total{namespace=\"$NS\",result=\"dropped\"}[5m]))")

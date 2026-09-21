@@ -10,14 +10,14 @@ on_cleanup "$LADDER_ROOT/platform/lib/chaos.sh delete redis-delay-200ms"
 step "Önce temiz taban"
 k6run redirect --vus 20 --duration 30s >/dev/null 2>&1 || true
 sleep 10
-base=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le))")
+base=$(num "$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le))")")
 note "taban p99=$(awk -v v="$base" 'BEGIN{printf "%.0f", v*1000}') ms"
 step "Gizli bir gecikme enjekte ediliyor (hangi bağımlılık olduğunu SÖYLEMİYORUZ)"
 chaos_apply redis-delay-200ms
 sleep 5
 k6run redirect --vus 20 --duration 40s >/dev/null 2>&1 || true
 sleep 12
-slow=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le))")
+slow=$(num "$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le))")")
 note "şimdi p99=$(awk -v v="$slow" 'BEGIN{printf "%.0f", v*1000}') ms — metrik sana BU KADARINI söylüyor"
 step "Metrikle teşhis denemesi: bağımlılık bazlı gecikmeler"
 curl -sG "$PROM_URL/api/v1/query" --data-urlencode \

@@ -8,8 +8,8 @@ step "Önbelleği ısıt, sonra sabit yük altında gecikmeyi ölç"
 k6run redirect --vus 20 --duration 30s >/dev/null 2>&1 || true
 k6run redirect --vus 20 --duration 45s || true
 sleep 12
-p50=$(promq "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le))")
-p99=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le))")
+p50=$(num "$(promq "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le))")")
+p99=$(num "$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le))")")
 hit=$(promq "sum(rate(cache_ops_total{namespace=\"$NS\",layer=\"l2\",result=\"hit\"}[2m])) / sum(rate(cache_ops_total{namespace=\"$NS\",layer=\"l2\"}[2m]))")
 redis_cpu=$(promq "sum(rate(container_cpu_usage_seconds_total{namespace=\"$NS\",pod=~\"redis.*\",image!=\"\",image!~\".*pause.*\"}[2m]))")
 grafana_hint "02 · App RED → 'latency p50/p95/p99' · 06 · Redis → 'App → Redis latency p99'"

@@ -39,7 +39,7 @@ HOT_SHARE=0.95 k6run hot-key --vus 60 --duration 40s >/dev/null 2>&1 || true
 sleep 12
 hot_ops=$(promq "max_over_time(sum(rate(redis_commands_processed_total{namespace=\"$NS\"}[30s]))[3m:15s])")
 hot_cpu=$(promq "max_over_time(sum(rate(container_cpu_usage_seconds_total{namespace=\"$NS\",pod=~\"redis.*\",image!=\"\",image!~\".*pause.*\"}[30s]))[3m:15s])")
-hot_p99=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[1m])) by (le))")
+hot_p99=$(num "$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[1m])) by (le))")")
 grafana_hint "06 · Redis → 'Redis CPU' + 'ops/s' · 02 · App RED → 'p99 by route'"
 note "uygulamanın ürettiği: $(awk -v v="$hot_ops" 'BEGIN{printf "%.0f", v}') ops/s · Redis CPU=$(awk -v v="$hot_cpu" 'BEGIN{printf "%.2f", v}') çekirdek · redirect p99=$(awk -v v="$hot_p99" 'BEGIN{printf "%.0f", v*1000}') ms"
 note "tavanın $(awk -v a="$hot_ops" -v b="${single_ceiling:-1}" 'BEGIN{printf "%%%.1f", (b>0? a*100/b : 0)}')'i kullanılıyor — bu kümede tavana ÇARPMIYORUZ."

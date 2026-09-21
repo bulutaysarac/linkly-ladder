@@ -17,7 +17,7 @@ sleep 10
 calls_on=$(promq "sum(increase(dependency_requests_total{namespace=\"$NS\",dep=\"postgres\"}[3m]))")
 open_rej=$(promq "sum(increase(dependency_requests_total{namespace=\"$NS\",dep=\"postgres\",result=\"open\"}[3m]))")
 state_max=$(promq "max_over_time(max(breaker_state{namespace=\"$NS\",dep=\"postgres\"})[4m:15s])")
-p99_on=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\"}[2m])) by (le))")
+p99_on=$(num "$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\"}[2m])) by (le))")")
 note "breaker açık: bağımlılık çağrısı=${calls_on%%.*} · devre-açık reddi=${open_rej%%.*} · tepe durum=${state_max%%.*} (2=açık) · p99=$(awk -v v="$p99_on" 'BEGIN{printf "%.0f", v*1000}') ms"
 step "(2) TRAP_NO_BREAKER: devre kesici yok, her istek bozuk bağımlılığa gidiyor"
 kubectl -n "$NS" set env deploy/redirect TRAP_NO_BREAKER=true >/dev/null
@@ -26,7 +26,7 @@ for _ in $(seq 1 20); do serving && break; sleep 2; done
 k6run mixed --vus 25 --duration 50s >/dev/null 2>&1 || true
 sleep 10
 calls_off=$(promq "sum(increase(dependency_requests_total{namespace=\"$NS\",dep=\"postgres\"}[3m]))")
-p99_off=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\"}[2m])) by (le))")
+p99_off=$(num "$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\"}[2m])) by (le))")")
 grafana_hint "11 · Resilience → 'breaker state by dep' + 'dependency errors/s' · 02 · App RED → p99"
 note "breaker yok: bağımlılık çağrısı=${calls_off%%.*} · p99=$(awk -v v="$p99_off" 'BEGIN{printf "%.0f", v*1000}') ms"
 note "Devre açıkken istek, bağımlılığa GİTMEDEN hızlıca reddedilir (ya da degrade moda düşer):"

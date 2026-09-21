@@ -8,7 +8,7 @@ ensure_healthy
 step "Isınmış durumda taban p99"
 k6run redirect --vus 20 --duration 40s >/dev/null 2>&1 || true
 sleep 10
-warm=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[1m])) by (le))")
+warm=$(num "$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[1m])) by (le))")")
 note "ısınmış p99=$(awk -v v="$warm" 'BEGIN{printf "%.1f", v*1000}') ms"
 step "Yük altında yeni pod'lar ekle (soğuk pod trafiğe girsin)"
 ( k6run redirect --vus 30 --duration 70s >/tmp/p0703.k6 2>&1 ) & kpid=$!
@@ -17,7 +17,7 @@ kubectl -n "$NS" scale deploy/redirect --replicas=6 >/dev/null
 on_cleanup "kubectl -n \"$NS\" scale deploy/redirect --replicas=2"
 sleep 25
 # Yeni (genç) pod'ların p99'unu ayrı ölç
-young=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[30s])) by (le, pod))")
+young=$(num "$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[30s])) by (le, pod))")")
 wait $kpid || true
 sleep 8
 peak=$(promq "max_over_time(histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[30s])) by (le))[3m:15s])")

@@ -33,6 +33,11 @@ note "Bu zincir 5 saniyede biten bir burst'ten yavaştır: pod'lar yük BİTTİK
 note "Doğru araçlar: (a) minReplicas'ı tabanı karşılayacak kadar yüksek tut, (b) scaleUp'ı hızlandır,"
 note "(c) asıl önemlisi: burst'ü YUTACAK bir tampon bırak — otomatik ölçekleme burst için değil,"
 note "TREND için tasarlanmıştır. Ani yük bir kapasite sorunudur, bir otomasyon sorunu değil."
-awk -v p="$peak_p99" 'BEGIN{exit !(p > 0.05)}' \
+# NaN KORUMASI: histogram_quantile boş pencerede NaN döner ve awk'ta her karşılaştırma yanlış
+# çıkar — script "burst etkisiz" der. Burst 5 saniye sürüyor, Prometheus 30 sn'de bir örnekliyor:
+# pencere boş kalabilir. O yüzden karar yalnızca p99'a değil, k6'nın KENDİ gördüğü hata oranına
+# da bakar: yükün kendisi de bir ölçüm kaynağıdır.
+[[ "$peak_p99" == "NaN" || -z "$peak_p99" ]] && peak_p99=0
+awk -v p="$peak_p99" -v f="$fr" -v e="$e5" 'BEGIN{exit !(p > 0.05 || f > 0.02 || e > 0)}' \
   && reproduced "burst sırasında p99 $(awk -v v="$peak_p99" 'BEGIN{printf "%.0f", v*1000}') ms'e çıktı; HPA ${peak_desired%%.*} replika istedi ama zamanında yetişemedi"
-not_reproduced "burst latency'yi bozmadı (minReplicas yeterli olabilir — PEAK'i artırıp tekrar dene)"
+not_reproduced "burst latency'yi bozmadı (tepe p99 $(awk -v v="$peak_p99" 'BEGIN{printf "%.0f", v*1000}') ms, 5xx=$e5, failed=$fr) — PEAK'i artırıp tekrar dene"
