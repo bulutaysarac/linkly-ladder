@@ -62,6 +62,16 @@ wait: ## Deployment/StatefulSet + (varsa) Argo Rollout hazır olana kadar bekle
 	@for d in $$(kubectl -n $(NS) get deploy,statefulset -o name 2>/dev/null); do kubectl -n $(NS) rollout status $$d --timeout=240s || exit 1; done
 	@# `kubectl rollout status` Argo Rollout'u tanımaz (yalnızca yerleşik türler). 12+ seviyelerde
 	@# beklemezsek smoke, henüz hazır olmayan bir uygulamaya çarpar.
+	@# CNPG Cluster'ı da bekle: operatör pod'ları doğrudan yaratır, ortada Deployment/StatefulSet
+	@# YOKTUR — yani yukarıdaki döngü onu hiç görmez ve smoke, veritabanı gelmeden koşar.
+	@for c in $$(kubectl -n $(NS) get cluster.postgresql.cnpg.io -o name 2>/dev/null); do \
+	  want=$$(kubectl -n $(NS) get $$c -o jsonpath='{.spec.instances}'); \
+	  for i in $$(seq 1 150); do \
+	    got=$$(kubectl -n $(NS) get $$c -o jsonpath='{.status.readyInstances}' 2>/dev/null); \
+	    [ "$${got:-0}" -ge "$${want:-1}" ] && break; sleep 4; \
+	  done; \
+	  echo "  $$c hazır: $${got:-0}/$${want:-1}"; \
+	done
 	@for r in $$(kubectl -n $(NS) get rollout -o name 2>/dev/null); do \
 	  want=$$(kubectl -n $(NS) get $$r -o jsonpath='{.spec.replicas}'); \
 	  for i in $$(seq 1 120); do \
