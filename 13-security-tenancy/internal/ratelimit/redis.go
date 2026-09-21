@@ -1,6 +1,7 @@
 package ratelimit
 
 import (
+	"errors"
 	"context"
 	"time"
 
@@ -61,7 +62,25 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "ratelimit_check_duration_seconds", Help: "Limit kontrolü süresi",
 			Buckets: []float64{.0001, .0005, .001, .0025, .005, .01, .025, .05, .1}}),
 	}
-	reg.MustRegister(m.Decisions, m.Errors, m.Latency)
+	// AYNI METRİĞİ İKİ PAKET SAHİPLENİYOR: `ratelimit_decisions_total` hem burada (dağıtık
+	// limiter) hem internal/metrics'te (süreç içi yedek limiter, Redis yokken kullanılıyor)
+	// tanımlı. MustRegister ikinci kayıtta PANİKLİYOR ve api-svc hiç açılmıyordu
+	// ("duplicate metrics collector registration attempted"). Prometheus'un bunun için bir
+	// sözleşmesi var: kayıt hatası AlreadyRegisteredError ise VAR OLAN collector'ı kullan.
+	// Ders: bir metriğin adı bir SÖZLEŞMEDİR; iki sahip varsa çakışmayı yutup tek seriye yaz.
+	register := func(c prometheus.Collector) prometheus.Collector {
+		if err := reg.Register(c); err != nil {
+			var are prometheus.AlreadyRegisteredError
+			if errors.As(err, &are) {
+				return are.ExistingCollector
+			}
+			panic(err)
+		}
+		return c
+	}
+	m.Decisions = register(m.Decisions).(*prometheus.CounterVec)
+	m.Errors = register(m.Errors).(prometheus.Counter)
+	m.Latency = register(m.Latency).(prometheus.Histogram)
 	for _, d := range []string{"allow", "reject"} {
 		for _, k := range []string{"ip", "tenant", "global"} {
 			m.Decisions.WithLabelValues(d, k)

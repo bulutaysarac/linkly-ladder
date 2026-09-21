@@ -33,8 +33,8 @@ type Metrics struct {
 	Panics     prometheus.Counter
 	Redirect   *prometheus.CounterVec // result
 	Create     *prometheus.CounterVec // result
-	Unsafe     *prometheus.CounterVec // reason
-	RateLimit  *prometheus.CounterVec // decision, key_type
+	Unsafe     *prometheus.CounterVec
+	RateLimit  *prometheus.CounterVec // decision, key_type // reason
 	trapByCode bool
 }
 
@@ -61,6 +61,10 @@ func New(trapByCode bool) *Metrics {
 	m.Create = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "create_total", Help: "Link oluşturma sonucu"}, []string{"result"})
 	m.Unsafe = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "create_rejected_unsafe_total", Help: "Güvenlik nedeniyle reddedilen hedef"}, []string{"reason"})
 	m.RateLimit = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ratelimit_decisions_total", Help: "Hız sınırı kararı"}, []string{"decision", "key_type"})
+	// NOT: `ratelimit_decisions_total` AYNI ZAMANDA internal/ratelimit paketinin: 08'de limiter Redis'e
+	// taşındı ve kendi Metrics'ini kuruyor. İkisi birden kaydedilince Prometheus
+	// "duplicate metrics collector registration attempted" ile PANİKLİYOR ve api-svc hiç
+	// açılmıyordu. Bir metriğin SAHİBİ tek bir paket olmalı; taşıdığın şeyin eski kaydını da taşı.
 
 	reg.MustRegister(m.Requests, m.Duration, m.InFlight, m.Panics, m.Redirect, m.Create, m.Unsafe, m.RateLimit)
 	m.preRegisterZero()
