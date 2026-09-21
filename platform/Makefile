@@ -42,6 +42,7 @@ obs: ## kube-prometheus-stack + Loki + Alloy (namespace monitoring)
 	   -f helm/kube-prometheus-stack.values.yaml --wait --timeout 15m
 	@helm upgrade --install loki grafana/loki -n monitoring -f helm/loki.values.yaml --wait --timeout 10m
 	@helm upgrade --install alloy grafana/alloy -n monitoring -f helm/alloy.values.yaml --wait --timeout 5m
+	@kubectl apply -f manifests/obs-servicemonitors.yaml   # Loki/Alloy'un KENDİ metrikleri (P11-05)
 	@$(MAKE) --no-print-directory dashboards
 	@echo "✔ obs → http://grafana.localtest.me (admin/ladder)  http://prometheus.localtest.me"
 

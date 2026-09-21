@@ -1,0 +1,51 @@
+# Loki ve Alloy'un KENDİ metriklerini Prometheus'a aldır.
+#
+# EN: The observability stack is a system too, and it has capacity. P11-05 asks "what happens to
+#     your logs when you turn on debug logging during an incident?" — a question you cannot answer
+#     unless Loki's own ingestion and discard counters are in Prometheus. Without these two
+#     ServiceMonitors the script silently measures zero and reports "no problem".
+# TR: Gözlemlenebilirlik yığını da bir sistemdir ve kapasitesi vardır. P11-05 "olay sırasında debug
+#     log açarsan loglarına ne olur?" diye sorar — Loki'nin kendi alım ve düşürme sayaçları
+#     Prometheus'ta olmadan bu sorunun cevabı yoktur. Bu iki ServiceMonitor olmadan script sessizce
+#     sıfır ölçer ve "sorun yok" der.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: loki
+  namespace: monitoring
+  labels:
+    release: kps            # kube-prometheus-stack yalnızca bu etiketli ServiceMonitor'ları alır
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: loki
+      app.kubernetes.io/instance: loki
+    # headless servis AYNI etiketleri taşıyor; ikisi de seçilirse her hedef İKİ KEZ scrape edilir
+    # ve sayaçlar iki katına çıkar. Chart bunun için `prometheus.io/service-monitor: "false"` koyuyor.
+    matchExpressions:
+      - { key: prometheus.io/service-monitor, operator: NotIn, values: ["false"] }
+  namespaceSelector:
+    matchNames: ["monitoring"]
+  endpoints:
+    - port: http-metrics
+      path: /metrics
+      interval: 15s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: alloy
+  namespace: monitoring
+  labels:
+    release: kps
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: alloy
+      app.kubernetes.io/instance: alloy
+  namespaceSelector:
+    matchNames: ["monitoring"]
+  endpoints:
+    - port: http-metrics
+      path: /metrics
+      interval: 15s

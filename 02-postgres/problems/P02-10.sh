@@ -7,7 +7,11 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 ensure_healthy
 on_cleanup "kubectl -n \"$NS\" set env deploy/linkly TRAP_READYZ_CHECKS_DB-"
 step "Önce varsayılan davranış: DB'yi kes, endpoint sayısını izle"
-base_ep=$(promq "sum(kube_endpoint_address{namespace=\"$NS\",endpoint=\"linkly\",ready=\"true\"})")
+# NOT: bu KSM sürümü `kube_endpoint_address` ÜRETMİYOR; karşılığı `kube_endpointslice_endpoints`.
+# Metrik adının var olduğunu VARSAYMAK, sessizce 0 ölçmenin en kolay yoludur.
+# DİKKAT: `service` etiketi burada KSM'nin KENDİ servisidir (scrape etiketi); hedef servisi
+# `endpointslice` adından seç (slice, servis adıyla başlar).
+base_ep=$(promq "sum(kube_endpointslice_endpoints{namespace=\"$NS\",endpointslice=~\"linkly-.*\",ready=\"true\"})")
 note "hazır endpoint (normal): ${base_ep%%.*}"
 step "Tuzağı aç: readyz DB'ye ping atsın"
 kubectl -n "$NS" set env deploy/linkly TRAP_READYZ_CHECKS_DB=true >/dev/null

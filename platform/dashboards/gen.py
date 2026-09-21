@@ -94,7 +94,7 @@ D["01-pods-resources"] = dashboard("pods", "01 · Pods & Resources", [
     ts("Goroutine", [(f'go_goroutines{{{NS}}}', "{{pod}}")], "short", 8, desc="01+ · yarım bağlantılar, asılı istekler burada birikir"),
     ts("Heap alloc", [(f'go_memstats_heap_alloc_bytes{{{NS}}}', "{{pod}}")], "bytes", 8),
     ts("GC süresi (s/s)", [(f'rate(go_gc_duration_seconds_sum{{{NS}}}[2m])', "{{pod}}")], "short", 8),
-    ts("Endpoint (hazır adres) sayısı", [(f'sum(kube_endpoint_address{{{NS},ready="true"}}) by (endpoint)', "{{endpoint}}")], "short", 12, desc="10 · P10-02: readiness bağımlılığa bağlıysa burası 0'a düşer"),
+    ts("Endpoint (hazır adres) sayısı", [(f'sum(kube_endpointslice_endpoints{{{NS},ready="true"}}) by (endpointslice)', "{{endpointslice}}")], "short", 12, desc="10 · P10-02: readiness bağımlılığa bağlıysa burası 0'a düşer"),
     ts("Network rx/tx", [(f'sum(rate(container_network_receive_bytes_total{{{NS}}}[2m])) by (pod)', "rx {{pod}}"), (f'sum(rate(container_network_transmit_bytes_total{{{NS}}}[2m])) by (pod)', "tx {{pod}}")], "Bps", 12),
 ])
 
@@ -229,7 +229,7 @@ D["11-resilience"] = dashboard("resilience", "11 · Resilience", [
     ts("retry/s by dep", [(f'sum(rate(retry_total{{{NS}}}[1m])) by (dep)', "{{dep}}")], "reqps", 8, desc="P10-01 retry fırtınası"),
     ts("load shed/s", [(f'sum(rate(load_shed_total{{{NS}}}[1m]))', "shed")], "reqps", 8, desc="P10-06"),
     ts("in-flight by pod", [(f'http_in_flight_requests{{{NS}}}', "{{pod}}")], "short", 12, desc="P10-05 yavaş bağımlılık → birikme"),
-    ts("hazır endpoint sayısı", [(f'sum(kube_endpoint_address{{{NS},ready="true"}}) by (endpoint)', "{{endpoint}}")], "short", 12, desc="P10-02"),
+    ts("hazır endpoint sayısı", [(f'sum(kube_endpointslice_endpoints{{{NS},ready="true"}}) by (endpointslice)', "{{endpointslice}}")], "short", 12, desc="P10-02"),
     ts("degrade modu", [(f'max(degraded_mode{{{NS}}}) by (mode)', "{{mode}}")], "short", 12),
     ts("kabul edilen isteklerin p99 (503 hariç)", [(f'histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{{{NS},code!="503"}}[1m])) by (le))', "p99")], "s", 12),
 ])
