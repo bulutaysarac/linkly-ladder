@@ -102,12 +102,20 @@ istekler zorunlu olarak DB'ye iner. [Topic · Konu: Soğuk başlangıç, kapasit
 1. `make repro P=P03-02` — 300 linkle ısıtır, 180 sn'lik yük altında **önce kararlı hâli**, sonra
    `rollout restart` penceresini ayrı ayrı ölçer ve ikisini kıyaslar
 
-**Ölçüm dersi — "tepe" tek başına kanıt değil:** İlk hâl tüm koşunun tepesini (`max_over_time`)
+**Ölçüm dersi 1 — "tepe" tek başına kanıt değil:** İlk hâl tüm koşunun tepesini (`max_over_time`)
 alıp sondaki orana bölüyordu. O tepe rollout'tan değil, **yükün kendi soğuk başlangıcından**
 geliyordu: k6 `setup()` her koşuda yeni kodlar üretir, ilk okumaları zorunlu olarak DB'ye iner.
 Script rollout'u hiç yapmasa da "REPRODUCED" derdi — nitekim 04'te (paylaşılan önbellek)
 yanlışlıkla dedi ve `verify-prev`'i kırdı. *Bir olayın etkisini ölçeceksen, pencereni o olaya
 hizala; "en büyük değer" nereden geldiğini söylemez.*
+
+**Ölçüm dersi 2 — komşu olayı SUSTUR:** Pencereler düzeltilince ilk sonuç şuydu: kararlı hâl
+17.6 DB get/s, rollout penceresi 12.0 get/s. Yani sinyal gürültünün *altında* kaldı. Sebep:
+60 sn'lik TTL ile 200 anahtar × 3 pod sürekli yeniden doluyordu (≈10 get/s) ve bu **TTL churn**,
+ölçmek istediğimiz soğuk başlangıç darbesiyle aynı büyüklükteydi. Script artık deney süresince
+`CACHE_TTL=10m` yapıyor ve çalışma kümesini 2000 koda çıkarıyor: TTL dolması (P03-07) susuyor,
+geriye yalnızca "pod boş doğdu" kalıyor. *Aynı grafiği iki farklı olay besliyorsa, hangisini
+ölçtüğünü bilemezsin.*
 
 **Grafana:** `04 · Cache` → "cache miss vs DB qps"; `05 · Postgres` → "DB queries by op".
 **Nerede çözülüyor:** 04 (önbellek pod'un dışında; pod ölse de yaşar).
