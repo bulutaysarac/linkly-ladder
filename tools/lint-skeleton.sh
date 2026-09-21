@@ -29,7 +29,11 @@ grep -q "^module github.com/bulutaysarac/linkly-ladder/$name\$" "$D/go.mod" || e
 # 5b. go.work OLMADAN derlenebilmeli. Docker imajında go.work YOKTUR; yalnızca go.mod + go.sum
 #     vardır. Yerelde go.work bağımlılıkları çözüp eksik go.sum girdilerini gizler ve hata ancak
 #     `make up` sırasında, imaj derlenirken ortaya çıkar. Bu kural onu lint zamanına çeker.
-(cd "$D" && GOWORK=off go build ./... >/dev/null 2>&1) || err "GOWORK=off go build başarısız (go.sum eksik olabilir → go mod tidy)"
+# `-o <dizin>/` şart: tek bir main paketi olan modülde (00) düz `go build ./...` ikiliyi
+# ÇALIŞTIĞI DİZİNE bırakıyor ve 8 MB'lık bir Mach-O bir kez depoya girdi.
+_out=$(mktemp -d)
+(cd "$D" && GOWORK=off go build -o "$_out/" ./... >/dev/null 2>&1) || err "GOWORK=off go build başarısız (go.sum eksik olabilir → go mod tidy)"
+rm -rf "$_out"
 
 # 6. README: 10 başlık sırayla + sabit metinler
 heads=("## 1. Bu seviye ne?" "## 2. Mimari" "## 3. Önceki seviyeden çözülenler" "## 4. Ayağa kaldırma" "## 5. API" \

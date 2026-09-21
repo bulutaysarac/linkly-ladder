@@ -5,3 +5,10 @@ coverage.out
 .DS_Store
 /tools/ladder-matrix/out/
 platform/dashboards/out/
+# `go build` (lint-skeleton içinde) çalıştırıldığı dizine ikili bırakıyor; 8 MB'lık bir Mach-O
+# bir kez depoya girdi. Seviye adıyla aynı isimli ikilileri ve yaygın adları yok say.
+*/linkly
+*/migrate
+*/redirect-svc
+*/api-svc
+*/analytics-consumer
