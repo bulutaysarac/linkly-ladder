@@ -24,7 +24,7 @@ else
   for i in $(seq 1 "$N"); do
     curl -sf -XPOST "$BASE_URL/api/links" -H 'Content-Type: application/json' \
       -d "{\"url\":\"https://example.com/u/$i\"}" 2>/dev/null \
-      | sed -n 's/.*"code":"\([^"]*\)".*/\1/p' >> "$tmp"
+      | sed -n 's/.*"code":"\([^"]*\)".*/\1/p' >> "$tmp" || true
   done
 fi
 after=$(restarts)
