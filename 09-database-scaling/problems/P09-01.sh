@@ -7,7 +7,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # sistem "çalışıyor", yalnızca ZAMAN farklı.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
-on_cleanup "kubectl -n \"$NS\" set env deploy/redirect TRAP_NO_STICKY- ; kubectl -n \"$NS\" set env deploy/api TRAP_NO_STICKY-"
+on_cleanup "kubectl -n \"$NS\" set env "$(wl redirect)" TRAP_NO_STICKY- ; kubectl -n \"$NS\" set env "$(wl api)" TRAP_NO_STICKY-"
 step "Replikasyon gecikmesi şu an ne kadar?"
 lag=$(promq "max(cnpg_pg_replication_lag{namespace=\"$NS\"})")
 note "cnpg replikasyon gecikmesi: $(awk -v v="$lag" 'BEGIN{printf "%.3f", v}') sn"
@@ -17,10 +17,10 @@ v_on=$(promq "sum(increase(ryw_violations_total{namespace=\"$NS\"}[3m]))")
 sticky=$(promq "sum(increase(db_sticky_reads_total{namespace=\"$NS\"}[3m]))")
 note "ihlal=${v_on%%.*} · primary'ye yapışan okuma=${sticky%%.*}"
 step "(2) Yapışkan okumayı KAPAT + replikasyona gecikme enjekte et"
-kubectl -n "$NS" set env deploy/redirect TRAP_NO_STICKY=true >/dev/null
-kubectl -n "$NS" set env deploy/api TRAP_NO_STICKY=true >/dev/null
-kubectl -n "$NS" rollout status deploy/redirect --timeout=180s >/dev/null 2>&1 || true
-kubectl -n "$NS" rollout status deploy/api --timeout=180s >/dev/null 2>&1 || true
+kubectl -n "$NS" set env "$(wl redirect)" TRAP_NO_STICKY=true >/dev/null
+kubectl -n "$NS" set env "$(wl api)" TRAP_NO_STICKY=true >/dev/null
+kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=180s >/dev/null 2>&1 || true
+kubectl -n "$NS" rollout status "$(wl api)" --timeout=180s >/dev/null 2>&1 || true
 chaos_apply replica-delay
 sleep 8
 k6run read-your-writes --vus 10 --duration 30s || true

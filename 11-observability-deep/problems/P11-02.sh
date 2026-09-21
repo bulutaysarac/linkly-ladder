@@ -6,7 +6,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # cevapsız kalır. Tam da asenkron yaptığın için görünmez olan yer, en çok trace gereken yerdir.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
-on_cleanup "kubectl -n \"$NS\" set env deploy/redirect TRAP_NO_KAFKA_PROPAGATION-"
+on_cleanup "kubectl -n \"$NS\" set env "$(wl redirect)" TRAP_NO_KAFKA_PROPAGATION-"
 tempo_traces() {
   # Tempo'ya sor: son 5 dakikada analytics servisine ait kaç trace var?
   kubectl -n monitoring port-forward svc/tempo 13200:3200 >/dev/null 2>&1 &
@@ -23,8 +23,8 @@ sleep 20
 on_tr=$(tempo_traces)
 note "Tempo'da analytics span'i olan trace sayısı: $on_tr"
 step "(2) TRAP: bağlam header'a KONMUYOR"
-kubectl -n "$NS" set env deploy/redirect TRAP_NO_KAFKA_PROPAGATION=true >/dev/null
-kubectl -n "$NS" rollout status deploy/redirect --timeout=180s >/dev/null 2>&1 || true
+kubectl -n "$NS" set env "$(wl redirect)" TRAP_NO_KAFKA_PROPAGATION=true >/dev/null
+kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=180s >/dev/null 2>&1 || true
 for _ in $(seq 1 20); do serving && break; sleep 2; done
 k6run redirect --vus 10 --duration 30s >/dev/null 2>&1 || true
 sleep 20

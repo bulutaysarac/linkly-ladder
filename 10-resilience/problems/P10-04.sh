@@ -6,7 +6,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # çok tembel → arızayı fark etmez. Ayrıca yarı açık pencerede flapping (aç-kapa-aç) olabilir.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
-on_cleanup "kubectl -n \"$NS\" set env deploy/redirect TRAP_NO_BREAKER-"
+on_cleanup "kubectl -n \"$NS\" set env "$(wl redirect)" TRAP_NO_BREAKER-"
 on_cleanup "$LADDER_ROOT/platform/lib/chaos.sh delete pg-loss-50"
 step "Postgres'e %50 paket kaybı (ağır arıza)"
 chaos_apply pg-loss-50
@@ -20,8 +20,8 @@ state_max=$(promq "max_over_time(max(breaker_state{namespace=\"$NS\",dep=\"postg
 p99_on=$(num "$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\"}[2m])) by (le))")")
 note "breaker açık: bağımlılık çağrısı=${calls_on%%.*} · devre-açık reddi=${open_rej%%.*} · tepe durum=${state_max%%.*} (2=açık) · p99=$(awk -v v="$p99_on" 'BEGIN{printf "%.0f", v*1000}') ms"
 step "(2) TRAP_NO_BREAKER: devre kesici yok, her istek bozuk bağımlılığa gidiyor"
-kubectl -n "$NS" set env deploy/redirect TRAP_NO_BREAKER=true >/dev/null
-kubectl -n "$NS" rollout status deploy/redirect --timeout=180s >/dev/null 2>&1 || true
+kubectl -n "$NS" set env "$(wl redirect)" TRAP_NO_BREAKER=true >/dev/null
+kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=180s >/dev/null 2>&1 || true
 for _ in $(seq 1 20); do serving && break; sleep 2; done
 k6run mixed --vus 25 --duration 50s >/dev/null 2>&1 || true
 sleep 10

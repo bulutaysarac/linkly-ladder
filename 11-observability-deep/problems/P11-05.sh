@@ -6,7 +6,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # gözlemlediği sistemden bağımsız değildir; onunla birlikte ölçeklenmesi gerekir.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
-on_cleanup "kubectl -n \"$NS\" set env deploy/redirect LOG_LEVEL=info"
+on_cleanup "kubectl -n \"$NS\" set env "$(wl redirect)" LOG_LEVEL=info"
 loki_rejects() {
   promq 'sum(increase(loki_discarded_samples_total[3m])) or sum(increase(loki_request_duration_seconds_count{status_code="429"}[3m])) or vector(0)'
 }
@@ -17,8 +17,8 @@ r1=$(loki_rejects)
 ingest1=$(promq 'sum(rate(loki_distributor_bytes_received_total[2m])) or vector(0)')
 note "info: Loki reddi=${r1%%.*} · alınan bayt/s=$(awk -v v="$ingest1" 'BEGIN{printf "%.0f", v}')"
 step "(2) LOG_LEVEL=debug ile AYNI yük"
-kubectl -n "$NS" set env deploy/redirect LOG_LEVEL=debug >/dev/null
-kubectl -n "$NS" rollout status deploy/redirect --timeout=180s >/dev/null 2>&1 || true
+kubectl -n "$NS" set env "$(wl redirect)" LOG_LEVEL=debug >/dev/null
+kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=180s >/dev/null 2>&1 || true
 for _ in $(seq 1 20); do serving && break; sleep 2; done
 k6run redirect --vus 30 --duration 40s >/dev/null 2>&1 || true
 sleep 15

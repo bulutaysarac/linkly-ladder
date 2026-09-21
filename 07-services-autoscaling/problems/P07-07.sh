@@ -8,8 +8,8 @@ ensure_healthy
 step "Replikalar hangi node'larda?"
 kubectl -n "$NS" get pods -l "$APP_SELECTOR" -o custom-columns=POD:.metadata.name,NODE:.spec.nodeName --no-headers | sed 's/^/    /'
 nodes=$(kubectl -n "$NS" get pods -l "$APP_SELECTOR" -o jsonpath='{range .items[*]}{.spec.nodeName}{"\n"}{end}' | sort -u | grep -c .) || true
-reps=$(kubectl -n "$NS" get deploy redirect -o jsonpath='{.status.readyReplicas}') || true
-note "replika=$reps · farklı node=$nodes · dağılım kuralı: $(kubectl -n "$NS" get deploy redirect -o jsonpath='{.spec.template.spec.topologySpreadConstraints[0].whenUnsatisfiable}')"
+reps=$(kubectl -n "$NS" get "$(wl redirect)" -o jsonpath='{.status.readyReplicas}') || true
+note "replika=$reps · farklı node=$nodes · dağılım kuralı: $(kubectl -n "$NS" get "$(wl redirect)" -o jsonpath='{.spec.template.spec.topologySpreadConstraints[0].whenUnsatisfiable}')"
 need_confirm "bir worker node DONDURULACAK (docker pause) — deney sonunda çözülür"
 # AYRI BAYRAK: bu deney node'un kubelet'ini donduruyor ve çözdükten sonra containerd'nin PLEG'i
 # ölü kalabiliyor (bir kez node 49 dakika NotReady kaldı ve bütün kümeyi çürüttü). Otomatik
@@ -25,7 +25,7 @@ victim=$(kubectl -n "$NS" get pods -l "$APP_SELECTOR" -o jsonpath='{.items[0].sp
 # node 49 dakika NotReady kaldı ve kümenin geri kalanı (Chaos Mesh, Argo, KEDA) o node'a
 # düşen pod'larla birlikte çürüdü. Sonraki HER deney bozuk bir ortamı ölçtü.
 # Bir deney, kümeyi bulduğu gibi bırakmak zorundadır — "geri aldım" demek yetmez, DOĞRULA.
-on_cleanup "for i in \$(seq 1 30); do [ \"\$(kubectl get node $victim -o jsonpath='{.status.conditions[?(@.type==\"Ready\")].status}' 2>/dev/null)\" = True ] && break; sleep 5; done"
+on_cleanup "for i in \$(seq 1 30); do [ \"\$(kubectl get node $victim -o jsonpath='{.status.conditions[?(@.type==\"Ready\")].status}' 2>/dev/null) = True ] && break; sleep 5; done"
 on_cleanup "docker exec $victim systemctl restart containerd >/dev/null 2>&1 || true"
 on_cleanup "docker unpause $victim"
 # ÖNCE TABAN: donma sırasındaki sayıyı neyle kıyaslayacağız? İlk koşuda 120 saniyede yalnızca

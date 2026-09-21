@@ -7,7 +7,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # Üçüncü seçenek "hiç düşünmemek"tir ve varsayılan davranış ne ise o olur — en kötüsü budur.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
-on_cleanup "kubectl -n \"$NS\" set env deploy/redirect RATE_LIMIT_FAIL_OPEN=true"
+on_cleanup "kubectl -n \"$NS\" set env "$(wl redirect)" RATE_LIMIT_FAIL_OPEN=true"
 on_cleanup "kubectl -n \"$NS\" rollout status statefulset/redis --timeout=180s"
 on_cleanup "kubectl -n \"$NS\" scale statefulset redis --replicas=1"
 step "Normal çalışma: limit uygulanıyor mu?"
@@ -26,8 +26,8 @@ open_5xx=$(k6_5xx)
 note "fail-open: 429=$open_rej · 5xx=$open_5xx · limiter hatası=${open_errs%%.*}"
 note "→ hizmet ÇALIŞTI ama koruma YOK: kötü client sınırsız geçti."
 step "FAIL-CLOSED: aynı senaryo, bu kez reddet"
-kubectl -n "$NS" set env deploy/redirect RATE_LIMIT_FAIL_OPEN=false >/dev/null
-kubectl -n "$NS" rollout status deploy/redirect --timeout=180s >/dev/null 2>&1 || true
+kubectl -n "$NS" set env "$(wl redirect)" RATE_LIMIT_FAIL_OPEN=false >/dev/null
+kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=180s >/dev/null 2>&1 || true
 sleep 5
 k6run redirect --vus 10 --duration 25s >/dev/null 2>&1 || true
 closed_429=$(k6_429); closed_reqs=$(k6_reqs)

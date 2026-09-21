@@ -8,8 +8,8 @@ ensure_healthy
 need_metric pg_settings_max_connections "postgres ServiceMonitor deploy/servicemonitor.yaml'da mı?"
 maxconn=$(promq "max(pg_settings_max_connections{namespace=\"$NS\"})")
 step "Aritmetik önce"
-rpool=$(kubectl -n "$NS" get deploy redirect -o jsonpath='{range .spec.template.spec.containers[0].env[?(@.name=="DB_MAX_CONNS")]}{.value}{end}') || true
-apool=$(kubectl -n "$NS" get deploy api -o jsonpath='{range .spec.template.spec.containers[0].env[?(@.name=="DB_MAX_CONNS")]}{.value}{end}') || true
+rpool=$(kubectl -n "$NS" get "$(wl redirect)" -o jsonpath='{range .spec.template.spec.containers[0].env[?(@.name=="DB_MAX_CONNS")]}{.value}{end}') || true
+apool=$(kubectl -n "$NS" get "$(wl api)" -o jsonpath='{range .spec.template.spec.containers[0].env[?(@.name=="DB_MAX_CONNS")]}{.value}{end}') || true
 hpamax=$(kubectl -n "$NS" get hpa redirect -o jsonpath='{.spec.maxReplicas}') || true
 note "max_connections=${maxconn%%.*} · redirect havuzu=$rpool × HPA max $hpamax = $(( ${rpool:-6} * ${hpamax:-12} ))"
 note "+ api ($apool × 2 = $(( ${apool:-15} * 2 ))) + tüketici (10) = $(( ${rpool:-6} * ${hpamax:-12} + ${apool:-15} * 2 + 10 )) > ${maxconn%%.*}"

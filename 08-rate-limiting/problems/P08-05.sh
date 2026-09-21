@@ -6,9 +6,9 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # sistemden önce kendisi darboğaz olur.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
-on_cleanup "kubectl -n \"$NS\" set env deploy/redirect TRAP_GLOBAL_LIMIT-"
+on_cleanup "kubectl -n \"$NS\" set env "$(wl redirect)" TRAP_GLOBAL_LIMIT-"
 measure() {
-  kubectl -n "$NS" rollout status deploy/redirect --timeout=180s >/dev/null 2>&1 || true
+  kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=180s >/dev/null 2>&1 || true
   for _ in $(seq 1 20); do serving && break; sleep 2; done
   k6run redirect --vus 40 --duration 40s >/dev/null 2>&1 || true
   sleep 10
@@ -21,7 +21,7 @@ step "Anahtar başına limit (varsayılan): yük Redis'te birçok anahtara dağ�
 read -r p1 c1 <<< "$(measure)"
 note "dağıtık anahtar: limit kontrolü p99=$(awk -v v="$p1" 'BEGIN{printf "%.2f", v*1000}') ms · Redis CPU=$(awk -v v="$c1" 'BEGIN{printf "%.2f", v}')"
 step "TRAP_GLOBAL_LIMIT: her istek TEK anahtara yazıyor"
-kubectl -n "$NS" set env deploy/redirect TRAP_GLOBAL_LIMIT=true >/dev/null
+kubectl -n "$NS" set env "$(wl redirect)" TRAP_GLOBAL_LIMIT=true >/dev/null
 read -r p2 c2 <<< "$(measure)"
 note "global anahtar: limit kontrolü p99=$(awk -v v="$p2" 'BEGIN{printf "%.2f", v*1000}') ms · Redis CPU=$(awk -v v="$c2" 'BEGIN{printf "%.2f", v}')"
 grafana_hint "06 · Redis → 'Redis CPU' + 'commands by type' · 10 · Rate limit → 'decisions by key type'"

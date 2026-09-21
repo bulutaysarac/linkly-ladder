@@ -8,13 +8,13 @@ APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
 step "Başlangıç durumu"
 kubectl -n "$NS" get hpa redirect -o custom-columns=HEDEF:.spec.metrics[0].resource.target.averageUtilization,MIN:.spec.minReplicas,MAX:.spec.maxReplicas,ŞİMDİ:.status.currentReplicas --no-headers 2>/dev/null | sed 's/^/    /'
-r0=$(kubectl -n "$NS" get deploy redirect -o jsonpath='{.status.readyReplicas}') || true
+r0=$(kubectl -n "$NS" get "$(wl redirect)" -o jsonpath='{.status.readyReplicas}') || true
 note "hazır replika: ${r0:-0}"
 step "Ani yük (burst senaryosu: 5 rps → 1000 rps)"
 ( k6run burst >/tmp/p0701.k6 2>&1 ) & kpid=$!
 best=0; worst=0
 for i in $(seq 1 30); do
-  cur=$(kubectl -n "$NS" get deploy redirect -o jsonpath='{.status.readyReplicas}' 2>/dev/null) || true
+  cur=$(kubectl -n "$NS" get "$(wl redirect)" -o jsonpath='{.status.readyReplicas}' 2>/dev/null) || true
   des=$(kubectl -n "$NS" get hpa redirect -o jsonpath='{.status.desiredReplicas}' 2>/dev/null) || true
   (( ${cur:-0} > best )) && best=${cur:-0}
   sleep 2
@@ -24,7 +24,7 @@ sleep 10
 fr=$(k6_failed_rate); e5=$(k6_5xx)
 peak_p99=$(promq "max_over_time(histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[30s])) by (le))[5m:15s])")
 peak_desired=$(promq "max_over_time(kube_horizontalpodautoscaler_status_desired_replicas{namespace=\"$NS\",horizontalpodautoscaler=\"redirect\"}[5m:15s])")
-now_ready=$(kubectl -n "$NS" get deploy redirect -o jsonpath='{.status.readyReplicas}') || true
+now_ready=$(kubectl -n "$NS" get "$(wl redirect)" -o jsonpath='{.status.readyReplicas}') || true
 grafana_hint "09 · Autoscaling → 'HPA desired / current' + 'rps vs pod sayısı' · 02 · App RED → p99"
 note "burst sırasında: tepe hazır replika=$best · HPA tepe istek=${peak_desired%%.*} · şimdi=${now_ready:-?}"
 note "tepe p99=$(awk -v v="$peak_p99" 'BEGIN{printf "%.0f", v*1000}') ms · 5xx=$e5 · k6 failed=$fr"

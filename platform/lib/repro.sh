@@ -406,6 +406,15 @@ app_name() {
   done
   printf 'linkly'
 }
+# ADI VERİLEN iş yükünün tam referansı: `deploy/api` mi `rollout/api` mi?
+# Neden: 12'den sonra redirect bir Argo Rollout. 11'in scriptleri `deploy/redirect` yazdığı için
+# verify-prev'de toptan ERROR verdiler — "bir sonraki seviye bunu çözer" iddiası doğrulanamadı,
+# yalnızca gizlendi. Türü koda gömme, KÜMEYE sor.
+wl() {
+  local n=$1
+  if kubectl -n "$NS" get "rollout/$n" >/dev/null 2>&1; then printf 'rollout/%s' "$n"
+  else printf 'deploy/%s' "$n"; fi
+}
 # Bu seviyedeki uygulama iş yükünün tam adı: `deploy/linkly` ya da `rollout/redirect`.
 app_workload() { printf '%s/%s' "$(workload_kind)" "$(app_name)"; }
 wait_endpoints() {

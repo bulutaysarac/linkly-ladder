@@ -6,13 +6,13 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # çöktürür. Kardinalite, bir label'ın DEĞER SAYISI kadar büyür ve bu sayı genelde İŞ BÜYÜDÜKÇE artar.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
-on_cleanup "kubectl -n \"$NS\" set env deploy/redirect TRAP_TENANT_LABEL-"
+on_cleanup "kubectl -n \"$NS\" set env "$(wl redirect)" TRAP_TENANT_LABEL-"
 N=${N:-500}
 before=$(promq 'prometheus_tsdb_head_series')
 note "Prometheus toplam seri (öncesi): ${before%%.*}"
 step "TRAP_TENANT_LABEL aç ve $N farklı kiracıdan istek gönder"
-kubectl -n "$NS" set env deploy/redirect TRAP_TENANT_LABEL=true >/dev/null
-kubectl -n "$NS" rollout status deploy/redirect --timeout=180s >/dev/null 2>&1 || true
+kubectl -n "$NS" set env "$(wl redirect)" TRAP_TENANT_LABEL=true >/dev/null
+kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=180s >/dev/null 2>&1 || true
 for _ in $(seq 1 20); do serving && break; sleep 2; done
 code=$(create_link "https://example.com/card")
 for i in $(seq 1 "$N"); do
@@ -27,7 +27,7 @@ grafana_hint "02 · App RED → seri sayısı · Prometheus kendi metrikleri (pr
 note "farklı tenant label değeri: ${tenants%%.*} · toplam seri: ${before%%.*} → ${after%%.*} (+$(( ${after%%.*} - ${before%%.*} )))"
 note "Prometheus sorgu p99=$(awk -v v="$qtime" 'BEGIN{printf "%.0f", v*1000}') ms · bellek=$(( ${mem%%.*} / 1024 / 1024 )) MB"
 step "Tuzağı kapat"
-kubectl -n "$NS" set env deploy/redirect TRAP_TENANT_LABEL- >/dev/null
+kubectl -n "$NS" set env "$(wl redirect)" TRAP_TENANT_LABEL- >/dev/null
 note "Kural (üçüncü tekrar): label'lar SINIRLI ve ÖNGÖRÜLEBİLİR kümelerden olmalı."
 note "'Tenant'a göre görmek istiyorum' meşru bir istektir; cevabı metrik DEĞİLDİR:"
 note "  · en çok trafik üreten 10 tenant → log toplama (Loki) ya da ayrı bir analitik sorgusu"

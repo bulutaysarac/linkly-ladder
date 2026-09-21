@@ -13,21 +13,21 @@ APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
 has_throttle=$(curl -s "$PROM_URL/api/v1/label/__name__/values" | jq -r '.data[]' | grep -c 'container_cpu_cfs_throttled' || true)
 note "throttling metriği mevcut mu: $([[ ${has_throttle:-0} -gt 0 ]] && echo evet || echo HAYIR — ortam sınırı)"
-lim=$(kubectl -n "$NS" get deploy redirect -o jsonpath='{.spec.template.spec.containers[0].resources.limits.cpu}') || true
-req=$(kubectl -n "$NS" get deploy redirect -o jsonpath='{.spec.template.spec.containers[0].resources.requests.cpu}') || true
-on_cleanup "kubectl -n \"$NS\" set resources deploy/redirect --limits=cpu=$lim"
-on_cleanup "kubectl -n \"$NS\" scale deploy/redirect --replicas=2"
+lim=$(kubectl -n "$NS" get "$(wl redirect)" -o jsonpath='{.spec.template.spec.containers[0].resources.limits.cpu}') || true
+req=$(kubectl -n "$NS" get "$(wl redirect)" -o jsonpath='{.spec.template.spec.containers[0].resources.requests.cpu}') || true
+on_cleanup "kubectl -n \"$NS\" set resources "$(wl redirect)" --limits=cpu=$lim"
+on_cleanup "kubectl -n \"$NS\" scale "$(wl redirect)" --replicas=2"
 # ÖLÇÜM NOTU: throttling ancak kotaya ÇARPARSAN görünür. İlk hâl 2 replika × 300m limit ile
 # 40 VU koşuyordu; uygulama toplam 0.13 çekirdek kullandı, yani kotanın yakınına bile gitmedi
 # ve "throttle=0.00" çıktı. Karar da p99 farkına bakıyordu — iki ayrı 45 sn'lik koşunun p99'u
 # bu kümede zaten oynuyor, yani ölçüm gürültüyü okuyordu.
 # Doğrusu: TEK pod + dar kota + kotayı aşacak yük. Ölçü de p99 değil, throttling'in kendisi.
 TIGHT=${TIGHT:-50m}   # ÖLÇÜLDÜ: 200m kotada bile kısıtlama 0 çıktı; uygulama o kadar CPU istemiyor
-on_cleanup "kubectl -n \"$NS\" set resources deploy/redirect --requests=cpu=${req:-150m}"
+on_cleanup "kubectl -n \"$NS\" set resources "$(wl redirect)" --requests=cpu=${req:-150m}"
 step "TEK pod, dar kota ($TIGHT) ve kotayı aşacak yük"
-kubectl -n "$NS" scale deploy/redirect --replicas=1 >/dev/null; wait_endpoints 1
-kubectl -n "$NS" set resources deploy/redirect --requests=cpu=100m --limits=cpu=$TIGHT >/dev/null
-kubectl -n "$NS" rollout status deploy/redirect --timeout=180s >/dev/null 2>&1 || true
+kubectl -n "$NS" scale "$(wl redirect)" --replicas=1 >/dev/null; wait_endpoints 1
+kubectl -n "$NS" set resources "$(wl redirect)" --requests=cpu=100m --limits=cpu=$TIGHT >/dev/null
+kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=180s >/dev/null 2>&1 || true
 wait_endpoints 1; sleep 5
 k6run redirect --vus 120 --duration 60s >/dev/null 2>&1 || true
 sleep 15
@@ -40,9 +40,9 @@ step "Kotayı pratikte KALDIR (4 çekirdek), AYNI yük — tek pod"
 # `--limits=cpu=0` geçerli görünüp bozuk bir spec üretebiliyor (pod'lar hazır olmuyor, iki
 # ReplicaSet takılı kalıyor — gerçekte oldu). Niyet "kota beni sınırlamasın"; bunu geçerli bir
 # değerle ifade et: node'un verebileceğinden büyük bir limit, pratikte limitsizdir.
-kubectl -n "$NS" set resources deploy/redirect --requests=cpu=100m --limits=cpu=4 >/dev/null 2>&1 || \
-  kubectl -n "$NS" patch deploy redirect --type=json -p '[{"op":"remove","path":"/spec/template/spec/containers/0/resources/limits/cpu"}]' >/dev/null 2>&1
-kubectl -n "$NS" rollout status deploy/redirect --timeout=180s >/dev/null 2>&1 || true
+kubectl -n "$NS" set resources "$(wl redirect)" --requests=cpu=100m --limits=cpu=4 >/dev/null 2>&1 || \
+  kubectl -n "$NS" patch "$(wl redirect)" --type=json -p '[{"op":"remove","path":"/spec/template/spec/containers/0/resources/limits/cpu"}]' >/dev/null 2>&1
+kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=180s >/dev/null 2>&1 || true
 wait_endpoints 1; sleep 5
 k6run redirect --vus 120 --duration 60s >/dev/null 2>&1 || true
 sleep 15

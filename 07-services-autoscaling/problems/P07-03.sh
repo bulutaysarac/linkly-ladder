@@ -13,8 +13,8 @@ note "ısınmış p99=$(awk -v v="$warm" 'BEGIN{printf "%.1f", v*1000}') ms"
 step "Yük altında yeni pod'lar ekle (soğuk pod trafiğe girsin)"
 ( k6run redirect --vus 30 --duration 70s >/tmp/p0703.k6 2>&1 ) & kpid=$!
 sleep 12
-kubectl -n "$NS" scale deploy/redirect --replicas=6 >/dev/null
-on_cleanup "kubectl -n \"$NS\" scale deploy/redirect --replicas=2"
+kubectl -n "$NS" scale "$(wl redirect)" --replicas=6 >/dev/null
+on_cleanup "kubectl -n \"$NS\" scale "$(wl redirect)" --replicas=2"
 sleep 25
 # Yeni (genç) pod'ların p99'unu ayrı ölç
 young=$(num "$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[30s])) by (le, pod))")")

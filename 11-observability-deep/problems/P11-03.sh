@@ -6,9 +6,9 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # collector, ağ ve depolama maliyeti doğrusal artar, faydası artmaz.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
-on_cleanup "kubectl -n \"$NS\" set env deploy/redirect TRACE_SAMPLE_PCT=5"
+on_cleanup "kubectl -n \"$NS\" set env "$(wl redirect)" TRACE_SAMPLE_PCT=5"
 measure() {
-  kubectl -n "$NS" rollout status deploy/redirect --timeout=180s >/dev/null 2>&1 || true
+  kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=180s >/dev/null 2>&1 || true
   for _ in $(seq 1 20); do serving && break; sleep 2; done
   k6run redirect --vus 30 --duration 40s >/dev/null 2>&1 || true
   sleep 15
@@ -21,7 +21,7 @@ step "(1) %5 sampling (varsayılan)"
 read -r c5 m5 <<< "$(measure)"
 note "%5: Alloy CPU tepe=$(awk -v v="$c5" 'BEGIN{printf "%.2f", v}') çekirdek · bellek tepe=$(( ${m5%%.*} / 1024 / 1024 )) MB"
 step "(2) %100 sampling"
-kubectl -n "$NS" set env deploy/redirect TRACE_SAMPLE_PCT=100 >/dev/null
+kubectl -n "$NS" set env "$(wl redirect)" TRACE_SAMPLE_PCT=100 >/dev/null
 read -r c100 m100 <<< "$(measure)"
 note "%100: Alloy CPU tepe=$(awk -v v="$c100" 'BEGIN{printf "%.2f", v}') çekirdek · bellek tepe=$(( ${m100%%.*} / 1024 / 1024 )) MB"
 grafana_hint "01 · Pods & Resources (namespace=monitoring) → Alloy CPU/bellek"

@@ -15,7 +15,7 @@ step "Yoğun tıklama yükü ver, tüketicinin ölçeklenmesini izle"
 kpid=$!
 maxreps=0
 for i in $(seq 1 25); do
-  r=$(kubectl -n "$NS" get deploy analytics -o jsonpath='{.status.readyReplicas}' 2>/dev/null) || true
+  r=$(kubectl -n "$NS" get "$(wl analytics)" -o jsonpath='{.status.readyReplicas}' 2>/dev/null) || true
   (( ${r:-0} > maxreps )) && maxreps=${r:-0}
   sleep 3
 done

@@ -6,9 +6,9 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # EN-İYİ-ÇABA olduğunu, yani kaçan bir mesajın L1 TTL'i kadar bayatlık bıraktığını gösteriyor.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
-on_cleanup "kubectl -n \"$NS\" set env rollout/redirect TRAP_NO_INVALIDATION_PUBSUB- 2>/dev/null || kubectl -n \"$NS\" set env deploy/redirect TRAP_NO_INVALIDATION_PUBSUB-"
-setenv() { kubectl -n "$NS" set env rollout/redirect "$@" >/dev/null 2>&1 || kubectl -n "$NS" set env deploy/redirect "$@" >/dev/null; }
-waitrollout() { kubectl -n "$NS" rollout status rollout/redirect --timeout=240s >/dev/null 2>&1 || kubectl -n "$NS" rollout status deploy/redirect --timeout=240s >/dev/null 2>&1 || true; }
+on_cleanup "kubectl -n \"$NS\" set env rollout/redirect TRAP_NO_INVALIDATION_PUBSUB- 2>/dev/null || kubectl -n \"$NS\" set env "$(wl redirect)" TRAP_NO_INVALIDATION_PUBSUB-"
+setenv() { kubectl -n "$NS" set env rollout/redirect "$@" >/dev/null 2>&1 || kubectl -n "$NS" set env "$(wl redirect)" "$@" >/dev/null; }
+waitrollout() { kubectl -n "$NS" rollout status rollout/redirect --timeout=240s >/dev/null 2>&1 || kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=240s >/dev/null 2>&1 || true; }
 AKEY=${AKEY:-acme-key-9f2c}
 stale_after_delete() {
   waitrollout; for _ in $(seq 1 25); do serving && break; sleep 2; done

@@ -7,7 +7,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 APP_SELECTOR="app.kubernetes.io/name=api"
 BASE_API="$BASE_URL"
 ensure_healthy
-on_cleanup "kubectl -n \"$NS\" set env deploy/api TRAP_LIST_N_PLUS_ONE-"
+on_cleanup "kubectl -n \"$NS\" set env "$(wl api)" TRAP_LIST_N_PLUS_ONE-"
 TEN=${TEN:-nplusone}
 step "Bu kiracı için 100 link oluştur"
 for i in $(seq 1 100); do
@@ -32,8 +32,8 @@ q1=$(dbq)
 d_ok=$(delta "${q0%%.*}" "${q1%%.*}")
 note "varsayılan: ${t_ok}s · bu istek için DB sorgusu ≈ $d_ok"
 step "Tuzağı aç: her link için AYRI stats sorgusu"
-kubectl -n "$NS" set env deploy/api TRAP_LIST_N_PLUS_ONE=true >/dev/null
-kubectl -n "$NS" rollout status deploy/api --timeout=180s >/dev/null || true
+kubectl -n "$NS" set env "$(wl api)" TRAP_LIST_N_PLUS_ONE=true >/dev/null
+kubectl -n "$NS" rollout status "$(wl api)" --timeout=180s >/dev/null || true
 sleep 5
 curl -s -o /dev/null -H "X-Tenant-ID: $TEN" "$BASE_API/api/links" || true   # yeni pod da soğuk
 curl -s -o /dev/null -H "X-Tenant-ID: $TEN" "$BASE_API/api/links" || true

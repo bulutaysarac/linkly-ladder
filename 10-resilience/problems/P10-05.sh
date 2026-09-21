@@ -6,7 +6,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # yavaşça boğulur. Timeout'suz bir çağrı, sınırsız bir kuyruktur (P05-02'nin bağımlılık hâli).
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
-on_cleanup "kubectl -n \"$NS\" set env deploy/redirect TRAP_NO_DEP_TIMEOUT-"
+on_cleanup "kubectl -n \"$NS\" set env "$(wl redirect)" TRAP_NO_DEP_TIMEOUT-"
 on_cleanup "$LADDER_ROOT/platform/lib/chaos.sh delete redis-delay-3s"
 step "Redis'e 3 sn gecikme enjekte et (ölmedi, YAVAŞLADI)"
 chaos_apply redis-delay-3s
@@ -20,8 +20,8 @@ p99_on=$(num "$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_s
 e5_on=$(k6_5xx)
 note "timeout var: tepe goroutine=${g_on%%.*} · tepe bellek=${m_on}MB · p99=$(awk -v v="$p99_on" 'BEGIN{printf "%.0f", v*1000}') ms · 5xx=$e5_on"
 step "(2) TRAP_NO_DEP_TIMEOUT: bağımlılık timeout'u yok"
-kubectl -n "$NS" set env deploy/redirect TRAP_NO_DEP_TIMEOUT=true >/dev/null
-kubectl -n "$NS" rollout status deploy/redirect --timeout=180s >/dev/null 2>&1 || true
+kubectl -n "$NS" set env "$(wl redirect)" TRAP_NO_DEP_TIMEOUT=true >/dev/null
+kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=180s >/dev/null 2>&1 || true
 for _ in $(seq 1 20); do serving && break; sleep 2; done
 k6run redirect --vus 30 --duration 45s >/dev/null 2>&1 || true
 sleep 10

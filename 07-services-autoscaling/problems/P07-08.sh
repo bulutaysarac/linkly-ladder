@@ -6,17 +6,17 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # rollout sırasında "hazır" sayıldığı için Kubernetes eski pod'ları güvenle öldürür.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
-on_cleanup "kubectl -n \"$NS\" set env deploy/redirect TRAP_READY_ALWAYS-"
+on_cleanup "kubectl -n \"$NS\" set env "$(wl redirect)" TRAP_READY_ALWAYS-"
 # preStop beklemesini deney süresince 0 yap (İKİ FAZDA DA). Neden: 5 saniyelik preStop, pod
 # Endpoints'ten düşene kadar trafiği emiyor ve readiness'ın "HAYIR" diyebilmesinin değerini
 # GİZLİYOR — ilk koşuda iki mod da 5xx=0 verdi, yani deney kendi güvenlik ağını ölçüyordu.
 # Bir korumanın değerini ölçmek istiyorsan, aynı işi yapan DİĞER korumayı geçici olarak kaldır.
-orig_prestop=$(kubectl -n "$NS" get deploy redirect -o jsonpath='{.spec.template.spec.containers[0].lifecycle.preStop.sleep.seconds}' 2>/dev/null) || true
-on_cleanup "kubectl -n \"$NS\" patch deploy redirect --type=json -p '[{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/lifecycle/preStop/sleep/seconds\",\"value\":${orig_prestop:-5}}]'"
-kubectl -n "$NS" patch deploy redirect --type=json \
+orig_prestop=$(kubectl -n "$NS" get "$(wl redirect)" -o jsonpath='{.spec.template.spec.containers[0].lifecycle.preStop.sleep.seconds}' 2>/dev/null) || true
+on_cleanup "kubectl -n \"$NS\" patch "$(wl redirect)" --type=json -p '[{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/lifecycle/preStop/sleep/seconds\",\"value\":${orig_prestop:-5}}]'"
+kubectl -n "$NS" patch "$(wl redirect)" --type=json \
   -p '[{"op":"replace","path":"/spec/template/spec/containers/0/lifecycle/preStop/sleep/seconds","value":0}]' >/dev/null 2>&1 \
   || warn "preStop 0 yapılamadı (sürüm sleep hook'unu desteklemiyor olabilir)"
-kubectl -n "$NS" rollout status deploy/redirect --timeout=180s >/dev/null 2>&1 || true
+kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=180s >/dev/null 2>&1 || true
 # ÖLÇÜ: 5xx TEK BAŞINA yetmiyor. Modern Kubernetes, sonlanmakta olan pod'u readiness'tan
 # BAĞIMSIZ olarak Endpoints'ten düşürür (deletionTimestamp). Yani "sabit 200 dönen readiness"in
 # zararı bu ortamda rollout'ta görünmeyebilir — iki modda da 5xx=0 çıktı. Bunu zorlayıp sahte bir
@@ -25,7 +25,7 @@ kubectl -n "$NS" rollout status deploy/redirect --timeout=180s >/dev/null 2>&1 |
 run_rollout_test() {
   ( k6run redirect --vus 10 --duration 60s >/tmp/p0708.k6 2>&1 ) & local kp=$!
   sleep 12
-  kubectl -n "$NS" rollout restart deploy/redirect >/dev/null
+  kubectl -n "$NS" rollout restart "$(wl redirect)" >/dev/null
   # Rollout SIRASINDA hazır endpoint sayısının tepesi: sabit-hazır probe ile sonlanan pod da
   # "hazır" görünmeye devam ederse bu sayı manifest'teki replika sayısını AŞAR.
   local peak=0 cur
@@ -33,7 +33,7 @@ run_rollout_test() {
     cur=$(kubectl -n "$NS" get endpointslice -l "kubernetes.io/service-name=redirect" \
            -o jsonpath='{range .items[*]}{range .endpoints[*]}{.conditions.ready}{"\n"}{end}{end}' 2>/dev/null | grep -c true || echo 0)
     (( ${cur:-0} > peak )) && peak=${cur:-0}
-    kubectl -n "$NS" rollout status deploy/redirect --timeout=3s >/dev/null 2>&1 && break
+    kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=3s >/dev/null 2>&1 && break
     sleep 2
   done
   wait $kp 2>/dev/null || true
@@ -43,8 +43,8 @@ step "Varsayılan readiness ile rollout"
 read -r ok5 ok_ep <<< "$(run_rollout_test)"
 note "varsayılan: rollout sırasında 5xx=$ok5 · tepe hazır endpoint=$ok_ep"
 step "TRAP_READY_ALWAYS ile aynı rollout"
-kubectl -n "$NS" set env deploy/redirect TRAP_READY_ALWAYS=true >/dev/null
-kubectl -n "$NS" rollout status deploy/redirect --timeout=180s >/dev/null 2>&1 || true
+kubectl -n "$NS" set env "$(wl redirect)" TRAP_READY_ALWAYS=true >/dev/null
+kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=180s >/dev/null 2>&1 || true
 sleep 5
 read -r trap5 trap_ep <<< "$(run_rollout_test)"
 grafana_hint "02 · App RED → 5xx · 01 · Pods & Resources → 'hazır endpoint sayısı'"
