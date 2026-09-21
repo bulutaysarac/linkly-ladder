@@ -53,3 +53,12 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 6. Ölçemediğin bir sınırı, **sınırın kendisini** ölçerek göster (`redis-benchmark` ile tavan gibi).
 7. Deneyi **ölçeğe uydur**: ya veriyi büyüt ya sınırı küçült — ve neyi değiştirdiğini yaz.
 8. Metrik adının var olduğunu **varsayma**: yoksa `promq` sessizce `0` döner ve script "sorun yok" der.
+
+### `SOLVES` kuralı: TRAP tabanlı sorunlar buraya YAZILMAZ
+
+`problems/SOLVES`, "bir önceki seviyenin şu sorunları artık reproduce OLMAMALI" listesidir ve
+`make verify-prev` bunu zorlar. Bir sorun `TRAP_` bayrağıyla üretiliyorsa (script tuzağı kendisi
+açıyorsa) o sorun **her seviyede reproduce olur** — tuzak orada durduğu sürece. Böyle bir ID'yi
+SOLVES'a yazmak, doğrulamayı kalıcı olarak kırmış olmak demektir (08, P07-06 ile tam olarak bunu
+yaptı). TRAP'ler seviye içi alıştırmadır; kalıcı çözüm geldiğinde tuzağın KENDİSİ kaldırılır ve
+sorun zaten listelenemez hâle gelir.

@@ -54,12 +54,27 @@ for id in $(grep -o '^### P[0-9][0-9]-[0-9][0-9]' "$D/README.md" | cut -c5-); do
 #     etkisiz kılar: her sonuç "açık kalabilir" sayılır ve regresyon yakalanmaz. Gerçekte oldu —
 #     bir zsh glob hatası (`rm -f P0X-*.sh &&` boş eşleşmede zinciri kırar) dosyayı hiç yazmadı.
 if [[ "$lvl" != "00" ]]; then
-  [[ -s "$D/problems/SOLVES" ]] || err "problems/SOLVES boş — verify-prev hiçbir şey doğrulamaz"
+  # SOLVES tamamen BOŞ olamaz; ama bir seviye bir öncekinden hiçbir şey çözmüyor da olabilir
+  # (08 dağıtık limiter getiriyor, 07'nin sorunlarından hiçbirini çözmüyor). O zaman dosyada
+  # bunu YAZAN bir `#` yorumu olmalı: iddia yoksa gerekçe olsun. Sessiz boşluk yasak, çünkü
+  # verify-prev'i sessizce etkisizleştiriyor.
+  [[ -s "$D/problems/SOLVES" ]] || err "problems/SOLVES boş — ya çözülen ID'leri yaz ya da '#' ile gerekçesini"
+  ids=0
   while read -r id; do
     [[ -z "$id" ]] && continue
+    [[ "$id" == \#* ]] && continue
+    ids=$((ids+1))
     [[ "$id" =~ ^P[0-9][0-9]-[0-9][0-9]$ ]] || err "SOLVES'ta geçersiz satır: '$id'"
     [[ "$id" == P$lvl-* ]] && err "SOLVES kendi seviyesinin sorununu içeremez: $id"
+    # TRAP tabanlı sorun SOLVES'a yazılamaz: script tuzağı kendisi açtığı için her seviyede
+    # reproduce olur ve doğrulamayı kalıcı olarak kırar (08, P07-06 ile bunu yaptı).
+    prevdir=$(ls -d "$ROOT"/[0-9][0-9]-*/ | sort | awk -v cur="$D/" '$0==cur{print prev; exit}{prev=$0}')
+    if [[ -n "$prevdir" && -f "$prevdir/problems/$id.sh" ]] && grep -q 'set env.*TRAP_' "$prevdir/problems/$id.sh"; then
+      err "SOLVES'ta TRAP tabanlı sorun: $id — tuzak duruyorsa her seviyede reproduce olur"
+    fi
   done < "$D/problems/SOLVES"
+  (( ids == 0 )) && grep -q '^#' "$D/problems/SOLVES" \
+    || (( ids > 0 )) || err "SOLVES'ta ne ID ne gerekçe var"
 fi
 
 # 8. Sorun ID'leri bu seviyenin numarasını taşımalı

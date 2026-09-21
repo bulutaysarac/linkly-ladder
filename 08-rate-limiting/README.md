@@ -31,7 +31,7 @@ Katmanlı: ingress **kaba** (yalnızca IP'yi bilir), uygulama **ince** (kiracıy
 
 | ID | Sorun | Nasıl çözüldü |
 |---|---|---|
-| P07-06 | N+1: liste maliyeti sonuç kümesiyle orantılı | `TRAP_LIST_N_PLUS_ONE` varsayılan kapalı; liste tek sorgu |
+| P07-06 | N+1: liste maliyeti sonuç kümesiyle orantılı | **Çözülmüş SAYILMAZ:** bu bir `TRAP_` alıştırması ve tuzak 08'de de duruyor (varsayılan kapalı). Script tuzağı kendisi açtığı için her seviyede reproduce olur — bu yüzden `SOLVES` dosyasında YER ALMAZ. Kalıcı çözüm 14'te (toplu sorgu / gRPC batch). |
 
 Ama asıl kapanan borç **listede görünmüyor**, çünkü üç seviye boyunca taşındı: P01-05 (süreç içi
 limit yanlış), P02-04 (3 replikada 3 katı), P07 (iki serviste ayrı ayrı). Bir sorunu "bir sonraki
