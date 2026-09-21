@@ -59,21 +59,32 @@ header_of()   { curl -sI --max-time 5 "$BASE_URL/$1" | tr -d '\r' | awk -v h="$2
 # proxy'si (`/proxy/metrics`) kalıcı bir tünel gerektirmez. Yine de tek tük hata olabilir:
 # başarısız örnek ATLANIR, sayaç farkı bir sonraki başarılı örnekte doğru kapanır.
 sample_series() {
-  local pod=$1 secs=$2 out=$3 pattern=$4 skip=${5:-0} prev="" cur i fails=0
+  local pod=$1 secs=$2 out=$3 pattern=$4 skip=${5:-0}
+  local prev="" cur i fails=0 raw rc firsterr=""
   : > "$out"
   for (( i = 0; i < secs; i++ )); do
-    cur=$(kubectl -n "$NS" get --raw "/api/v1/namespaces/$NS/pods/$pod:8080/proxy/metrics" 2>/dev/null \
-          | awk -v pat="$pattern" '$0 ~ pat {s += $2} END {print s + 0}') || cur=""
-    if [[ -z "$cur" ]]; then
+    rc=0
+    raw=$(kubectl --request-timeout=3s -n "$NS" get --raw "/api/v1/namespaces/$NS/pods/$pod:8080/proxy/metrics" 2>&1) || rc=$?
+    if (( rc != 0 )); then
+      # Tek bir anlık hata örnekleme serisini delik deşik etmesin: bir kez hemen tekrar dene.
+      rc=0
+      raw=$(kubectl --request-timeout=3s -n "$NS" get --raw "/api/v1/namespaces/$NS/pods/$pod:8080/proxy/metrics" 2>&1) || rc=$?
+    fi
+    if (( rc != 0 )); then
+      # İlk hatayı SAKLA ve bas: "144/150 örnek kayboldu" tek başına teşhis değil, semptomdur.
+      [[ -z "$firsterr" ]] && firsterr=$(printf '%s' "$raw" | tr '\n' ' ' | cut -c1-160)
       fails=$(( fails + 1 )); prev=""; sleep 1; continue
     fi
+    cur=$(printf '%s\n' "$raw" | awk -v pat="$pattern" '$0 ~ pat {s += $2} END {print s + 0}')
     if [[ -n "$prev" && $i -gt $skip ]]; then
       awk -v a="$prev" -v b="$cur" 'BEGIN{d=b-a; print (d<0?0:d)}' >> "$out"
     fi
     prev=$cur
     sleep 1
   done
-  (( fails > secs / 5 )) && warn "örnekleme kayıpları: $fails/$secs (sonuç gürültülü olabilir)"
+  if (( fails > secs / 5 )); then
+    warn "örnekleme kayıpları: $fails/$secs — ilk hata: ${firsterr:-<yok>}"
+  fi
   return 0
 }
 # "tepe ortalama oran" üçlüsü — kapasite tepeye göre planlanır, ortalamaya göre değil.
