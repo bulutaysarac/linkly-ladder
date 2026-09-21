@@ -41,6 +41,13 @@ metadata:
   name: pg
 spec:
   instances: 3          # 1 primary + 2 replika
+  # Ortak chaos şablonları ve dashboard'lar bu etiketi arıyor (platform/chaos/pg-*.yaml).
+  # CNPG kendi etiketlerini (cnpg.io/*) koyar; merdivenin TEKDÜZELİK kuralı gereği 02'den beri
+  # kullandığımız adı da taşıtıyoruz. DİKKAT: `part-of: linkly-ladder` BİLEREK yok — o etiket
+  # APP_SELECTOR'dür ve reproduce scriptleri onunla uygulama pod'u siliyor.
+  inheritedMetadata:
+    labels:
+      app.kubernetes.io/name: postgres
   imageName: ghcr.io/cloudnative-pg/postgresql:17.2
   primaryUpdateStrategy: unsupervised
   bootstrap:
