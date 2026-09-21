@@ -132,6 +132,10 @@ with_timeout() {
 # "tepe p99=nan ms" basıp "burst latency'yi bozmadı" dedi). Sayı bekleyen yere sayı ver.
 num() { local v=${1:-}; case "$v" in ""|NaN|nan|+Inf|-Inf|null) printf '0' ;; *) printf '%s' "$v" ;; esac; }
 
+# Bir arka plan işini sessizce bekle (ölmüşse hemen dön). `wait` doğrudan çağrıldığında
+# with_timeout içinde farklı bir kabukta olduğu için işe yaramaz.
+wait_pid_quiet() { local p=$1; while kill -0 "$p" 2>/dev/null; do sleep 2; done; return 0; }
+
 # Bir metrik YOKSA ölçüme başlama.
 # `promq` serisi olmayan bir sorguya "0" döndürür; yani var olmayan bir metrik ile gerçekten
 # sıfır olan bir metrik aşağı akışta AYNI görünür. Gerçekte oldu: 07-14'te postgres/redis

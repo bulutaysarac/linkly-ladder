@@ -33,7 +33,7 @@ step "Node '$victim' donduruluyor — kubelet cevap veremeyecek"
 # de takılabiliyor. 43 dakikalık bir takılma yaşandı; bir deney adımı SINIRLI sürmeli.
 ( with_timeout 200 k6run redirect --vus 10 --duration 120s >/tmp/p0707.k6 2>&1 ) & kpid=$!
 sleep 12
-docker pause "$victim" >/dev/null
+with_timeout 30 docker pause "$victim" >/dev/null || warn "docker pause zaman aşımı"
 note "donduruldu. Kubernetes bunu ~40 sn sonra NotReady, ~5 dk sonra evict olarak görür."
 for i in $(seq 1 20); do
   st=$(kubectl get node "$victim" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null) || true
@@ -41,7 +41,7 @@ for i in $(seq 1 20); do
   sleep 5
 done
 sleep 20
-docker unpause "$victim" >/dev/null
+with_timeout 30 docker unpause "$victim" >/dev/null || warn "docker unpause zaman aşımı"
 wait $kpid 2>/dev/null || true
 e5=$(k6_5xx); reqs=$(k6_reqs)
 grafana_hint "09 · Autoscaling → 'Pod dağılımı / node' · 02 · App RED → 5xx"
