@@ -113,6 +113,11 @@ listeye bak.
 | Deney, cluster'ı **temiz** bırakmalı | Takılı kalan bir cordon, ilgisiz bir seviyeyi "rollout timeout" ile patlattı → `on_cleanup` + `trap` |
 | Kanıtı okunabilirlik uğruna **kırpma** | `EXPLAIN` çıktısını `head -3` ile kırpmak tam da aradığın "Parallel Seq Scan" satırını kesti |
 | Çıkış koduna değil, **çıktı işaretine** bak | Script çökünce (exit 1) `verify-prev` bunu "NOT-REPRODUCED" sanıp yeşil yaktı |
+| **Var olmayan metrik** ile sıfır aynı görünür | 07-14'te postgres/redis ServiceMonitor'ları eksikti; `promq` "0" döndü, script "sorun yok" dedi → `need_metric` |
+| Eşiğin, iddian olmadan **oluşmayacak** bir şeyi ölçmeli | `busy_p99 >= base_p99` gürültüyle geçilir; ayırt edici işaret paylaşılan havuzda bekleme |
+| Deney **kendisi müdahale ederse** iki seviye aynı çıkar | P06-02 tüketiciyi kendi açıyordu; "07 bunu çözdü" iddiası doğrulanamıyordu |
+| Arızanın işareti her zaman **hata kodu değildir** | Donmuş node'da 5xx yok, sadece iş bitmiyordu (120 sn'de 13 istek) |
+| Bir korumanın değerini ölçerken **diğer korumayı kaldır** | 5 sn'lik preStop, readiness'ın "HAYIR" diyebilmesini gizliyordu |
 
 ## Sayılarla
 

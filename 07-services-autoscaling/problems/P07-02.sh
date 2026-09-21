@@ -5,6 +5,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # Her yeni pod kendi havuzunu açıyor: ölçeklendikçe uygulama rahatlıyor, veritabanı boğuluyor.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
+need_metric pg_settings_max_connections "postgres ServiceMonitor deploy/servicemonitor.yaml'da mı?"
 maxconn=$(promq "max(pg_settings_max_connections{namespace=\"$NS\"})")
 step "Aritmetik önce"
 rpool=$(kubectl -n "$NS" get deploy redirect -o jsonpath='{range .spec.template.spec.containers[0].env[?(@.name=="DB_MAX_CONNS")]}{.value}{end}')

@@ -5,6 +5,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # şimdi iki ağ çağrısı. Sıcak yolda yapılan her "küçük" kontrol, p50'ye doğrudan eklenir.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
+need_metric redis_commands_processed_total "redis ServiceMonitor deploy/servicemonitor.yaml'da mı?"
 step "Limit kontrolünün kendi süresi"
 k6run redirect --vus 20 --duration 40s >/dev/null 2>&1 || true
 sleep 10

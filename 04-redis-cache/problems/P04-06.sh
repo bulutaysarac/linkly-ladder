@@ -12,6 +12,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 N=${N:-1200}
 TESTMEM=${TESTMEM:-4mb}
 ensure_healthy
+need_metric redis_evicted_keys_total "redis ServiceMonitor deploy/servicemonitor.yaml'da mı?"
 rpod=$(dep_pod app.kubernetes.io/name=redis) || exit 2   # bağımlılık hazır değilse ölçüm anlamsız
 rcli() { kubectl -n "$NS" exec "$rpod" -c redis -- redis-cli "$@" 2>/dev/null; }
 orig_mem=$(rcli CONFIG GET maxmemory | tail -1 | tr -d '\r')

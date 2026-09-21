@@ -6,6 +6,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # Bu script kazancı ölçüyor; bedeli bir sonraki script ölçüyor.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
+need_metric redis_commands_processed_total "redis ServiceMonitor deploy/servicemonitor.yaml'da mı?"
 on_cleanup "kubectl -n \"$NS\" set env rollout/redirect L1_ENABLED=true 2>/dev/null || kubectl -n \"$NS\" set env deploy/redirect L1_ENABLED=true"
 setenv() { kubectl -n "$NS" set env rollout/redirect "$@" >/dev/null 2>&1 || kubectl -n "$NS" set env deploy/redirect "$@" >/dev/null; }
 waitrollout() { kubectl -n "$NS" rollout status rollout/redirect --timeout=240s >/dev/null 2>&1 || kubectl -n "$NS" rollout status deploy/redirect --timeout=240s >/dev/null 2>&1 || true; }

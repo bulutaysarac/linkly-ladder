@@ -92,6 +92,19 @@ peak_avg() {
   awk '{n++; s+=$1; if ($1>p) p=$1} END{if (n==0||s==0){print "0 0 0"; exit} printf "%d %.1f %.1f", p, s/n, p/(s/n)}' "$1"
 }
 
+# Bir metrik YOKSA ölçüme başlama.
+# `promq` serisi olmayan bir sorguya "0" döndürür; yani var olmayan bir metrik ile gerçekten
+# sıfır olan bir metrik aşağı akışta AYNI görünür. Gerçekte oldu: 07-14'te postgres/redis
+# ServiceMonitor'ları eksikti, P07-02 ekrana `max_connections=0` basıp "sorun yok" dedi.
+# Kural: bir ölçüm, dayandığı metriğin VARLIĞINI önce doğrulamalı.
+need_metric() {
+  local m=$1 hint=${2:-}
+  if prom_absent "$m{namespace=\"$NS\"}" && prom_absent "$m"; then
+    warn "metrik YOK: $m — ölçüm anlamsız${hint:+ ($hint)}"
+    exit 2
+  fi
+}
+
 # Chaos uygula ve temizliğini kaydet; UYGULANAMADIYSA scripti DURDUR.
 # Neden: yaygın `|| warn "Chaos Mesh yok"` kalıbı iki farklı durumu aynı kefeye koyuyordu —
 #   (2) Chaos Mesh kurulu değil
