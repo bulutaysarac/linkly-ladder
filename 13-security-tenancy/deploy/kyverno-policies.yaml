@@ -1,3 +1,17 @@
+# KAPSAM NOTU (merdivene özel):
+# EN: These rules are deliberately scoped to this level's own namespace. A ClusterPolicy is
+#     cluster scoped and survives `make down` (which only deletes the namespace). Scoped to
+#     "lvl*" with Enforce, it would silently block EVERY earlier level from starting again —
+#     level 00 has no memory limit on purpose (P00-08), so the ladder would lock itself out.
+#     That is the real lesson about policy as code: its blast radius is the whole cluster and
+#     it outlives the thing that installed it. In production you want "lvl*"; here you want to
+#     still be able to run level 00 tomorrow.
+# TR: Bu kurallar bilerek YALNIZCA bu seviyenin namespace'ine kapsanmıştır. ClusterPolicy küme
+#     kapsamlıdır ve `make down` (yalnızca namespace'i siler) sonrası AYAKTA KALIR. "lvl*" +
+#     Enforce olsaydı, geçmişteki her seviyenin yeniden ayağa kalkmasını sessizce engellerdi —
+#     00 seviyesinde bellek limiti BİLEREK yok (P00-08), yani merdiven kendi kendini kilitlerdi.
+#     Policy-as-code hakkındaki asıl ders bu: etki alanı tüm kümedir ve onu kuran şeyden daha
+#     uzun yaşar. Üretimde "lvl*" istersin; burada yarın 00'ı da koşabilmek istiyorsun.
 # Kyverno — kuralları YAZIYA değil, KAPIYA dönüştür.
 #
 # EN: Every rule in this file is something an earlier level learned the hard way and then wrote
@@ -24,7 +38,7 @@ spec:
         any:
           - resources:
               kinds: [Pod]
-              namespaces: ["lvl*"]
+              namespaces: ["lvl13"]
       validate:
         message: ":latest etiketi yasak — sürüm belirsiz ve geri alınamaz olur (P12-04)"
         pattern:
@@ -36,7 +50,7 @@ spec:
         any:
           - resources:
               kinds: [Pod]
-              namespaces: ["lvl*"]
+              namespaces: ["lvl13"]
       validate:
         message: "Bellek limiti zorunlu — limitsiz bir konteyner node'u düşürebilir (P00-08)"
         pattern:
@@ -50,7 +64,7 @@ spec:
         any:
           - resources:
               kinds: [Pod]
-              namespaces: ["lvl*"]
+              namespaces: ["lvl13"]
       exclude:
         any:
           - resources:

@@ -182,6 +182,14 @@ P00-04 + P07-08 (probe). *Her kural, bir kez ölçülmüş bir arızanın kalıc
 **İki operasyonel not:** yeni politikayı önce `Audit` ile açmak standarttır; politika **admission**
 anında çalışır, zaten çalışan ihlalleri **silmez**.
 
+**Kapsam notu — politikanın patlama yarıçapı:** Bu politikalar bilerek yalnızca `lvl13`
+namespace'ine kapsandı. `ClusterPolicy` **küme kapsamlıdır** ve `make down` onu silmez (yalnızca
+namespace gider). Kapsam `lvl*` + `Enforce` olsaydı, bu seviyeyi bir kez çalıştırdıktan sonra
+**00'ı bir daha ayağa kaldıramazdın**: orada bellek limiti bilerek yok (P00-08). Yani politika,
+onu kuran şeyden daha uzun yaşar ve geçmişi de kapsar. Üretimde istediğin tam olarak budur;
+bir öğrenme merdiveninde ise kendi kendini kilitlemektir. *Bir kuralı yazmadan önce "kimleri
+kapsıyor ve ne zaman kaldırılacak?" sorusunun cevabını yaz.*
+
 ---
 
 ### P13-08 · Konteyner ve tedarik zinciri sertleştirme
