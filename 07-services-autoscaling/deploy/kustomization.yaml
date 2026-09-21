@@ -12,6 +12,7 @@ resources:
   - redirect-svc.yaml
   - api-svc.yaml
   - ingress.yaml
+  - servicemonitor.yaml
 labels:
   - includeSelectors: false
     includeTemplates: true

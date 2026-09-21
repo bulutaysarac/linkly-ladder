@@ -263,13 +263,17 @@ fatal_line() {
 # 12'den sonra redirect bir Deployment değil, Argo Rollout. Ölçek/okuma yardımcıları iş yükünün
 # TÜRÜNÜ sormak zorunda; "deploy" varsaymak "error: no objects passed to scale" ile patlıyordu.
 workload_kind() {
-  if kubectl -n "$NS" get rollout -l "$APP_SELECTOR" -o name 2>/dev/null | grep -q .; then
+  if kubectl -n "$NS" get "rollout/$(app_name)" -o name 2>/dev/null | grep -q .; then
     printf 'rollout'
   else
     printf 'deploy'
   fi
 }
-scale()       { kubectl -n "$NS" scale "$(workload_kind)" -l "$APP_SELECTOR" --replicas="$1" >/dev/null; wait_ready; }
+# Yalnızca BU scriptin iş yükünü ölçekle, etiketle eşleşen HER ŞEYİ değil.
+# Gerçekte oldu: 06'dan sonra tüketici (analytics) de `part-of=linkly-ladder` taşıyor ve
+# `scale deploy -l "$APP_SELECTOR"` uygulamayla birlikte onu da ölçekliyordu — deney, ölçtüğünü
+# sandığı şeyden başka bir şeyi değiştiriyordu (P06-03/04/07 hata verdi).
+scale()       { kubectl -n "$NS" scale "$(workload_kind)/$(app_name)" --replicas="$1" >/dev/null; wait_ready; }
 # Service endpoint'leri ölçeğe yetişene kadar bekle. rollout status "pod hazır" der ama ingress'in
 # upstream listesi birkaç saniye geriden gelir; o pencerede tüm istekler TEK pod'a düşer ve
 # yük dağılımına dayanan deneyler (P00-03 gibi) yanlış negatif verir.
@@ -294,7 +298,7 @@ wait_endpoints() {
   warn "endpoint sayısı $want'e ulaşmadı (servis=$svc, şu an $got)"
 }
 
-replicas_of() { kubectl -n "$NS" get "$(workload_kind)" -l "$APP_SELECTOR" -o jsonpath='{.items[0].spec.replicas}' 2>/dev/null || echo 1; }
+replicas_of() { kubectl -n "$NS" get "$(workload_kind)/$(app_name)" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo 1; }
 # cAdvisor bu ortamda `container` label'ı üretmiyor → konteyner serilerini image üzerinden seç (bkz. dashboards/gen.py).
 # Örneklenen tepe bellek. DİKKAT: Prometheus 15 sn'de bir örnekler; hızlı dolup ölen bir konteynerin
 # gerçek tepesini KAÇIRIR (örnekler arasında doldu, öldü, sıfırdan başladı). Yani bu değer daima
@@ -319,7 +323,18 @@ port_forward() {
 }
 port_forward_stop() { [[ -n "$PF_PID" ]] && { kill "$PF_PID" 2>/dev/null || true; wait "$PF_PID" 2>/dev/null || true; PF_PID=""; }; return 0; }
 
-pod_name()    { kubectl -n "$NS" get pod -l "$APP_SELECTOR" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null; }
+# HAZIR ve silinmekte OLMAYAN bir pod seç.
+# Gerçekte oldu: `items[0]` rollout'tan sonra hâlâ listede duran TERMINATING pod'u veriyordu ve
+# 150 saniyelik örnekleme boyunca her istek "connection refused" aldı (P03-07, 142/150 kayıp).
+# Aynı kod bir başka seviyede çalıştı — çünkü orada items[0] şansa canlı pod'du. Şansa dayanan
+# bir seçim, ölçümün bir parçası değildir.
+pod_name() {
+  kubectl -n "$NS" get pod -l "$APP_SELECTOR" -o json 2>/dev/null \
+    | jq -r '[.items[]
+              | select(.metadata.deletionTimestamp == null)
+              | select(any(.status.containerStatuses[]?; .ready))
+              | .metadata.name][0] // empty'
+}
 restarts_of() { kubectl -n "$NS" get pod "$1" -o jsonpath='{.status.containerStatuses[0].restartCount}' 2>/dev/null || echo 0; }
 
 # Çökme kanıtı: belirtilen pod'un ÖNCEKİ konteyner loglarında kalıp var mı?
