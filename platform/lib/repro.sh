@@ -130,7 +130,11 @@ kill_tree() {
 with_timeout() {
   local secs=$1; shift
   ( "$@" ) & local pid=$!
-  ( sleep "$secs"; kill_tree "$pid" ) & local watchdog=$!
+  # >/dev/null ŞART: watchdog stdout'u MİRAS ALIR. Bu fonksiyon `$( )` içinde çağrıldığında
+  # komut ikamesi EOF bekler ve watchdog borusu açık kaldığı için ASILI KALIR — komut çoktan
+  # bitmiş olsa bile. Gece turu tam olarak burada durdu; P07-07'nin saatlerce asılması da
+  # büyük ihtimalle buydu. Arka plana attığın her şeyin çıktısını KAPAT.
+  ( sleep "$secs"; kill_tree "$pid" ) >/dev/null 2>&1 & local watchdog=$!
   local rc=0; wait "$pid" 2>/dev/null || rc=$?
   kill "$watchdog" 2>/dev/null || true; wait "$watchdog" 2>/dev/null || true
   return "$rc"
