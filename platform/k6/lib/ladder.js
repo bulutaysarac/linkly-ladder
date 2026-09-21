@@ -59,9 +59,27 @@ export function getMeta(code) {
 }
 
 // Isınma: N link oluşturup kodlarını döndürür (setup() içinde kullanılır).
-export function seedLinks(n) {
+//
+// SEED_BUDGET_MS — setup'ın ZAMAN BÜTÇESİ. Neden var:
+// EN: The setup phase is subject to the very fault the experiment injects. With a 2s database
+//     delay, seeding 500 links takes 1000s: k6's setupTimeout fires, the run is aborted and the
+//     load never happens — while the repro script happily reports "not reproduced". The bug was
+//     never in the system under test, it was in the experiment's own preparation.
+// TR: Kurulum aşaması, deneyin enjekte ettiği arızaya TABİDİR. 2 sn'lik bir veritabanı gecikmesinde
+//     500 link oluşturmak 1000 sn sürer: k6'nın setupTimeout'u devreye girer, koşu iptal olur ve
+//     yük hiç çalışmaz — reproduce scripti ise memnuniyetle "reproduce olmadı" der. Hata test
+//     edilen sistemde değil, deneyin kendi hazırlığındaydı. Bütçe dolunca elde ne varsa onunla devam.
+export function seedLinks(n, budgetMs = parseInt(__ENV.SEED_BUDGET_MS || '30000', 10)) {
   const codes = [];
-  for (let i = 0; i < n; i++) { const c = createLink(); if (c) codes.push(c); }
+  const t0 = Date.now();
+  for (let i = 0; i < n; i++) {
+    const c = createLink();
+    if (c) codes.push(c);
+    if (Date.now() - t0 > budgetMs) {
+      console.log(`seed: zaman bütçesi doldu (${budgetMs}ms), ${codes.length}/${n} kod ile devam`);
+      break;
+    }
+  }
   if (codes.length === 0) throw new Error(`seed: hiç link oluşturulamadı (${BASE})`);
   return codes;
 }

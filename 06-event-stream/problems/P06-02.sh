@@ -12,8 +12,8 @@ step "Tüketiciyi tamamen durdur (replicas=0)"
 kubectl -n "$NS" scale deploy/$CONSUMER --replicas=0 >/dev/null
 sleep 5
 step "Tıklama üretmeye devam et — üretici çalışıyor, tüketici yok"
-N=${N:-800}
-for i in $(seq 1 "$N"); do status_of "$code" >/dev/null; done
+N=${N:-2000}
+clicks "$code" "$N" 20
 sleep 8
 mid=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0')
 produced=$(promq "sum(increase(producer_records_total{namespace=\"$NS\",result=\"ok\"}[10m]))")

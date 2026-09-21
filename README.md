@@ -92,6 +92,28 @@ make verify-prev  # önceki seviyenin sorunları burada çözülmüş mü?
 tepe heap **185 MB / 62 872 link** → OOMKilled · sağlık ucu iş zincirine sokulunca
 **77 readiness Unhealthy** olayı (pod ölmeden Endpoints'ten düşüyor).
 
+## Ölçüm dersleri (deneyleri koşarken öğrenilenler)
+
+Bu merdivenin ikinci öğretisi sistemler hakkında değil, **ölçüm** hakkında. Aşağıdakilerin hepsi
+gerçekten başımıza geldi: script "sorun yok" dedi, sorun oradaydı. Yeni bir reproduce yazarken
+listeye bak.
+
+| Kural | Nasıl ısırdı |
+|---|---|
+| Ölçüm **penceresi**, ölçtüğün olaydan kısa olmamalı | `rate(...[1m])` 45 sn'lik yükün yarısını kaçırdı, oranı boşta geçen zamanla seyreltti |
+| Ölçüm **çözünürlüğü**, olaydan ince olmalı | 1-2 sn'lik TTL darbesi Prometheus'un 15 sn'lik örneklemesinde düzleşti → pod'un `/metrics` ucunu saniyede bir örnekle (P03-07) |
+| İki fazı **ayrı** ölç | `increase(...[3m])` iki ölçümü karıştırdı; doğrusu yük öncesi/sonrası sayaç farkı (P03-04) |
+| Deneyin **hazırlığı** da arızaya tabidir | Chaos'u yükten önce uygulayınca k6 setup'ı zaman aşımına uğradı, yük hiç koşmadı (P05-02) → `seedLinks` artık zaman bütçeli |
+| **Hangi** iki olayın yarıştığını yaz | Yanlış pencere büyütüldü; üstelik `defer` ile, yani hiç (P04-05) |
+| Sorunlar birbirini **maskeler** | Eşzamanlılık çökmesi, çakışma ve OOM kanıtını sakladı → izole ederken 1 VU |
+| Anlık metrik, **ölüp dirilen** süreci kaçırır | Tepe bellek + `OOMKilled`/exit 137 kanıtı şart |
+| Korumayı **kim** veriyor? | 413'ü uygulama değil ingress veriyordu → pod'a port-forward ile doğrudan test et |
+| Yük, probe'un **failureThreshold**'undan uzun sürmeli | Aksi hâlde "probe iyi" dersin |
+| Bağımlılığın hazır olması **önkoşuldur**, ölçüm değil | Bir önceki deney Redis'i öldürdü, sonraki deney ilgisiz bir hatayla düştü → `dep_pod` |
+| Deney, cluster'ı **temiz** bırakmalı | Takılı kalan bir cordon, ilgisiz bir seviyeyi "rollout timeout" ile patlattı → `on_cleanup` + `trap` |
+| Kanıtı okunabilirlik uğruna **kırpma** | `EXPLAIN` çıktısını `head -3` ile kırpmak tam da aradığın "Parallel Seq Scan" satırını kesti |
+| Çıkış koduna değil, **çıktı işaretine** bak | Script çökünce (exit 1) `verify-prev` bunu "NOT-REPRODUCED" sanıp yeşil yaktı |
+
 ## Sayılarla
 
 | | |

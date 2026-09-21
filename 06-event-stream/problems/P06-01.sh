@@ -7,19 +7,27 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 ensure_healthy
 CONSUMER=analytics
 on_cleanup "kubectl -n \"$NS\" set env deploy/$CONSUMER TRAP_COMMIT_BEFORE_WRITE-"
-step "Bilinen sayıda tıklama üret"
-code=$(create_link "https://example.com/dedup")
-N=${N:-600}
-before=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0')
-for i in $(seq 1 "$N"); do status_of "$code" >/dev/null; done
-step "Tüketiciyi işlerken öldür (birkaç kez) — commit edilmemiş partiler yeniden teslim edilecek"
+# DENEY KURULUMU ÖNEMLİ: tüketiciyi ÖNCE durdurup birikim yarat, SONRA aç ve işlerken öldür.
+# İlk hâlde tıklamalar üretilirken tüketici de çalışıyordu; olayları anında işleyip commit ediyor,
+# öldürdüğümüzde ortada commit edilmemiş parti KALMIYORDU. Yani deney, ölçmek istediği durumu
+# hiç oluşturmadan "tekrar teslim gözlenmedi" diyordu.
 need_confirm "tüketici pod'u öldürülecek"
+step "Tüketiciyi durdur ve birikim yarat"
+kubectl -n "$NS" scale deploy/$CONSUMER --replicas=0 >/dev/null
+on_cleanup "kubectl -n \"$NS\" scale deploy/$CONSUMER --replicas=1"
+code=$(create_link "https://example.com/dedup")
+N=${N:-2000}
+before=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0')
+clicks "$code" "$N" 20
+note "$N tıklama üretildi, hepsi topic'te bekliyor (tüketici kapalı)"
+step "Tüketiciyi aç ve birikimi işlerken ÖLDÜR — commit edilmemiş partiler yeniden teslim edilecek"
+kubectl -n "$NS" scale deploy/$CONSUMER --replicas=1 >/dev/null
 for i in 1 2 3; do
+  sleep 4
   kubectl -n "$NS" delete pod -l app.kubernetes.io/name=$CONSUMER --force --grace-period=0 >/dev/null 2>&1 || true
-  sleep 6
 done
 kubectl -n "$NS" rollout status deploy/$CONSUMER --timeout=120s >/dev/null 2>&1 || true
-sleep 20
+sleep 40
 after=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0')
 counted=$(( after - before ))
 dup=$(promq "sum(increase(consumer_records_total{namespace=\"$NS\",result=\"duplicate\"}[10m]))")

@@ -93,8 +93,14 @@ hata değil, seçilmiş garantinin ta kendisi. Çift saymayı `processed_events`
 `INSERT … ON CONFLICT DO NOTHING RETURNING` ile hangi olayın gerçekten *iddia edildiği* belirleniyor.
 [Topic · Konu: En az bir kez, idempotency, atomiklik]
 
-**Reproduce (adım adım):** `CONFIRM=1 make repro P=P06-01` — bilinen sayıda tıklama üretir, tüketiciyi
-üç kez öldürür, son sayımı ve `duplicate` sayacını gösterir.
+**Reproduce (adım adım):** `CONFIRM=1 make repro P=P06-01` — tüketiciyi **önce durdurup** 2000
+tıklamalık bir birikim yaratır, sonra açıp birikimi işlerken üç kez öldürür, son sayımı ve
+`duplicate` sayacını gösterir.
+
+**Ölçüm dersi:** İlk hâlde tıklamalar üretilirken tüketici de çalışıyordu; olayları anında işleyip
+commit ettiği için öldürdüğümüzde ortada **commit edilmemiş parti kalmıyordu**. Deney, ölçmek
+istediği durumu hiç oluşturmadan "tekrar teslim gözlenmedi" diyordu. *Bir yarışı ölçmek istiyorsan
+önce o yarışın oluşacağı koşulu kurmak zorundasın.*
 
 **Grafana:** `08 · Stream` → "consumer records by result"; `07 · Analytics` → tıklama farkı.
 **Kritik ayrıntı:** İddia ve sayım **aynı transaction'da** commit ediliyor. Aralarında bir çökme,
@@ -111,8 +117,8 @@ birikmiş olaylar işlenir ve sayı yakalar.
 **Neden:** Log dayanıklı; tüketici yalnızca **nerede kaldığını** (offset) takip ediyor.
 [Topic · Konu: Lag, dayanıklı log]
 
-**Reproduce (adım adım):** `make repro P=P06-02` — tüketiciyi `replicas=0` yapar, 800 tıklama üretir,
-bayatlığı ölçer, geri açıp yakalama süresini ölçer.
+**Reproduce (adım adım):** `make repro P=P06-02` — tüketiciyi `replicas=0` yapar, 2000 tıklama
+üretir (paralel), bayatlığı ölçer, geri açıp yakalama süresini ölçer.
 
 **Grafana:** `08 · Stream` → "consumer lag by partition", "produced vs consumed vs written".
 **Nerede çözülüyor:** 07 — KEDA lag'i **ölçekleme sinyali** yapacak. Ama dikkat: tek partition varsa
@@ -184,8 +190,8 @@ varsayılan modda **eksilmez** (tekrarlar idempotency ile yutulur).
 
 [Topic · Konu: Teslimat garantisi, commit noktası]
 
-**Reproduce (adım adım):** `CONFIRM=1 make repro P=P06-06` — her iki modda da tüketiciyi işleme
-sırasında öldürüp son sayımları karşılaştırır.
+**Reproduce (adım adım):** `CONFIRM=1 make repro P=P06-06` — her iki modda da önce birikim yaratır
+(tüketici kapalı), sonra tüketiciyi işleme sırasında öldürüp son sayımları karşılaştırır.
 
 **Grafana:** `08 · Stream` → "consumer records by result" (`duplicate`).
 **Ders:** *Mühendislik, hangi hatayı yaşayacağını seçmektir.* "Tam bir kez teslimat" bir pazarlama

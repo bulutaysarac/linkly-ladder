@@ -46,6 +46,15 @@ create_status() {
 status_of()   { curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$BASE_URL/$1"; }
 header_of()   { curl -sI --max-time 5 "$BASE_URL/$1" | tr -d '\r' | awk -v h="$2" 'tolower($1)==tolower(h)":"{ $1=""; sub(/^ /,""); print }'; }
 
+# Bilinen bir koda N tıklama üret (varsayılan 10 paralel).
+# Neden paralel: sıralı `for + curl` döngüsü ~20-40 istek/s'te kalıyor. "Tampon/ kuyruk doluyken
+# öldür" türü deneylerde bu hız yetersiz — tüketici üretimden hızlı çalışıyorsa hiç birikim olmaz
+# ve deney, ölçmek istediği durumu HİÇ oluşturmadan "sorun yok" der.
+clicks() {
+  local code=$1 n=$2 par=${3:-10}
+  seq 1 "$n" | xargs -P "$par" -I{} curl -s -o /dev/null --max-time 5 "$BASE_URL/$code" >/dev/null 2>&1 || true
+}
+
 kpods()       { kubectl -n "$NS" get pods -l "$APP_SELECTOR" "$@"; }
 restarts()    { kpods -o jsonpath='{range .items[*]}{.status.containerStatuses[0].restartCount}{"\n"}{end}' | awk '{s+=$1} END{print s+0}'; }
 last_reason() { kpods -o jsonpath='{range .items[*]}{.status.containerStatuses[0].lastState.terminated.reason}{"\n"}{end}' | grep -v '^$' | sort -u | paste -sd, -; }
