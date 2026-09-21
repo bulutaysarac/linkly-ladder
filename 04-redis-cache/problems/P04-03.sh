@@ -12,11 +12,22 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # gösteriyoruz. Ölçemediğin bir sınırı, sınırın KENDİSİNİ ölçerek göster.
 ensure_healthy
 rpod=$(dep_pod app.kubernetes.io/name=redis) || exit 2   # bağımlılık hazır değilse ölçüm anlamsız
-bench() { kubectl -n "$NS" exec "$rpod" -c redis -- redis-benchmark -q -t get -n "${2:-100000}" -c 50 -r "$1" 2>/dev/null \
-            | awk -F'[: ]+' '/^GET/ {print $2}' | tr -d '\r'; }
+# redis-benchmark -q çıktısı sürüme göre değişiyor ("GET: 85178.88 requests per second" ya da
+# "GET: 85178.88 requests per second, p50=0.295 msec"). Alan numarasına güvenme: SATIRDAKİ İLK
+# SAYIYI al. İlk sürüm alan numarasına güveniyordu ve boş dönüp "tavanın %1126716'sı kullanılıyor"
+# gibi saçma bir satır üretti — ayrıştırma hatası, ölçüm hatasının en sessiz türüdür.
+bench() {
+  kubectl -n "$NS" exec "$rpod" -c redis -- redis-benchmark -q -t get -n "${2:-100000}" -c 50 -r "$1" 2>/dev/null \
+    | tr -d '\r' | awk '/^GET/ {for (i=1; i<=NF; i++) if ($i+0 > 0) {printf "%d", $i; exit}}'
+}
 step "Tavanı DOĞRUDAN ölç: 100k anahtara dağıtılmış GET vs TEK anahtara GET (ağ dışı, pod içinde)"
 spread_ceiling=$(bench 100000)
 single_ceiling=$(bench 0)
+if [[ -z "${spread_ceiling:-}" || -z "${single_ceiling:-}" ]]; then
+  warn "redis-benchmark çıktısı ayrıştırılamadı — ham çıktı:"
+  kubectl -n "$NS" exec "$rpod" -c redis -- redis-benchmark -q -t get -n 1000 -c 10 -r 0 2>&1 | head -3 | sed 's/^/    /'
+  exit 2
+fi
 note "dağıtık GET tavanı: ${spread_ceiling:-?} ops/s"
 note "TEK anahtar GET tavanı: ${single_ceiling:-?} ops/s"
 note "İkisi birbirine yakınsa mesaj şudur: sınır ANAHTARDA değil, INSTANCE'ta. Yani sharding"

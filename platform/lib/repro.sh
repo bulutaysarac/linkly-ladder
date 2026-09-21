@@ -47,22 +47,34 @@ status_of()   { curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$BASE_URL/$
 header_of()   { curl -sI --max-time 5 "$BASE_URL/$1" | tr -d '\r' | awk -v h="$2" 'tolower($1)==tolower(h)":"{ $1=""; sub(/^ /,""); print }'; }
 
 # Pod'un kendi /metrics ucunu SANİYEDE BİR örnekle → saniyelik fark dizisi (dosyaya, satır başına bir sayı).
-#   sample_series <port> <saniye> <çıktı-dosyası> <awk-deseni> [atlanacak-ilk-saniye]
+#   sample_series <pod> <saniye> <çıktı-dosyası> <awk-deseni> [atlanacak-ilk-saniye]
+#
 # Neden var: Prometheus bu kurulumda 15 sn'de bir örnekliyor ve `rate(...[30s])` 1-2 saniyelik bir
 # darbeyi 30 saniyeye yayıp düzlüyor. Tepe/ortalama oranını ölçmek istiyorsan ölçüm çözünürlüğün
 # olaydan İNCE olmalı. (Aynı sorun 11'de yüksek çözünürlük/exemplar başlığıyla dönüyor.)
+#
+# Neden port-forward DEĞİL: ilk sürüm `kubectl port-forward` kullanıyordu ve 150 saniyelik
+# örnekleme boyunca bağlantı düşünce curl 28 (timeout) / 52 (empty reply) döndürüyor, `pipefail`
+# altında scripti öldürüyordu — ölçüm aracının kendisi deneyi bozuyordu. API sunucusunun pod
+# proxy'si (`/proxy/metrics`) kalıcı bir tünel gerektirmez. Yine de tek tük hata olabilir:
+# başarısız örnek ATLANIR, sayaç farkı bir sonraki başarılı örnekte doğru kapanır.
 sample_series() {
-  local port=$1 secs=$2 out=$3 pattern=$4 skip=${5:-0} prev="" cur i
+  local pod=$1 secs=$2 out=$3 pattern=$4 skip=${5:-0} prev="" cur i fails=0
   : > "$out"
   for (( i = 0; i < secs; i++ )); do
-    cur=$(curl -s --max-time 2 "http://127.0.0.1:$port/metrics" \
-          | awk -v pat="$pattern" '$0 ~ pat {s += $2} END {print s + 0}')
-    if [[ -n "$prev" && -n "$cur" && $i -gt $skip ]]; then
+    cur=$(kubectl -n "$NS" get --raw "/api/v1/namespaces/$NS/pods/$pod:8080/proxy/metrics" 2>/dev/null \
+          | awk -v pat="$pattern" '$0 ~ pat {s += $2} END {print s + 0}') || cur=""
+    if [[ -z "$cur" ]]; then
+      fails=$(( fails + 1 )); prev=""; sleep 1; continue
+    fi
+    if [[ -n "$prev" && $i -gt $skip ]]; then
       awk -v a="$prev" -v b="$cur" 'BEGIN{d=b-a; print (d<0?0:d)}' >> "$out"
     fi
     prev=$cur
     sleep 1
   done
+  (( fails > secs / 5 )) && warn "örnekleme kayıpları: $fails/$secs (sonuç gürültülü olabilir)"
+  return 0
 }
 # "tepe ortalama oran" üçlüsü — kapasite tepeye göre planlanır, ortalamaya göre değil.
 peak_avg() {

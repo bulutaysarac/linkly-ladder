@@ -13,18 +13,15 @@ LOAD=${LOAD:-150}
 SKIP=${SKIP:-35}
 ensure_healthy
 on_cleanup "kubectl -n \"$NS\" set env deploy/linkly TRAP_NO_TTL_JITTER- CACHE_TTL-"
-on_cleanup "port_forward_stop"
 warm_and_watch() {
-  local out=$1 pod port=18404
+  local out=$1 pod
   kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null
   for _ in $(seq 1 30); do serving && break; sleep 2; done
   pod=$(pod_name)
-  port_forward "$pod" "$port"
   SEED=300 k6run redirect --vus 20 --duration "${LOAD}s" >/dev/null 2>&1 &
   local kpid=$!
-  sample_series "$port" "$LOAD" "$out" '^cache_ops_total\{.*result="miss"' "$SKIP"
+  sample_series "$pod" "$LOAD" "$out" '^cache_ops_total\{.*result="miss"' "$SKIP"
   wait "$kpid" 2>/dev/null || true
-  port_forward_stop
 }
 step "Jitter AÇIK (varsayılan, ±%20), TTL $TTLS — ${LOAD}s boyunca saniyede bir örnekleniyor"
 kubectl -n "$NS" set env deploy/linkly CACHE_TTL="$TTLS" TRAP_NO_TTL_JITTER- >/dev/null
