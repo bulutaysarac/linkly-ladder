@@ -56,6 +56,10 @@ deploy: ## kubectl apply -k deploy/ (IMAGE_TAG yerine gerçek tag)
 	  [ $$i = 1 ] && echo "  $(NS) siliniyor, bitmesi bekleniyor..."; \
 	  sleep 2; \
 	done
+	@# Tek seferlik Job'lar (migrate, topics) IMMUTABLE: namespace ayakta kalmışsa ve imaj etiketi
+	@# değiştiyse `apply` "field is immutable" ile düşer ve seviye hiç kurulamaz. Bunlar zaten
+	@# bir kez koşup biten işler; yeniden uygulamadan ÖNCE sil.
+	@kubectl -n $(NS) delete job migrate topics --ignore-not-found --wait=false >/dev/null 2>&1 || true
 	@kubectl kustomize deploy/ | sed 's|:IMAGE_TAG|:$(TAG)|g' | kubectl apply -f -
 
 wait: ## Deployment/StatefulSet + (varsa) Argo Rollout hazır olana kadar bekle
