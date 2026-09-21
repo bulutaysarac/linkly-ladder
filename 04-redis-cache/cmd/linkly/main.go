@@ -96,6 +96,7 @@ func main() {
 		Layer:       "l2",
 		NoNegative:  cfg.TrapNoNegative,
 		NoJitter:    cfg.TrapNoJitter,
+		FillDelay:   time.Duration(cfg.TrapFillDelayMs) * time.Millisecond,
 	}, cache.NewMetrics(met.Registry(), "l2"), "linkly:link:")
 	met.BindRedisStats(func() (hits, misses uint32) {
 		st := rdb.PoolStats()
@@ -121,7 +122,7 @@ func main() {
 		"TRAP_NO_NEGATIVE_CACHE": cfg.TrapNoNegative,
 		"TRAP_NO_TTL_JITTER":     cfg.TrapNoJitter,
 		"TRAP_DEBUG_KEYS":        cfg.TrapDebugKeys,
-		"TRAP_UPDATE_DELAY":      cfg.TrapUpdateDelayMs > 0,
+		"TRAP_READ_FILL_DELAY":   cfg.TrapFillDelayMs > 0,
 	} {
 		if on {
 			log.Warn("önbellek tuzağı açık", "flag", name, "bkz", "README §7")

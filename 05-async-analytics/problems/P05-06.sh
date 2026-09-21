@@ -27,6 +27,11 @@ warn "Elle doğrula: Chrome'da http://${BASE_URL#http://}/$code2 adresini 5 kez 
 warn "sonra stats'a bak: yalnızca 1 tıklama görürsün. Kalan 4'ü '(disk cache)' olarak servis edildi."
 note "Zarar zinciri: 301 → tarayıcı önbelleği → sunucuya ulaşmayan istek → sayılamayan tıklama →"
 note "yanlış analitik → yanlış iş kararı. Üstelik linki silsen bile yönlendirme devam eder (P00-10)."
-{ [[ "$st301" == 301 ]] && [[ -z "$cc2" ]]; } \
-  && reproduced "301 + Cache-Control yok: tarayıcı önbelleği tıklamaları görünmez kılıyor (302 modunda $c302/$N sayılmıştı)"
+# Kanıt "Cache-Control BOŞ" değil, "saklamayı YASAKLAMIYOR" olmalı: araya giren bir katman
+# (ingress, CDN) başlık ekleyebilir ve boşluk kontrolü yanlış negatif verir. RFC 7234'e göre 301,
+# açık bir yasak yoksa sezgisel olarak ÖNBELLEKLENEBİLİR — ölçtüğümüz şey tam olarak bu.
+storable=1
+printf '%s' "${cc2:-}" | grep -qiE 'no-store|no-cache|max-age=0' && storable=0
+{ [[ "$st301" == 301 ]] && (( storable == 1 )); } \
+  && reproduced "301 + saklamayı yasaklamayan Cache-Control ('${cc2:-<yok>}'): tarayıcı önbelleği tıklamaları görünmez kılıyor (302 modunda $c302/$N sayılmıştı)"
 not_reproduced "yönlendirme 302 + no-store — tıklamalar sunucuya ulaşıyor"

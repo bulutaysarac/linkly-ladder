@@ -44,7 +44,7 @@ type Config struct {
 	TrapNoNegative      bool // negatif önbellek kapalı → var olmayan kod taraması hep DB'ye iner (P03-06)
 	TrapNoJitter        bool // TTL jitter kapalı → tüm anahtarlar aynı anda dolar (P04-04)
 	TrapDebugKeys       bool // /debug/keys ucu KEYS * çalıştırsın → Redis'i tek komutla kilitle (P04-07)
-	TrapUpdateDelayMs   int  // DB update ile önbellek silme arasına gecikme koy → cache-aside yarışı (P04-05)
+	TrapFillDelayMs     int  // DB okuma ile önbelleğe yazma arasına gecikme koy → cache-aside yarışı (P04-05)
 }
 
 func Load() Config {
@@ -83,7 +83,7 @@ func Load() Config {
 		TrapNoNegative:      envBool("TRAP_NO_NEGATIVE_CACHE", false),
 		TrapNoJitter:        envBool("TRAP_NO_TTL_JITTER", false),
 		TrapDebugKeys:       envBool("TRAP_DEBUG_KEYS", false),
-		TrapUpdateDelayMs:   envInt("TRAP_UPDATE_DELAY_MS", 0),
+		TrapFillDelayMs:     envInt("TRAP_READ_FILL_DELAY_MS", 0),
 	}
 }
 

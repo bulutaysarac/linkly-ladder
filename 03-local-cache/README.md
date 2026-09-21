@@ -132,6 +132,14 @@ gördüğü örneklem küçülür, ısınma N kat uzar. [Topic · Konu: Önbelle
 
 **Reproduce (adım adım):**
 1. `CONFIRM=1 make repro P=P03-04` — 1 replika ve çok replika ile aynı yükü koşup hit oranını kıyaslar
+   (4000 kodluk çalışma kümesi, 20 VU × 60 sn; script replika sayısını deney sonunda geri alır)
+
+**Ölçüm notu — bu deneyi iki kez yanlış kurduk, ikisi de ders:**
+- Çalışma kümesi 200 kodken etki ölçülemiyordu. Etkinin büyüklüğü `N × K / toplam istek`: pod sayısı
+  N ve çalışma kümesi K küçükse fark gürültüye karışır. K'yi 4000'e çıkarınca fark 20+ puan oldu.
+- `increase(cache_ops_total[3m])` iki ölçümü birbirine karıştırıyordu: ölçekleme + restart + yük,
+  iki ölçüm arasında 3 dakikadan kısa sürüyor ve pencere bir öncekinin verisini de topluyordu.
+  Artık sayacın kendisi yükten **önce ve sonra** okunup fark alınıyor — pencere hizalama derdi yok.
 
 **Grafana:** `04 · Cache` → "hit ratio by pod".
 **Nerede çözülüyor:** 04 (sorun tamamen ortadan kalkar). Ara çözüm **consistent hashing**'dir
@@ -148,7 +156,16 @@ gider. Yük ne kadar yüksekse darbe o kadar büyük — koruma tam da en gerekl
 [Topic · Konu: Cache stampede, singleflight]
 
 **Reproduce (adım adım):**
-1. `make repro P=P03-05` — TTL'i 5 sn'ye çeker, `hot-key` yükü verir, önce korumalı sonra korumasız ölçer
+1. `make repro P=P03-05` — Postgres'e 200 ms gecikme enjekte eder (Chaos Mesh), TTL'i 5 sn'ye çeker,
+   `hot-key` yükü verir, önce korumalı sonra korumasız ölçer
+   (Chaos Mesh kurulu değilse: `cd platform && make chaos`)
+
+**Neden gecikme enjekte ediyoruz:** İzdihamın büyüklüğü `istek hızı × önbelleği DOLDURMA süresi`.
+Bu kümede Postgres 1 ms'de cevap veriyor; delik o kadar dar ki korumasız hâlde bile içeri 1-2 istek
+sızıyor ve ölçüm "sorun yok" diyor. Gerçek hayatta doldurma maliyeti 10-500 ms'dir (uzak DB, JOIN,
+soğuk sayfa). 200 ms bunu temsil ediyor. **Ders: singleflight'ın değeri DB hızıyla ters orantılıdır**
+— DB hızlandıkça gereksizleşir, yavaşladıkça hayat kurtarır. Korumayı "yükte lazım olur" diye değil,
+"doldurma pahalı olduğunda lazım olur" diye koyarsın.
 
 **Grafana:** `04 · Cache` → "stampede wait/s" ve "cache miss vs DB qps".
 **Okuma notu:** `cache_stampede_wait_total`'ın **yükselmesi hata değildir** — o kadar çağrının DB'ye
@@ -182,12 +199,23 @@ ve TTL süresi sonra hepsi **aynı saniyede** dolar. Sistem kendi kendine bir y�
 [Topic · Konu: Korelasyon kırma, thundering herd]
 
 **Reproduce (adım adım):**
-1. `make repro P=P03-07` — 400 anahtarı tek seferde ısıtır, jitter açık/kapalı **tepe/ortalama**
-   oranını kıyaslar
+1. `make repro P=P03-07` — TTL'i 30 sn'ye çeker, 300 kodluk kümeyi tek seferde ısıtır, jitter
+   açık/kapalı 150'şer saniye yük verip **tepe/ortalama** oranını kıyaslar (~8 dk sürer)
+2. Saniyelik seriler `/tmp/p0307-jitter.txt` ve `/tmp/p0307-nojitter.txt` dosyalarında kalır —
+   yan yana koyunca biri düz, diğeri testere dişi
+
+**Ölçüm notu — bu darbeyi Prometheus'tan okuyamazsın:** Darbe 1-2 saniye sürüyor, Prometheus ise
+15 saniyede bir örnekliyor ve `rate(...[30s])` onu 30 saniyeye yayıp düzlüyor; düzlenen şey tam da
+ölçmek istediğin tepe. Bu yüzden script pod'un `/metrics` ucunu **saniyede bir** kendisi örnekliyor.
+Kural: **ölçüm çözünürlüğün, ölçtüğün olaydan ince olmalı** (pencere kuralının kardeşi: ölçüm
+penceresi de olaydan kısa olmamalı). Aynı sorun 11'de yüksek çözünürlük/exemplar başlığıyla dönecek.
+Sayaç olarak `cache_ops_total{result="expired"}` seçildi: ilk ısınmanın ıskalarını saymaz, yalnızca
+TTL dolmalarını sayar.
 
 **Grafana:** `05 · Postgres` → "DB queries by op" (darbeler); `04 · Cache` → "eviction/expired".
 **Okuma notu:** Bakılacak sayı ortalama değil, **tepe/ortalama oranıdır** — kapasite tepeye göre
-planlanır. Jitter, ilişkisiz olayların ilişkili hâle gelmesini engelleyen genel bir tekniktir;
+planlanır. İki durumda da aynı sayıda anahtar dolar; fark yalnızca bunun zamana yayılıp
+yayılmadığıdır. Jitter, ilişkisiz olayların ilişkili hâle gelmesini engelleyen genel bir tekniktir;
 aynı fikir retry'da (10) ve zamanlanmış işlerde de karşına çıkacak.
 
 ## 7. Seviye içi alıştırmalar (TRAP_ bayrakları)

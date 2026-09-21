@@ -2,30 +2,49 @@
 source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.sh"
 # P03-05 · TRAP_NO_SINGLEFLIGHT: TTL dolan sıcak anahtarda izdiham (cache stampede)
 # Sıcak bir anahtarın TTL'i dolduğu anda, o anda uçuşta olan TÜM istekler aynı satır için
-# veritabanına gider. Önbellek "çalışıyor" görünür (hit oranı yüksek), ama DB saniyede bir
-# dikey darbe alır. Yük ne kadar yüksekse darbe o kadar büyür — koruma tam da en gerektiği anda yok.
+# veritabanına gider. Önbellek "çalışıyor" görünür (hit oranı yüksek), ama DB düzenli darbe alır.
+#
+# ÖLÇÜM NOTU — izdihamın büyüklüğü şudur:  (istek hızı) × (önbelleği DOLDURMA süresi)
+# Bu kümede Postgres 1 ms'de cevap veriyor; delik o kadar dar ki korumasız halde bile içeri
+# yalnızca 1-2 istek sızıyor ve ölçüm "sorun yok" diyor. Gerçekte doldurma maliyeti 10-500 ms'dir
+# (uzak DB, JOIN, soğuk sayfa). Bu yüzden deliği gerçekçi genişliğe getiriyoruz: Postgres'e 200 ms.
+# Ders: singleflight'ın değeri DB hızıyla TERS orantılıdır — DB yavaşladıkça hayat kurtarır.
+SHORT_TTL=${SHORT_TTL:-5s}
+VUS=${VUS:-60}
 ensure_healthy
 on_cleanup "kubectl -n \"$NS\" set env deploy/linkly TRAP_NO_SINGLEFLIGHT- CACHE_TTL-"
-SHORT_TTL=${SHORT_TTL:-5s}
+step "Doldurma maliyetini gerçekçi yap: Postgres'e 200 ms gecikme (Chaos Mesh)"
+if ! "$LADDER_ROOT/platform/lib/chaos.sh" apply pg-delay-200ms; then
+  warn "Chaos Mesh kurulu değil: cd platform && make chaos"; exit 2
+fi
+on_cleanup "$LADDER_ROOT/platform/lib/chaos.sh delete pg-delay-200ms"
+sleep 5
+gets() { promq "sum(db_queries_total{namespace=\"$NS\",op=\"get\"})"; }
 run_hot() {
+  local g0 g1
   kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null
-  for _ in $(seq 1 20); do serving && break; sleep 2; done
-  HOT_SHARE=0.95 k6run hot-key --vus 80 --duration 45s >/dev/null 2>&1 || true
-  sleep 12
-  promq "max_over_time(sum(rate(db_queries_total{namespace=\"$NS\",op=\"get\"}[15s]))[3m:15s])"
+  for _ in $(seq 1 30); do serving && break; sleep 2; done
+  g0=$(gets)
+  # SEED küçük + HOT_SHARE yüksek: soğuk anahtarların ıskaları sinyali boğmasın.
+  SEED=20 HOT_SHARE=0.99 k6run hot-key --vus "$VUS" --duration 60s >/dev/null 2>&1 || true
+  sleep 20
+  g1=$(gets)
+  awk -v a="${g0:-0}" -v b="${g1:-0}" 'BEGIN{d=b-a; if (d<0) d=0; printf "%.0f", d}'
 }
 step "Koruma AÇIK (varsayılan), TTL $SHORT_TTL — sıcak anahtar sürekli dolup duruyor"
 kubectl -n "$NS" set env deploy/linkly CACHE_TTL="$SHORT_TTL" TRAP_NO_SINGLEFLIGHT- >/dev/null
 guarded=$(run_hot)
 sf=$(promq "sum(increase(cache_stampede_wait_total{namespace=\"$NS\"}[5m]))")
-note "korumalı: DB get/s TEPE=$(awk -v v="$guarded" 'BEGIN{printf "%.0f", v}') · singleflight bekleyen çağrı=${sf%%.*}"
+note "korumalı:   yük boyunca DB get sorgusu = $guarded · singleflight'ta bekleyen çağrı = ${sf%%.*}"
 note "cache_stampede_wait_total'ın YÜKSEK olması iyi haberdir: o kadar çağrı DB'ye gitmek yerine bekledi."
 step "Korumayı KAPAT (TRAP_NO_SINGLEFLIGHT), aynı yük"
 kubectl -n "$NS" set env deploy/linkly TRAP_NO_SINGLEFLIGHT=true >/dev/null
 unguarded=$(run_hot)
-note "korumasız: DB get/s TEPE=$(awk -v v="$unguarded" 'BEGIN{printf "%.0f", v}')"
+note "korumasız: yük boyunca DB get sorgusu = $unguarded"
 grafana_hint "04 · Cache → 'stampede wait/s' · 'cache miss vs DB qps' · 05 · Postgres → 'DB CPU'"
-note "Hit oranı iki durumda da yüksek görünür — farkı yalnızca DB'deki TEPE ve stampede sayacı gösterir."
-awk -v g="$guarded" -v u="$unguarded" 'BEGIN{exit !(u > g*1.5 && u > 5)}' \
-  && reproduced "koruma kapalıyken DB tepesi $(awk -v v="$guarded" 'BEGIN{printf "%.0f", v}')/s → $(awk -v v="$unguarded" 'BEGIN{printf "%.0f", v}')/s'e çıktı — izdiham"
-not_reproduced "koruma kapalıyken de tepe oluşmadı (yük yetersiz olabilir: VUS artırıp tekrar dene)"
+note "Hit oranı iki durumda da yüksek görünür — farkı yalnızca DB'ye inen sorgu sayısı gösterir."
+note "TTL $SHORT_TTL boyunca korumalı hâlde pod başına anahtar başına 1 sorgu düşer; korumasız hâlde"
+note "delik (200 ms) süresince gelen HER istek DB'ye iner."
+awk -v g="${guarded:-0}" -v u="${unguarded:-0}" 'BEGIN{exit !(u > g*2 && u - g > 100)}' \
+  && reproduced "korumasız DB get sorgusu $guarded → $unguarded'e çıktı — izdiham"
+not_reproduced "koruma kapalıyken de fark oluşmadı (VUS artır ya da doldurma süresini büyüt)"

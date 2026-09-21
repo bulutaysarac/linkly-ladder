@@ -82,8 +82,15 @@ kapanışta (rollout) kayıp olmaz.
 boşaltacak kimse kalmaz. [Topic · Konu: Teslimat garantisi, dayanıklılık]
 
 **Reproduce (adım adım):**
-1. `CONFIRM=1 make repro P=P05-01` — bilinen sayıda tıklama üretir, önce `--force` ile öldürür,
-   sonra aynı senaryoyu `rollout restart` ile tekrarlar ve iki kaybı karşılaştırır
+1. `CONFIRM=1 make repro P=P05-01` — flush aralığını 15 sn'ye açar (tampon görünür olsun), bilinen
+   sayıda tıklama üretir, önce `--force` ile öldürür, sonra aynı senaryoyu `rollout restart` ile
+   tekrarlar ve iki kaybı karşılaştırır
+
+**Ölçüm notu:** Kaybedebileceğin şey, o an **tamponda olandır**. Varsayılan `ANALYTICS_FLUSH_INTERVAL=1s`
+ile tampon en fazla 1 saniyelik tıklama tutar; yavaş üreten bir döngüyle öldürdüğünde tamponu çoğu
+zaman boş yakalarsın ve deney "kayıp yok" der. Bu, tasarımın güvenli olduğunu değil **ölçümün şanslı**
+olduğunu gösterir. Pencereyi bilerek açmak, olayı görünür kılmanın meşru yoludur — yeter ki neyi
+değiştirdiğini söyleyesin.
 
 **Grafana:** `07 · Analytics` → "events by result", "k6 tıklama − DB tıklama" farkı.
 **Nerede çözülüyor:** 06 — olay süreç belleğinden çıkıp **dayanıklı bir loga** yazılacak
@@ -101,11 +108,17 @@ redirect'i yine DB'ye bağlardı — görünmez biçimde, yalnızca yük altınd
 [Topic · Konu: Back pressure, bounded queue]
 
 **Reproduce (adım adım):**
-1. `make repro P=P05-02` — kuyruğu 500'e küçültür, Postgres'e 2 sn gecikme enjekte eder, yük verir
+1. `make repro P=P05-02` — kuyruğu 500'e küçültür, **önce ısıtır**, sonra Postgres'e 2 sn gecikme
+   enjekte eder ve yük verir
 2. Alternatifi gör: `kubectl -n lvl05 set env deploy/linkly TRAP_UNBOUNDED_QUEUE=true` → düşürme
    sıfırlanır, working set tırmanır, sonunda **OOMKilled** ve tampondaki her şey gider
 
 **Grafana:** `07 · Analytics` → "events by result", "queue depth by pod"; `02 · App RED` → p99.
+**Ölçüm dersi — deneyin SIRASI da bir değişkendir:** İlk hâlde gecikme yükten önce enjekte
+ediliyordu; k6'nın `setup()` aşaması 100 link oluşturuyor ve her INSERT 2 sn sürdüğü için setup
+zaman aşımına uğrayıp yük hiç koşmuyordu. Script "düşürme olmadı" dedi — ölçtüğü şey kuyruk değil,
+kendi kurulum sırasıydı. Bir deney kurarken *hazırlık* adımlarının da arızadan etkilendiğini unutma.
+
 **Ders:** *Gördüğün bir düşüş bir karardır; göremediğin bir bloklama, trafiği bekleyen bir
 kesintidir.* Sınırsız kuyruk bir emniyet ağı değil, **ertelenmiş bir çöküştür** — "hiç düşürmeyelim"
 isteği sonunda her şeyi düşürmekle biter.
@@ -151,7 +164,7 @@ tersi değil (veri zaten yazılmıştır).
 **Neden:** Drain kodu doğru olabilir; kubelet süreci bitirmesine izin vermezse hiçbir anlamı yok.
 [Topic · Konu: Kapatma bütçesi]
 
-**Reproduce (adım adım):** `CONFIRM=1 make repro P=P05-05` — mevcut ayarla ve `grace=2s` ile
+**Reproduce (adım adım):** `CONFIRM=1 make repro P=P05-05` — mevcut ayarla ve `grace=3s` (+`preStop=1s`) ile
 kaybı ölçüp karşılaştırır.
 
 **Grafana:** `07 · Analytics` → "events by result" (`written`); `01 · Pods` → "Son sonlanma nedeni".

@@ -5,7 +5,10 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # "Kod doğru" ile "sistem doğru" aynı şey değildir — aradaki fark bir YAML satırı.
 ensure_healthy
 orig_grace=$(kubectl -n "$NS" get deploy linkly -o jsonpath='{.spec.template.spec.terminationGracePeriodSeconds}')
-on_cleanup "kubectl -n \"$NS\" patch deploy linkly --type=json -p '[{\"op\":\"replace\",\"path\":\"/spec/template/spec/terminationGracePeriodSeconds\",\"value\":$orig_grace}]'"
+orig_prestop=$(kubectl -n "$NS" get deploy linkly -o jsonpath='{.spec.template.spec.containers[0].lifecycle.preStop.sleep.seconds}')
+# İkisini TEK patch'te geri al: API sunucusu preStop.sleep < grace şartını nesnenin SON hâlinde
+# doğruluyor; ayrı ayrı göndermek geçersiz bir ara hâl üretir ve reddedilir.
+on_cleanup "kubectl -n \"$NS\" patch deploy linkly --type=json -p '[{\"op\":\"replace\",\"path\":\"/spec/template/spec/terminationGracePeriodSeconds\",\"value\":$orig_grace},{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/lifecycle/preStop/sleep/seconds\",\"value\":$orig_prestop}]'"
 measure_loss() {
   local label=$1
   local code b a
@@ -19,12 +22,17 @@ measure_loss() {
   a=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0')
   echo $(( b + ${N:-400} - a ))
 }
-step "Mevcut ayar (grace=${orig_grace}s, SHUTDOWN_GRACE=20s): drain'e zaman VAR"
+step "Mevcut ayar (grace=${orig_grace}s, preStop=${orig_prestop}s, SHUTDOWN_GRACE=20s): drain'e zaman VAR"
 loss_ok=$(measure_loss ok)
 note "kayıp: $loss_ok tıklama"
-step "grace=2s yap: kubelet süreci drain'in ORTASINDA öldürecek"
-kubectl -n "$NS" patch deploy linkly --type=json \
-  -p '[{"op":"replace","path":"/spec/template/spec/terminationGracePeriodSeconds","value":2}]' >/dev/null
+step "grace=3s yap: kubelet süreci drain'in ORTASINDA öldürecek (SHUTDOWN_GRACE hâlâ 20s)"
+# preStop beklemesi de küçültülmek ZORUNDA: Kubernetes preStop.sleep < grace şartını doğruluyor
+# ve ikisi ayrı patch'lerde gönderilirse ara hâl geçersiz olduğu için istek reddediliyor
+# (gerçekte oldu: "Invalid value: 5: must be ... less than terminationGracePeriodSeconds (2)").
+# Ders küçülmüyor: grace (3s) hâlâ preStop(1s) + SHUTDOWN_GRACE(20s) toplamının ÇOK altında.
+kubectl -n "$NS" patch deploy linkly --type=json -p '[
+  {"op":"replace","path":"/spec/template/spec/terminationGracePeriodSeconds","value":3},
+  {"op":"replace","path":"/spec/template/spec/containers/0/lifecycle/preStop/sleep/seconds","value":1}]' >/dev/null
 kubectl -n "$NS" rollout status deploy/linkly --timeout=200s >/dev/null 2>&1 || true
 for _ in $(seq 1 25); do serving && break; sleep 2; done
 loss_short=$(measure_loss short)
@@ -34,5 +42,5 @@ note "Aynı kod, aynı drain mantığı, farklı YAML → farklı veri kaybı."
 note "Kural: terminationGracePeriodSeconds > (preStop beklemesi + SHUTDOWN_GRACE + drain süresi)."
 note "Bu üç sayı birbirini tanımıyorsa, hangisinin kazandığını kubelet'in SIGKILL'i belirler."
 (( loss_short > loss_ok )) \
-  && reproduced "grace 2s'de kayıp $loss_ok → $loss_short'a çıktı — drain'e zaman verilmezse drain yoktur"
+  && reproduced "grace 3s'de kayıp $loss_ok → $loss_short'a çıktı — drain'e zaman verilmezse drain yoktur"
 not_reproduced "kısa grace'te ek kayıp ölçülemedi (N'i artırıp tekrar dene)"

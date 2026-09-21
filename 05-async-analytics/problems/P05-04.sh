@@ -5,7 +5,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # ayrı satır olarak saklasaydık stats sorgusu bir count(*) taramasına dönerdi. Bu seviye doğru
 # tercihi yapıyor; script yanlış tercihin ne kadar pahalı olacağını ÖLÇÜYOR.
 ensure_healthy
-pgpod=$(kubectl -n "$NS" get pod -l app.kubernetes.io/name=postgres -o jsonpath='{.items[0].metadata.name}')
+pgpod=$(dep_pod app.kubernetes.io/name=postgres) || exit 2   # bağımlılık hazır değilse ölçüm anlamsız
 psql() { kubectl -n "$NS" exec "$pgpod" -c postgres -- psql -U linkly -d linkly -tAc "$1" 2>/dev/null; }
 ROWS=${ROWS:-2000000}
 code=$(create_link "https://example.com/stats-scale")
@@ -20,11 +20,13 @@ psql "CREATE TABLE IF NOT EXISTS clicks_detail (id bigserial, code text, at time
 psql "INSERT INTO clicks_detail (code, at)
       SELECT '$code', now() - (i || ' seconds')::interval FROM generate_series(1, $ROWS) i" >/dev/null
 psql "ANALYZE clicks_detail" >/dev/null
-detail_plan=$(psql "EXPLAIN (ANALYZE) SELECT count(*) FROM clicks_detail WHERE code='$code'" | head -3)
-echo "$detail_plan" | sed 's/^/    /'
+# Planın TAMAMINI al: "Parallel Seq Scan" satırı 4. satıra düşebiliyor ve `head -3` onu kesiyordu
+# (aynı hatayı P02-05'te de yaptık). Kanıtı okunabilirlik uğruna kırpma; ekrana kırpılmışını bas.
+detail_plan=$(psql "EXPLAIN (ANALYZE) SELECT count(*) FROM clicks_detail WHERE code='$code'")
+echo "$detail_plan" | head -5 | sed 's/^/    /'
 t_detail=$(psql "\timing on" >/dev/null; { time psql "SELECT count(*) FROM clicks_detail WHERE code='$code'" >/dev/null; } 2>&1 | awk '/real/{print $2}')
-agg_plan=$(psql "EXPLAIN (ANALYZE) SELECT sum(count) FROM clicks_daily WHERE code='$code'" | head -3)
-echo "$agg_plan" | sed 's/^/    /'
+agg_plan=$(psql "EXPLAIN (ANALYZE) SELECT sum(count) FROM clicks_daily WHERE code='$code'")
+echo "$agg_plan" | head -5 | sed 's/^/    /'
 psql "DROP TABLE clicks_detail" >/dev/null
 grafana_hint "07 · Analytics → 'stats endpoint p99' · 05 · Postgres → 'DB query p99 by op' (op=stats)"
 note "ayrıntı tablosu count(*): ${t_detail:-?} ($ROWS satır) · toplama tablosu: ${rows_agg:-?} satırda anında"

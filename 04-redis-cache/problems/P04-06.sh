@@ -5,7 +5,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # Okumalar çalışmaya devam eder, hit oranı bir süre yüksek görünür — ama yeni hiçbir şey
 # önbelleğe girmez. Önbellek hâlâ "ayakta"dır ve artık hiçbir işe yaramamaktadır.
 ensure_healthy
-rpod=$(kubectl -n "$NS" get pod -l app.kubernetes.io/name=redis -o jsonpath='{.items[0].metadata.name}')
+rpod=$(dep_pod app.kubernetes.io/name=redis) || exit 2   # bağımlılık hazır değilse ölçüm anlamsız
 rcli() { kubectl -n "$NS" exec "$rpod" -c redis -- redis-cli "$@" 2>/dev/null; }
 step "Redis ayarları"
 note "maxmemory: $(rcli CONFIG GET maxmemory | tail -1) bayt · politika: $(rcli CONFIG GET maxmemory-policy | tail -1)"

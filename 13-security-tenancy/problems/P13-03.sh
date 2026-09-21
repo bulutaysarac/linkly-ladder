@@ -15,7 +15,7 @@ logs=$(kubectl -n "$NS" logs netcheck 2>/dev/null)
 kubectl -n "$NS" delete pod netcheck --ignore-not-found --wait=false >/dev/null 2>&1
 note "yetkisiz pod'dan sonuç:"; echo "${logs:-<log alınamadı>}" | sed 's/^/      /'
 step "Yetkili bir pod (redirect) aynı şeyi yapabiliyor mu?"
-rp=$(kubectl -n "$NS" get pod -l app.kubernetes.io/name=redirect -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+rp=$(dep_pod app.kubernetes.io/name=redirect) || exit 2   # bağımlılık hazır değilse ölçüm anlamsız
 note "redirect pod'u zaten DB'ye bağlı (uygulama çalışıyor) → izin listesi doğru"
 grafana_hint "14 · Security → 'NetworkPolicy drop'"
 note "Varsayılan-reddet, soruyu değiştirir: 'neyi engellemeliyim?' (sonsuz, hep birini kaçırırsın)"

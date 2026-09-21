@@ -105,6 +105,16 @@ func (c *Redis[V]) GetOrLoad(ctx context.Context, k string, load func(context.Co
 		c.m.Errors.WithLabelValues("load").Inc()
 		return zero, loadErr
 	}
+	// TRAP (FillDelay): okuma DB'den DEĞERİ ALDI ama önbelleğe HENÜZ YAZMADI. Tam bu aralıkta
+	// başka biri satırı silerse/değiştirirse, o silme önbellekte HENÜZ OLMAYAN bir anahtarı
+	// geçersiz kılar ve hemen ardından bu satır BAYAT değeri önbelleğe yazar. Bayat kayıt
+	// TTL boyunca yaşar — silinmiş bir link yönlendirmeye devam eder (P04-05).
+	if c.cfg.FillDelay > 0 {
+		select {
+		case <-time.After(c.cfg.FillDelay):
+		case <-ctx.Done():
+		}
+	}
 	if !found {
 		if !c.cfg.NoNegative {
 			if err := c.rdb.Set(ctx, c.key(k), negativeMarker, c.ttl(c.cfg.NegativeTTL)).Err(); err != nil {

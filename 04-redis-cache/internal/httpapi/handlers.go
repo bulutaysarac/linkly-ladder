@@ -149,13 +149,13 @@ func (a *API) handleGet(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleDelete(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := a.dbCtx(r)
 	defer cancel()
-	// TRAP_UPDATE_DELAY_MS: DB yazımı ile önbellek geçersiz kılma arasındaki pencereyi BÜYÜT.
-	// Cache-aside'ın klasik yarışı: bu pencerede gelen bir okuma, DB'den ESKİ değeri alıp önbelleğe
-	// GERİ YAZAR ve bayat kayıt TTL boyunca yaşar. Pencere normalde mikrosaniyelerdir — küçük olması
-	// yok olduğu anlamına gelmez (P04-05).
-	if a.cfg.TrapUpdateDelayMs > 0 {
-		defer time.Sleep(time.Duration(a.cfg.TrapUpdateDelayMs) * time.Millisecond)
-	}
+	// NOT (ölçüm dersi): burada bir zamanlar `defer time.Sleep(...)` duruyordu ve "DB yazımı ile
+	// geçersiz kılma arasındaki pencereyi büyütüyorum" diye yazıyordu. Büyütmüyordu: defer,
+	// fonksiyon DÖNERKEN çalışır — yani silme de geçersiz kılma da çoktan bitmiş olur. Üstelik o
+	// pencere doğru pencere de değil: orada anahtar HÂLÂ önbellektedir, okuyanlar bayat değeri
+	// zaten hit olarak alır ve geçersiz kılma sonrası düzelir. KALICI bayatlık ters yönden gelir:
+	// önbelleği ıskalayıp DB'den ESKİ değeri okuyan bir istek, geçersiz kılmadan SONRA önbelleğe
+	// yazarsa. O pencere okuma yolundadır → TRAP_READ_FILL_DELAY_MS (bkz. cache.Config.FillDelay).
 	// Kiracı sınırı: silme yalnızca KENDİ linkini silebilmeli. Filtreyi WHERE'e koymak,
 	// uygulamada kontrol etmekten üstündür — unutulan bir kontrol sessizce veri sızdırır,
 	// unutulan bir WHERE ise 0 satır etkiler. (13'te RLS ile veritabanına da öğreteceğiz.)

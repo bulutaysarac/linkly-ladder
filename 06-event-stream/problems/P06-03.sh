@@ -6,7 +6,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 ensure_healthy
 CONSUMER=analytics
 on_cleanup "kubectl -n \"$NS\" scale deploy/$CONSUMER --replicas=1"
-rp=$(kubectl -n "$NS" get pod -l app.kubernetes.io/name=redpanda -o jsonpath='{.items[0].metadata.name}')
+rp=$(dep_pod app.kubernetes.io/name=redpanda) || exit 2   # bağımlılık hazır değilse ölçüm anlamsız
 rpk() { kubectl -n "$NS" exec "$rp" -- rpk "$@" 2>/dev/null; }
 step "Topic'in partition sayısı"
 rpk topic describe clicks 2>/dev/null | head -6 | sed 's/^/    /'

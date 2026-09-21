@@ -76,6 +76,14 @@ type Config struct {
 	NoSingleflight bool // TRAP
 	NoNegative     bool // TRAP
 	NoJitter       bool // TRAP
+	// FillDelay — TRAP: DB'den yüklemek ile önbelleğe YAZMAK arasına gecikme koyar.
+	// EN: This is the window of the classic cache-aside race. It exists in every cache-aside
+	//     system; it is normally microseconds wide, which is why people believe it is not there.
+	//     Widening it does not create the bug, it makes an existing one observable (P04-05).
+	// TR: Klasik cache-aside yarışının penceresi. Her cache-aside sisteminde vardır; normalde
+	//     mikrosaniyeler genişliğindedir, insanlar bu yüzden yok sanır. Pencereyi büyütmek hatayı
+	//     YARATMAZ, var olan hatayı GÖZLENEBİLİR yapar (P04-05).
+	FillDelay time.Duration // TRAP
 }
 
 type LRU[V any] struct {

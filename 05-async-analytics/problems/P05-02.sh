@@ -10,6 +10,12 @@ step "Kuyruğu küçült ve yazıcıyı yavaşlat (DB'ye gecikme enjekte et)"
 kubectl -n "$NS" set env deploy/linkly ANALYTICS_QUEUE_SIZE=500 >/dev/null
 kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null
 for _ in $(seq 1 20); do serving && break; sleep 2; done
+# SIRA ÖNEMLİ: önce ısıt, SONRA gecikmeyi enjekte et.
+# Gerçekte oldu: chaos'u önce uyguladığımızda k6'nın setup'ı (100 link oluşturma) her INSERT için
+# 2 sn beklediği için setup timeout'una takıldı ve yük HİÇ koşmadı — script "düşürme olmadı" dedi.
+# Yani ölçtüğümüz şey kuyruk değil, kendi kurulum sıramızdı.
+step "Önce ısıt: sıcak kodu oluştur ve önbelleğe al (gecikme yokken)"
+k6run hot-key --vus 20 --duration 20s >/dev/null 2>&1 || true
 if "$LADDER_ROOT/platform/lib/chaos.sh" apply pg-delay-2s >/dev/null 2>&1; then
   on_cleanup "$LADDER_ROOT/platform/lib/chaos.sh delete pg-delay-2s"
   note "Postgres'e 2 sn gecikme enjekte edildi (yazıcı yetişemeyecek)"
@@ -17,7 +23,8 @@ else
   warn "Chaos Mesh yok; yalnızca yüksek yükle deneniyor"
 fi
 step "Yoğun tıklama yükü — kuyruk dolacak"
-k6run hot-key --vus 80 --duration 45s >/dev/null 2>&1 || true
+# SEED=1: gecikme altında her create 2 sn sürüyor; setup tek link oluştursun ki yüke zaman kalsın.
+SEED=1 HOT_SHARE=1 k6run hot-key --vus 80 --duration 45s >/dev/null 2>&1 || true
 sleep 10
 dropped=$(promq "sum(increase(analytics_events_total{namespace=\"$NS\",result=\"dropped\"}[5m]))")
 enq=$(promq "sum(increase(analytics_events_total{namespace=\"$NS\",result=\"enqueued\"}[5m]))")

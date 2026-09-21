@@ -49,7 +49,35 @@ header_of()   { curl -sI --max-time 5 "$BASE_URL/$1" | tr -d '\r' | awk -v h="$2
 kpods()       { kubectl -n "$NS" get pods -l "$APP_SELECTOR" "$@"; }
 restarts()    { kpods -o jsonpath='{range .items[*]}{.status.containerStatuses[0].restartCount}{"\n"}{end}' | awk '{s+=$1} END{print s+0}'; }
 last_reason() { kpods -o jsonpath='{range .items[*]}{.status.containerStatuses[0].lastState.terminated.reason}{"\n"}{end}' | grep -v '^$' | sort -u | paste -sd, -; }
-wait_ready()  { for d in $(kubectl -n "$NS" get deploy -o name); do kubectl -n "$NS" rollout status "$d" --timeout=180s >/dev/null; done; }
+# rollout status, İZLEDİĞİ nesne watch sırasında silinirse "error: object has been deleted" der.
+# Bu bir arıza değil bir yarıştır: ensure_healthy pod'u force-delete ederken ya da bir deney
+# rollout restart atarken denk gelir. Gerçekte oldu: P04-07 kendi sorunuyla ilgisiz bir hata
+# verdi, sebebi bir önceki adımın sildiği pod'du. Bir kez tekrar dene, sonra yoluna devam et.
+wait_ready() {
+  local d
+  for d in $(kubectl -n "$NS" get deploy -o name 2>/dev/null); do
+    kubectl -n "$NS" rollout status "$d" --timeout=180s >/dev/null 2>&1 \
+      || kubectl -n "$NS" rollout status "$d" --timeout=180s >/dev/null 2>&1 || true
+  done
+}
+
+# Bağımlı bileşenin (redis/postgres/redpanda/...) HAZIR pod'unu ver; yoksa gelmesini bekle.
+# Neden: önceki bir deney o pod'u silmiş olabilir (P04-01 Redis'i öldürüyor). O pencerede
+# `get pod -o jsonpath` boş liste üzerinde patlar ve script, kendi sorunuyla ilgisiz bir
+# hatayla düşer. Bağımlılığın hazır olması ÖLÇÜMÜN ÖNKOŞULUDUR, ölçümün kendisi değil.
+dep_pod() {
+  local sel=$1 p ready
+  for _ in $(seq 1 90); do
+    p=$(kubectl -n "$NS" get pod -l "$sel" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+    if [[ -n "$p" ]]; then
+      ready=$(kubectl -n "$NS" get pod "$p" -o jsonpath='{.status.containerStatuses[0].ready}' 2>/dev/null || true)
+      [[ "$ready" == "true" ]] && { echo "$p"; return 0; }
+    fi
+    sleep 2
+  done
+  warn "bağımlı bileşen hazır olmadı: $sel"
+  return 1
+}
 
 # Deney sonrası temizlik GARANTİSİ. Bir reproduce scripti yarıda hata verirse cluster'ı bozuk
 # bırakmamalı: cordon'lu node, düşük replika, açık kalmış TRAP env'i sonraki deneyleri sessizce

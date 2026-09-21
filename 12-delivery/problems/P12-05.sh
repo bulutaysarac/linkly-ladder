@@ -8,7 +8,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
 step "Mevcut önbellek anahtar formatı"
-rpod=$(kubectl -n "$NS" get pod -l app.kubernetes.io/name=redis -o jsonpath='{.items[0].metadata.name}')
+rpod=$(dep_pod app.kubernetes.io/name=redis) || exit 2   # bağımlılık hazır değilse ölçüm anlamsız
 keys=$(kubectl -n "$NS" exec "$rpod" -c redis -- redis-cli --scan --pattern 'linkly:link:*' 2>/dev/null | head -3)
 note "örnek anahtarlar:"; echo "${keys:-<yok>}" | sed 's/^/      /'
 prefixes=$(kubectl -n "$NS" exec "$rpod" -c redis -- redis-cli --scan --pattern 'linkly:*' 2>/dev/null | sed 's/:[^:]*$//' | sort -u | head -5)

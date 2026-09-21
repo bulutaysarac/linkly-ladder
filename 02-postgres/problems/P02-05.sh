@@ -4,7 +4,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # migrations/001 tenant üzerinde index OLUŞTURMUYOR (bilerek). ListByTenant bu yüzden tüm tabloyu tarar.
 ROWS=${ROWS:-300000}
 ensure_healthy
-pgpod=$(kubectl -n "$NS" get pod -l app.kubernetes.io/name=postgres -o jsonpath='{.items[0].metadata.name}')
+pgpod=$(dep_pod app.kubernetes.io/name=postgres) || exit 2   # bağımlılık hazır değilse ölçüm anlamsız
 psql() { kubectl -n "$NS" exec "$pgpod" -c postgres -- psql -U linkly -d linkly -tAc "$1" 2>/dev/null; }
 step "Tabloyu $ROWS satıra kadar doldur (tek INSERT ... generate_series)"
 before=$(psql "SELECT count(*) FROM links")
@@ -18,8 +18,11 @@ psql "ANALYZE links" >/dev/null
 after=$(psql "SELECT count(*) FROM links")
 note "şimdi: ${after:-?} satır"
 step "Sorgu planı: index mi, seq scan mi?"
-plan=$(psql "EXPLAIN (ANALYZE, BUFFERS) SELECT code FROM links WHERE tenant='acme' ORDER BY created_at DESC LIMIT 100" | head -6)
-echo "$plan" | sed 's/^/    /'
+# NOT: planın tamamını arıyoruz. `head -6` "Parallel Seq Scan" satırını kesebiliyordu —
+# ölçtüğün kanıtı, okunabilirlik uğruna kırpma.
+plan=$(psql "EXPLAIN (ANALYZE, BUFFERS) SELECT code FROM links WHERE tenant='acme' ORDER BY created_at DESC LIMIT 100")
+echo "$plan" | head -8 | sed 's/^/    /'
+scan_line=$(echo "$plan" | grep -i "Seq Scan" | head -1)
 seq_before=$(promq "sum(pg_stat_user_tables_seq_scan{namespace=\"$NS\",relname=\"links\"})")
 step "API üzerinden list — kullanıcının hissettiği süre"
 t=$(curl -s -o /dev/null -w '%{time_total}' -H 'X-Tenant-ID: acme' "$BASE_URL/api/links")

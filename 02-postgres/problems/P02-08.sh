@@ -4,7 +4,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # Her redirect aynı satıra UPDATE atıyor. Postgres satır kilidi tek sıralı: 500 eşzamanlı tıklama
 # CPU'ya değil, KİLİT KUYRUĞUNA giriyor. Üstelik her UPDATE yeni satır sürümü (MVCC) → ölü satır.
 ensure_healthy
-pgpod=$(kubectl -n "$NS" get pod -l app.kubernetes.io/name=postgres -o jsonpath='{.items[0].metadata.name}')
+pgpod=$(dep_pod app.kubernetes.io/name=postgres) || exit 2   # bağımlılık hazır değilse ölçüm anlamsız
 psql() { kubectl -n "$NS" exec "$pgpod" -c postgres -- psql -U linkly -d linkly -tAc "$1" 2>/dev/null; }
 step "Referans: trafiğin dağıldığı durum (mixed)"
 k6run mixed --vus 60 --duration 40s >/dev/null 2>&1 || true

@@ -4,7 +4,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # Üretici ve tüketici AYRI dağıtılır; bir an gelir ikisi farklı sürümdedir. Tüketici bilmediği
 # bir sürümde PATLARSA, üreticinin tek satırlık bir değişikliği tüm analitiği durdurur.
 ensure_healthy
-rp=$(kubectl -n "$NS" get pod -l app.kubernetes.io/name=redpanda -o jsonpath='{.items[0].metadata.name}')
+rp=$(dep_pod app.kubernetes.io/name=redpanda) || exit 2   # bağımlılık hazır değilse ölçüm anlamsız
 code=$(create_link "https://example.com/schema")
 before=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0')
 step "Geleceğin sürümünden bir olay bas (v=99, bilinmeyen alanlar)"

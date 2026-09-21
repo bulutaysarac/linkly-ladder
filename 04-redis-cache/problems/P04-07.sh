@@ -5,7 +5,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # Bir milyon anahtarda "sadece debug için" eklenmiş bir uç, tüm redirect'leri saniyelerce durdurur.
 ensure_healthy
 on_cleanup "kubectl -n \"$NS\" set env deploy/linkly TRAP_DEBUG_KEYS-"
-rpod=$(kubectl -n "$NS" get pod -l app.kubernetes.io/name=redis -o jsonpath='{.items[0].metadata.name}')
+rpod=$(dep_pod app.kubernetes.io/name=redis) || exit 2   # bağımlılık hazır değilse ölçüm anlamsız
 step "Tuzağı aç: /debug/keys ucu (KEYS * çalıştırır)"
 kubectl -n "$NS" set env deploy/linkly TRAP_DEBUG_KEYS=true >/dev/null
 kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null

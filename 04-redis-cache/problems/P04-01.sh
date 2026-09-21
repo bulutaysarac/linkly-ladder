@@ -11,6 +11,9 @@ db_warm=$(promq "sum(rate(db_queries_total{namespace=\"$NS\",op=\"get\"}[1m]))")
 hit=$(promq "sum(rate(cache_ops_total{namespace=\"$NS\",layer=\"l2\",result=\"hit\"}[1m])) / sum(rate(cache_ops_total{namespace=\"$NS\",layer=\"l2\"}[1m]))")
 note "önbellek açık: DB get/s=$(awk -v v="$db_warm" 'BEGIN{printf "%.1f", v}') · hit oranı=$(awk -v v="$hit" 'BEGIN{printf "%.0f%%", v*100}')"
 need_confirm "redis pod'u silinecek"
+# Deneyden sonra Redis'in GERİ GELDİĞİNDEN emin ol: sonraki deney (P04-06/07) redis pod'unu
+# arıyor ve o pencerede boş liste bulursa kendi sorunuyla ilgisiz bir hatayla düşer.
+on_cleanup "kubectl -n \"$NS\" rollout status statefulset/redis --timeout=180s"
 step "Redis'i öldür, AYNI yükü tekrar ver"
 kubectl -n "$NS" delete pod -l app.kubernetes.io/name=redis --wait=false >/dev/null
 sleep 3

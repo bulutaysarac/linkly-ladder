@@ -4,7 +4,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # P06-03'te tek partition, tüketici replikalarını anlamsız kılıyordu. 14'te 3 partition var.
 # Bu script tavanın kalktığını doğruluyor — ve yeni sınırın ne olduğunu söylüyor.
 ensure_healthy
-rp=$(kubectl -n "$NS" get pod -l app.kubernetes.io/name=redpanda -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+rp=$(dep_pod app.kubernetes.io/name=redpanda) || exit 2   # bağımlılık hazır değilse ölçüm anlamsız
 step "Topic yapılandırması"
 parts=$(kubectl -n "$NS" exec "$rp" -- rpk topic describe clicks -p 2>/dev/null | grep -c '^[0-9]' || echo "?")
 note "clicks partition sayısı: ${parts:-?}"

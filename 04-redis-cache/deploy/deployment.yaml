@@ -64,7 +64,7 @@ spec:
             - name: CACHE_NEGATIVE_TTL
               value: "10s"          # pozitifin altıda biri: yeni link eski "yok" cevabının arkasında kalmasın
             # Önbellek tuzakları varsayılan KAPALI (README §7):
-            #   TRAP_NO_NEGATIVE_CACHE · TRAP_NO_TTL_JITTER · TRAP_DEBUG_KEYS · TRAP_UPDATE_DELAY_MS
+            #   TRAP_NO_NEGATIVE_CACHE · TRAP_NO_TTL_JITTER · TRAP_DEBUG_KEYS · TRAP_READ_FILL_DELAY_MS
             - name: RATE_LIMIT_PER_SEC
               value: "5000"         # hâlâ SÜREÇ İÇİ: 3 replikada gerçek limit 15000 (P02-04)
             - name: RATE_LIMIT_BURST

@@ -153,14 +153,24 @@ bölünmez, **birleşir**. [Topic · Konu: Korelasyon, paylaşılan kaynak]
 
 **Belirti:** Silinmiş bir link, silme işleminden sonra bile TTL boyunca yönlendirmeye devam ediyor —
 **paylaşılan** önbellekte, yani P03-01'in çözülmüş olmasına rağmen.
-**Neden:** Sıra: (1) DB'yi değiştir, (2) önbelleği sil. Bu iki adım arasında gelen bir **okuma**,
-DB'den eski değeri alır ve önbelleğe **geri yazar** — silme onun öncesinde gerçekleştiği için.
+**Neden:** Kalıcı bayatlık şu sıradan doğar:
+1. bir **okuma** önbelleği ıskalar ve DB'den eski değeri alır,
+2. tam o sırada başkası satırı **siler**: DB'den gider, önbellek geçersiz kılınır — ama anahtar
+   önbellekte **henüz yok**, yani geçersiz kılma hiçbir şeyi silmez,
+3. 1. adımdaki okuma nihayet önbelleğe **yazar**: silinmiş kayıt TTL boyunca yaşar.
+
 Pencere normalde mikrosaniyeler; **küçük olması yok olduğu anlamına gelmez**, yeterli trafikte her
 pencere er geç yakalanır. [Topic · Konu: Cache-aside'ın yapısal sınırı, yarış]
 
 **Reproduce (adım adım):**
-1. `make repro P=P04-05` — `TRAP_UPDATE_DELAY_MS=800` ile pencereyi ölçülebilir hâle getirir,
-   silme sırasında paralel okuma yapar, sonucu sayar
+1. `make repro P=P04-05` — `TRAP_READ_FILL_DELAY_MS=1500` ile **okuma yolundaki** pencereyi
+   (DB'den al → önbelleğe yaz) ölçülebilir hâle getirir, tam ortasında siler, sonucu sayar
+
+**Ölçüm dersi — yanlış pencereyi büyütmek:** Bu deneyin ilk hâli gecikmeyi *silme ile geçersiz
+kılma* arasına koyuyordu (üstelik `defer` ile, yani ikisi de bittikten sonra). O pencerede anahtar
+hâlâ önbellektedir: okuyanlar bayat değeri zaten hit olarak alır ve geçersiz kılmadan sonra iş
+düzelir — **kalıcı** bayatlık üretmez. "Yarışı büyüttüm" demeden önce hangi iki olayın yarıştığını
+yaz; yoksa bir şeyi ölçtüğünü sanarak başka bir şeyi ölçersin.
 
 **Grafana:** `04 · Cache` → "ops by result & layer"; `03 · App Business` → "redirect sonuçları".
 **Nerede çözülüyor:** Bu bir *tartışma* maddesi, çünkü bedava çözümü yok:
@@ -212,7 +222,7 @@ Bir milyon anahtarda bu, saniyelerce tam durma demektir. [Topic · Konu: Bloklay
 | Bayrak | Ne yapar | Reproduce | Düzeltme |
 |---|---|---|---|
 | `TRAP_NO_TTL_JITTER` | TTL'e rastgelelik eklemez | `make repro P=P04-04` | Bayrağı kapat |
-| `TRAP_UPDATE_DELAY_MS` | Silme ile geçersiz kılma arasına gecikme koyar | `make repro P=P04-05` | Pencereyi daralt (yapısal olarak kapatılamaz) |
+| `TRAP_READ_FILL_DELAY_MS` | Okuma yolunda DB'den alma ile önbelleğe yazma arasına gecikme koyar | `make repro P=P04-05` | Pencereyi daralt (yapısal olarak kapatılamaz) |
 | `TRAP_DEBUG_KEYS` | `GET /debug/keys` ucunu açar (`KEYS *`) | `make repro P=P04-07` | Ucu kaldır; `SCAN` kullan |
 | `TRAP_NO_NEGATIVE_CACHE` | (03'ten devam) "yok" cevabını önbelleklemez | `make repro P=P03-06` (03'te) | Bayrağı kapat |
 

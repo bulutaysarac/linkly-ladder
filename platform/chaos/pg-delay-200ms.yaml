@@ -1,0 +1,10 @@
+# target: app.kubernetes.io/name=postgres
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata: { name: pg-delay-200ms, namespace: ${NS} }
+spec:
+  action: delay
+  mode: all
+  selector: { namespaces: ["${NS}"], labelSelectors: { app.kubernetes.io/name: postgres } }
+  delay: { latency: "200ms", jitter: "20ms" }
+  direction: to
