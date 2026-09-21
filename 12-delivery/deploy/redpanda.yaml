@@ -58,14 +58,40 @@ spec:
             - --advertise-kafka-addr=PLAINTEXT://redpanda.$(POD_NAMESPACE).svc.cluster.local:9092
             - --rpc-addr=0.0.0.0:33145
             - --advertise-rpc-addr=$(POD_NAME).redpanda.$(POD_NAMESPACE).svc.cluster.local:33145
-            - --set=redpanda.auto_create_topics_enabled=true
-            - --set=redpanda.default_topic_partitions=1   # P06-03: tek partition
-            - --set=redpanda.default_topic_replications=1
           env:
             - name: POD_NAME
               valueFrom: { fieldRef: { fieldPath: metadata.name } }
             - name: POD_NAMESPACE
               valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+          # Topic'leri AÇIKÇA oluştur (hiçbir `--set redpanda.*` bayrağı KULLANMIYORUZ).
+          # EN: `--set redpanda.default_topic_*` are CLUSTER properties, not node flags; this
+          #     redpanda build rejects the unknown argument and the broker never starts. It
+          #     crash-looped silently while every stream experiment "measured" a dead broker
+          #     (P06-05 reported 75k producer errors and we read it as a feature).
+          #     Creating the topic explicitly states the intent instead of relying on defaults.
+          # TR: `--set redpanda.default_topic_*` bir KÜME özelliğidir, düğüm bayrağı değil; bu
+          #     redpanda sürümü tanımadığı argümanla açılmıyor. Broker sessizce crash-loop'ta
+          #     kaldı ve bütün stream deneyleri ÖLÜ bir broker'ı "ölçtü" (P06-05'in 75 bin
+          #     üretici hatası aslında buydu). Topic'i açıkça oluşturmak, varsayılana güvenmek
+          #     yerine NİYETİ yazmaktır — ve partition sayısı zaten bir tasarım kararı (P06-03).
+#     NOT: bu sürüm `--set redpanda.*` bayraklarının HİÇBİRİNİ kabul etmiyor
+#     (auto_create_topics_enabled dahil); küme özellikleri `rpk cluster config` ile ayarlanır.
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    # Küme sağlıklı olana kadar bekle (ilk açılış saniyeler sürüyor).
+                    for i in $(seq 1 150); do rpk cluster health >/dev/null 2>&1 && break; sleep 2; done
+                    # `--set redpanda.*` bayrakları bu sürümde YOK; küme özellikleri böyle ayarlanır.
+                    rpk cluster config set auto_create_topics_enabled true >/dev/null 2>&1 || true
+                    # Oluşturmayı da YENİDEN DENE: tek seferlik `|| true`, hatayı yutar ve
+                    # topic'siz bir broker'la devam edersin (ilk hâlde tam olarak bu oldu).
+                    for i in $(seq 1 30); do rpk topic create clicks -p 1 -r 1 >/dev/null 2>&1 && break; sleep 2; done
+                    for i in $(seq 1 30); do rpk topic create clicks-dlq -p 1 -r 1 >/dev/null 2>&1 && break; sleep 2; done
+                    exit 0
           ports:
             - name: kafka
               containerPort: 9092
