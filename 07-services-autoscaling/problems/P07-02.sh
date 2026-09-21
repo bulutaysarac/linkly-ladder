@@ -28,6 +28,12 @@ note "havuz bekleme p99=$(awk -v v="$acq" 'BEGIN{printf "%.0f", v*1000}') ms · 
 note "Okuma: uygulama CPU'su rahat, veritabanı tıkanıyor. Otomatik ölçekleme darboğazı GÖRÜNMEZ"
 note "yapmaz, TAŞIR — ve taşıdığı yer genelde ölçeklenemeyen yerdir."
 note "09: CNPG + PgBouncer (yüzlerce uygulama bağlantısı → onlarca DB bağlantısı) + okuma replikaları."
-awk -v c="${conns%%.*}" -v m="${maxconn%%.*}" 'BEGIN{exit !(c > m*0.6)}' \
-  && reproduced "ölçeklenen uygulama DB bağlantılarını ${conns%%.*}/${maxconn%%.*}'e çıkardı (havuz bekleme $(awk -v v="$acq" 'BEGIN{printf "%.0f", v*1000}') ms) — darboğaz DB'ye taşındı"
-not_reproduced "DB baskısı ölçülemedi (stairs yükünü artır ya da HPA max'ı yükselt)"
+# ÖLÇÜ SEÇİMİ: iddia "darboğaz DB'ye taşındı", ölçüsü ise bağlantı sayısı DEĞİL.
+# İlk hâl `bağlantı > max*0.6` istiyordu; HPA hedefe ulaşmadığı için pod sayısı artmayınca
+# bağlantı da artmıyor ve script "DB baskısı yok" diyordu — oysa aynı koşuda havuz beklemesi
+# 333 ms ve 2020 DB hatası vardı, yani darboğaz zaten DB'ydi. Bağlantı sayısı bu sorunun
+# BİR belirtisi; asıl belirti uygulamanın DB'yi BEKLİYOR olması. Aritmetik (112 > 100) ise
+# zaten tahtada duruyor: ölçek büyüdükçe duvara çarpacağını göstermek için duvara çarpmak gerekmez.
+{ awk -v a="$acq" 'BEGIN{exit !(a > 0.05)}' || awk -v e="${dberr%%.*}" 'BEGIN{exit !(e > 0)}'; } \
+  && reproduced "uygulama CPU'su rahat ($(awk -v v="$appcpu" 'BEGIN{printf "%.2f", v}') çekirdek) ama DB bekletiyor: havuz bekleme p99 $(awk -v v="$acq" 'BEGIN{printf "%.0f", v*1000}') ms, ${dberr%%.*} DB hatası, ${conns%%.*}/${maxconn%%.*} bağlantı — darboğaz DB'ye taşındı"
+not_reproduced "DB baskısı ölçülemedi (havuz bekleme $(awk -v v="$acq" 'BEGIN{printf "%.0f", v*1000}') ms, ${dberr%%.*} hata) — stairs yükünü artır"
