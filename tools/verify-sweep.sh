@@ -3,12 +3,26 @@
 # Kullanım: tools/verify-sweep.sh 08-rate-limiting 09-database-scaling ...
 set -uo pipefail
 R=$(cd "$(dirname "$0")/.." && pwd)
+
+# Bir adım asılırsa bütün tur kaybolmasın: süreç AĞACINI öldüren sert zaman sınırı.
+# (macOS'ta `timeout` yok; alt kabuğa TERM göndermek, o kabuk ön plandaki çocuğunu
+# beklerken iletilmiyor — bu yüzden çocuklar önce, ebeveyn sonra.)
+_kill_tree() { local p=$1 c; for c in $(pgrep -P "$p" 2>/dev/null); do _kill_tree "$c"; done; kill -KILL "$p" 2>/dev/null || true; }
+hard_timeout() {
+  local secs=$1; shift
+  ( "$@" ) & local pid=$!
+  ( sleep "$secs"; _kill_tree "$pid" ) & local wd=$!
+  local rc=0; wait "$pid" 2>/dev/null || rc=$?
+  kill "$wd" 2>/dev/null || true; wait "$wd" 2>/dev/null || true
+  return "$rc"
+}
+
 run_level() {
   local L=$1 lvl=${1%%-*}
   "$R/platform/lib/profile.sh" "$lvl"
   cd "$R/$L" || return 1
   echo "═══ $L · make up"
-  local upout; upout=$(make up 2>&1) || {
+  local upout; upout=$(hard_timeout "${UP_TIMEOUT:-900}" make up 2>&1) || {
     echo "✘ $L ayağa kalkmadı"
     echo "$upout" | tail -12 | sed 's/^/         ! /'
     # TEMİZLE: başarısız kurulum namespace'i AYAKTA bırakıyordu ve bir sonraki seviye onun
@@ -19,12 +33,12 @@ run_level() {
     return 1
   }
   echo "═══ $L · verify-prev"
-  CONFIRM=1 make verify-prev 2>&1 | grep -E '^(ID|P[0-9]{2}-)' || echo "(önceki seviye yok)"
+  CONFIRM=1 hard_timeout "${PREV_TIMEOUT:-5400}" make verify-prev 2>&1 | grep -E '^(ID|P[0-9]{2}-)' || echo "(önceki seviye yok)"
   echo "═══ $L · kendi sorunları"
   for f in problems/P${lvl}-*.sh; do
     [[ -e "$f" ]] || continue
     p=$(basename "${f%.sh}")
-    out=$(CONFIRM=1 make repro P="$p" 2>&1)
+    out=$(CONFIRM=1 hard_timeout "${REPRO_TIMEOUT:-900}" make repro P="$p" 2>&1)
     r=$(echo "$out" | grep -oE 'NOT-REPRODUCED|REPRODUCED' | tail -1)
     printf '%-8s %s\n' "$p" "${r:-HATA}"
     if [[ -z "$r" ]]; then echo "$out" | sed 's/\x1b\[[0-9;]*m//g' | tail -8 | sed 's/^/         ! /'

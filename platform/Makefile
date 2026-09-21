@@ -110,6 +110,8 @@ argo: ## Argo CD + Argo Rollouts + Gitea (cluster içi git) — 12+
 
 security: ## cert-manager + sealed-secrets + Kyverno (13+)
 	@helm repo add jetstack https://charts.jetstack.io >/dev/null 2>&1 || true
+	@# NOT: sealed-secrets'in helm deposu bu ağdan 404 dönüyor (kurumsal proxy). Resmi release
+	@# manifest'i çalışıyor; helm başarısız olursa ona düşüyoruz.
 	@helm repo add sealed-secrets https://bitnami-labs.github.io/sealed-secrets >/dev/null 2>&1 || true
 	@helm repo add kyverno https://kyverno.github.io/kyverno >/dev/null 2>&1 || true
 	@helm repo update >/dev/null
@@ -117,7 +119,8 @@ security: ## cert-manager + sealed-secrets + Kyverno (13+)
 	   --set crds.enabled=true --set resources.requests.cpu=20m --set resources.requests.memory=64Mi \
 	   --wait --timeout 10m
 	@helm upgrade --install sealed-secrets sealed-secrets/sealed-secrets -n kube-system \
-	   --set resources.requests.cpu=20m --set resources.requests.memory=64Mi --wait --timeout 10m
+	   --set resources.requests.cpu=20m --set resources.requests.memory=64Mi --wait --timeout 10m \
+	   || kubectl apply -f https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.27.1/controller.yaml
 	@helm upgrade --install kyverno kyverno/kyverno -n kyverno --create-namespace \
 	   --set admissionController.replicas=1 --set backgroundController.enabled=true \
 	   --set cleanupController.enabled=false --set reportsController.enabled=false \
