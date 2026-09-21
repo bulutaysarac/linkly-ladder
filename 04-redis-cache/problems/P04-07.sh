@@ -8,7 +8,7 @@ on_cleanup "kubectl -n \"$NS\" set env deploy/linkly TRAP_DEBUG_KEYS-"
 rpod=$(dep_pod app.kubernetes.io/name=redis) || exit 2   # bağımlılık hazır değilse ölçüm anlamsız
 step "Tuzağı aç: /debug/keys ucu (KEYS * çalıştırır)"
 kubectl -n "$NS" set env deploy/linkly TRAP_DEBUG_KEYS=true >/dev/null
-kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null
+kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null || true
 for _ in $(seq 1 20); do serving && break; sleep 2; done
 step "Önbelleği doldur (anahtar sayısı ne kadar çoksa kilit o kadar uzun)"
 for i in $(seq 1 ${N:-4000}); do c=$(create_link "https://example.com/k/$i"); [[ -n "$c" ]] && status_of "$c" >/dev/null; done

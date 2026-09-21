@@ -8,7 +8,7 @@ ensure_healthy
 on_cleanup 'kubectl -n "$NS" set env deploy/linkly TRAP_LIVENESS_STRICT- RATE_LIMIT_PER_SEC=5000 RATE_LIMIT_BURST=10000'
 step "Tuzağı aç: sağlık uçları iş zincirine giriyor + limit düşük"
 kubectl -n "$NS" set env deploy/linkly TRAP_LIVENESS_STRICT=true RATE_LIMIT_PER_SEC=30 RATE_LIMIT_BURST=30 >/dev/null
-kubectl -n "$NS" rollout status deploy/linkly --timeout=120s >/dev/null
+kubectl -n "$NS" rollout status deploy/linkly --timeout=120s >/dev/null || true
 for _ in $(seq 1 20); do serving && break; sleep 2; done
 pod=$(pod_name); before=$(restarts_of "$pod")
 note "pod: $pod (restart: $before) · limit 30 rps · liveness her 10 sn'de bir /healthz"
@@ -27,7 +27,7 @@ note "Doğrusu: sağlık uçları hız sınırının ve iş timeout'unun DIŞIND
 note "'süreç kurtarılamaz mı?' sorusunu sorar. Bağımlılık kontrolü liveness'a girerse aynı tuzak 10'da büyür (P10-02)."
 step "Tuzağı kapat"
 kubectl -n "$NS" set env deploy/linkly TRAP_LIVENESS_STRICT- RATE_LIMIT_PER_SEC=5000 RATE_LIMIT_BURST=10000 >/dev/null
-kubectl -n "$NS" rollout status deploy/linkly --timeout=120s >/dev/null
+kubectl -n "$NS" rollout status deploy/linkly --timeout=120s >/dev/null || true
 { (( ${after:-0} > before )) || (( probe429 > 0 )) || (( ready429 > 0 )); } \
   && reproduced "yük altında sağlık probe'ları düştü (liveness $probe429, readiness $ready429 olay; restart ${before}→${after:-?}) — trafik artışı kendini kesintiye çevirdi"
 not_reproduced "sağlık uçları yükten etkilenmedi — zincirin dışındalar"

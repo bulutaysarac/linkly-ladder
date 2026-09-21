@@ -12,7 +12,7 @@ kubectl -n "$NS" set env deploy/linkly TRAP_MIGRATE_IN_MAIN=true >/dev/null
 kubectl -n "$NS" rollout restart deploy/linkly >/dev/null
 sleep 5
 kubectl -n "$NS" delete pod -l "$APP_SELECTOR" --force --grace-period=0 >/dev/null 2>&1 || true
-rc=0; kubectl -n "$NS" rollout status deploy/linkly --timeout=150s >/dev/null 2>&1 || rc=$?
+rc=0; kubectl -n "$NS" rollout status deploy/linkly --timeout=150s >/dev/null 2>&1 || rc=$? || true
 sleep 5
 restarts=$(restarts)
 logerr=$(kubectl -n "$NS" logs -l "$APP_SELECTOR" --tail=200 --all-containers 2>/dev/null | grep -ci 'migration\|lock\|deadlock\|already exists' || true)

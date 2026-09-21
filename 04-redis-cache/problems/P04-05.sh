@@ -19,7 +19,7 @@ ensure_healthy
 on_cleanup "kubectl -n \"$NS\" set env deploy/linkly TRAP_READ_FILL_DELAY_MS-"
 step "Pencereyi ölçülebilir hâle getir: okuma yolunda DB→önbellek arasına ${DELAY}ms"
 kubectl -n "$NS" set env deploy/linkly TRAP_READ_FILL_DELAY_MS="$DELAY" >/dev/null
-kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null
+kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null || true
 for _ in $(seq 1 30); do serving && break; sleep 2; done
 stale=0
 step "$TOT kez: ıskalayan bir OKUMA başlat → tam ortasında SİL → sonucu kontrol et"

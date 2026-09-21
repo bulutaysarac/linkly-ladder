@@ -12,7 +12,7 @@ on_cleanup "kubectl -n \"$NS\" set env deploy/linkly ANALYTICS_FLUSH_INTERVAL- A
 # şanslı olduğunu gösterir. Pencereyi 15 sn'ye açıyoruz: kaybın büyüklüğü artık tesadüf değil.
 step "Tamponu görünür yap: flush aralığı 15s, batch 5000 (erken flush olmasın)"
 kubectl -n "$NS" set env deploy/linkly ANALYTICS_FLUSH_INTERVAL=15s ANALYTICS_BATCH_SIZE=5000 >/dev/null
-kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null
+kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null || true
 for _ in $(seq 1 30); do serving && break; sleep 2; done
 code=$(create_link "https://example.com/atmostonce")
 step "Sayacı sıfırla ve bilinen sayıda tıklama üret"

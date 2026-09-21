@@ -17,7 +17,7 @@ on_cleanup "kubectl -n \"$NS\" set env deploy/linkly TRAP_NO_TTL_JITTER- CACHE_T
 
 warm_and_watch() {
   local out=$1 pod
-  kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null
+  kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null || true
   for _ in $(seq 1 30); do serving && break; sleep 2; done
   pod=$(pod_name)
   # Sabit, orta yoğunluklu okuma: 300 kod tek seferde ısınır, sonra TTL boyunca sürekli okunur.

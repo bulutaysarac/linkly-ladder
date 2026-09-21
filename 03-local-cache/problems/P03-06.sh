@@ -7,7 +7,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 ensure_healthy
 on_cleanup "kubectl -n \"$NS\" set env deploy/linkly TRAP_NO_NEGATIVE_CACHE-"
 run_scan() {
-  kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null
+  kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null || true
   for _ in $(seq 1 20); do serving && break; sleep 2; done
   CODE_LEN=7 k6run scan --vus 30 --duration 60s >/dev/null 2>&1 || true
   sleep 18

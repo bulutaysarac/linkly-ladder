@@ -8,7 +8,7 @@ ensure_healthy
 on_cleanup "kubectl -n \"$NS\" set env deploy/linkly TRAP_UNBOUNDED_QUEUE- ANALYTICS_QUEUE_SIZE- ANALYTICS_WRITE_TIMEOUT-"
 step "Kuyruğu küçült ve yazıcıyı yavaşlat (DB'ye gecikme enjekte et)"
 kubectl -n "$NS" set env deploy/linkly ANALYTICS_QUEUE_SIZE=500 >/dev/null
-kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null
+kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null || true
 for _ in $(seq 1 20); do serving && break; sleep 2; done
 # SIRA ÖNEMLİ: önce ısıt, SONRA gecikmeyi enjekte et.
 # Gerçekte oldu: chaos'u önce uyguladığımızda k6'nın setup'ı (100 link oluşturma) her INSERT için

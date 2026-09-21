@@ -17,7 +17,7 @@ st302=$(status_of "$code"); cc=$(header_of "$code" Cache-Control)
 note "302 modunda: durum=$st302 · Cache-Control='${cc:-<yok>}' · sayılan tıklama=$c302 / $N"
 step "Tuzağı aç: 301 (Cache-Control yok)"
 kubectl -n "$NS" set env deploy/linkly TRAP_REDIRECT_301=true >/dev/null
-kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null
+kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null || true
 for _ in $(seq 1 20); do serving && break; sleep 2; done
 code2=$(create_link "https://example.com/uncounted")
 st301=$(status_of "$code2"); cc2=$(header_of "$code2" Cache-Control)

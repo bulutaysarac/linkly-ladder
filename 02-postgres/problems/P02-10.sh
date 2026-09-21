@@ -15,7 +15,7 @@ base_ep=$(promq "sum(kube_endpointslice_endpoints{namespace=\"$NS\",endpointslic
 note "hazır endpoint (normal): ${base_ep%%.*}"
 step "Tuzağı aç: readyz DB'ye ping atsın"
 kubectl -n "$NS" set env deploy/linkly TRAP_READYZ_CHECKS_DB=true >/dev/null
-kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null
+kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null || true
 for _ in $(seq 1 20); do serving && break; sleep 2; done
 need_confirm "postgres pod'u silinecek"
 ( k6run redirect --vus 5 --duration 100s >/tmp/p0210.k6 2>&1 ) & kpid=$!

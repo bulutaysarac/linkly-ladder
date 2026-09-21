@@ -10,7 +10,7 @@ ensure_healthy
 # doğması = P03-02) ölçmek istiyorsan birini susturman gerekir.
 on_cleanup "kubectl -n \"$NS\" set env deploy/linkly CACHE_TTL-"
 kubectl -n "$NS" set env deploy/linkly CACHE_TTL=10m >/dev/null
-kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null
+kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null || true
 for _ in $(seq 1 30); do serving && break; sleep 2; done
 # ÖLÇÜM NOTU — "tepe" tek başına kanıt değil:
 # İlk hâl `max_over_time(...[5m:15s])` ile TÜM koşunun tepesini alıp sondaki orana bölüyordu.

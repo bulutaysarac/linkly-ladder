@@ -19,7 +19,7 @@ sleep 5
 gets() { promq "sum(db_queries_total{namespace=\"$NS\",op=\"get\"})"; }
 run_hot() {
   local g0 g1
-  kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null
+  kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null || true
   for _ in $(seq 1 30); do serving && break; sleep 2; done
   g0=$(gets)
   # SEED küçük + HOT_SHARE yüksek: soğuk anahtarların ıskaları sinyali boğmasın.

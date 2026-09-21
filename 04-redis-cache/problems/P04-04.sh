@@ -15,7 +15,7 @@ ensure_healthy
 on_cleanup "kubectl -n \"$NS\" set env deploy/linkly TRAP_NO_TTL_JITTER- CACHE_TTL-"
 warm_and_watch() {
   local out=$1 pod
-  kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null
+  kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null || true
   for _ in $(seq 1 30); do serving && break; sleep 2; done
   pod=$(pod_name)
   SEED=300 k6run redirect --vus 20 --duration "${LOAD}s" >/dev/null 2>&1 &

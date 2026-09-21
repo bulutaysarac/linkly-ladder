@@ -28,7 +28,7 @@ d_ok=$(delta "${q0%%.*}" "${q1%%.*}")
 note "varsayılan: ${t_ok}s · bu istek için DB sorgusu ≈ $d_ok"
 step "Tuzağı aç: her link için AYRI stats sorgusu"
 kubectl -n "$NS" set env deploy/api TRAP_LIST_N_PLUS_ONE=true >/dev/null
-kubectl -n "$NS" rollout status deploy/api --timeout=180s >/dev/null
+kubectl -n "$NS" rollout status deploy/api --timeout=180s >/dev/null || true
 sleep 5
 q2=$(dbq)
 t_bad=$(curl -s -o /dev/null -w '%{time_total}' -H "X-Tenant-ID: $TEN" "$BASE_API/api/links")
