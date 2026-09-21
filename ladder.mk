@@ -47,6 +47,15 @@ push: build ## Local registry'ye push
 	@for s in $(SERVICES); do docker push -q $(IMAGE_BASE)-$$s:$(TAG) || exit 1; done
 
 deploy: ## kubectl apply -k deploy/ (IMAGE_TAG yerine gerçek tag)
+	@# Önceki `make down` namespace silmeyi ARKA PLANDA bırakır (--wait=false). Hemen ardından
+	@# `make up` çağırmak "namespace is being terminated" ile düşer: deneyin kendi temizliği bir
+	@# sonraki kurulumu devirir. Sil → bekle → kur sırasını burada garanti altına al.
+	@for i in $$(seq 1 90); do \
+	  ph=$$(kubectl get ns $(NS) -o jsonpath='{.status.phase}' 2>/dev/null); \
+	  [ "$$ph" = "Terminating" ] || break; \
+	  [ $$i = 1 ] && echo "  $(NS) siliniyor, bitmesi bekleniyor..."; \
+	  sleep 2; \
+	done
 	@kubectl kustomize deploy/ | sed 's|:IMAGE_TAG|:$(TAG)|g' | kubectl apply -f -
 
 wait: ## Deployment/StatefulSet + (varsa) Argo Rollout hazır olana kadar bekle
