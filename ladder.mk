@@ -60,7 +60,10 @@ deploy: ## kubectl apply -k deploy/ (IMAGE_TAG yerine gerçek tag)
 	@# değiştiyse `apply` "field is immutable" ile düşer ve seviye hiç kurulamaz. Bunlar zaten
 	@# bir kez koşup biten işler; yeniden uygulamadan ÖNCE sil.
 	@kubectl -n $(NS) delete job migrate topics --ignore-not-found --wait=false >/dev/null 2>&1 || true
-	@kubectl kustomize deploy/ | sed 's|:IMAGE_TAG|:$(TAG)|g' | kubectl apply -f -
+	@# YENİDEN DENE: yüklü bir kümede admission webhook'ları (CNPG, Kyverno) anlık olarak
+	@# "connection refused" verebiliyor — operatör pod'u yeniden başlıyorsa. Tek denemede
+	@# pes etmek, geçici bir arızayı "seviye kurulamadı"ya çeviriyor (11 gece turunda böyle düştü).
+	@for i in 1 2 3; do 	  if kubectl kustomize deploy/ | sed 's|:IMAGE_TAG|:$(TAG)|g' | kubectl apply -f -; then exit 0; fi; 	  echo "  apply başarısız (deneme $$i/3), 20 sn sonra tekrar"; sleep 20; 	done; exit 1
 
 wait: ## Deployment/StatefulSet + (varsa) Argo Rollout hazır olana kadar bekle
 	@for d in $$(kubectl -n $(NS) get deploy,statefulset -o name 2>/dev/null); do kubectl -n $(NS) rollout status $$d --timeout=240s || exit 1; done
