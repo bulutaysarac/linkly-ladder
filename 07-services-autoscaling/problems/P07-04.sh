@@ -25,8 +25,11 @@ tight_p99=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_secon
 tight_cpu=$(promq "sum(rate(container_cpu_usage_seconds_total{namespace=\"$NS\",pod=~\"redirect.*\",image!=\"\",image!~\".*pause.*\"}[1m]))")
 tight_thr=$(promq "sum(rate(container_cpu_cfs_throttled_seconds_total{namespace=\"$NS\",pod=~\"redirect.*\"}[1m]))")
 note "limitli: p99=$(awk -v v="$tight_p99" 'BEGIN{printf "%.0f", v*1000}') ms · CPU=$(awk -v v="$tight_cpu" 'BEGIN{printf "%.2f", v}') çekirdek · throttle=$(awk -v v="$tight_thr" 'BEGIN{printf "%.2f", v}') s/s"
-step "CPU limitini KALDIR, aynı yük"
-kubectl -n "$NS" set resources deploy/redirect --limits=cpu=0 >/dev/null 2>&1 || \
+step "CPU limitini pratikte KALDIR (4 çekirdek), aynı yük"
+# `--limits=cpu=0` geçerli görünüp bozuk bir spec üretebiliyor (pod'lar hazır olmuyor, iki
+# ReplicaSet takılı kalıyor — gerçekte oldu). Niyet "kota beni sınırlamasın"; bunu geçerli bir
+# değerle ifade et: node'un verebileceğinden büyük bir limit, pratikte limitsizdir.
+kubectl -n "$NS" set resources deploy/redirect --limits=cpu=4 >/dev/null 2>&1 || \
   kubectl -n "$NS" patch deploy redirect --type=json -p '[{"op":"remove","path":"/spec/template/spec/containers/0/resources/limits/cpu"}]' >/dev/null 2>&1
 kubectl -n "$NS" rollout status deploy/redirect --timeout=180s >/dev/null 2>&1 || true
 wait_endpoints 2; sleep 5

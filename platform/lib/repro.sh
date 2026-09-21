@@ -239,16 +239,21 @@ ensure_baseline_scale() {
 # sonuçları bulgu sanarak rapor ettik. Bir deneyin ön koşulu da ölçülmesi gereken bir şeydir.
 ensure_deps_ready() {
   local bad
-  bad=$(kubectl -n "$NS" get pods -o json 2>/dev/null | jq -r '
-    [ .items[]
-      | select(.status.phase != "Succeeded")
-      | select(.metadata.deletionTimestamp == null)
-      | select(any(.status.containerStatuses[]?; .ready | not))
-      | .metadata.name ] | join(", ")')
-  if [[ -n "${bad:-}" ]]; then
-    warn "hazır olmayan pod(lar): $bad — ortam bozukken ölçüm yapılmaz (make up / kubectl describe)"
-    exit 2
-  fi
+  # BEKLE, hemen patlama: bir önceki deneyin rollout'u hâlâ sürüyor olabilir ve "şu an hazır
+  # değil" ile "hiç hazır olmayacak" farklı şeylerdir. İlk sürüm hemen exit 2 veriyordu ve
+  # normal bir rollout penceresi, sonraki TÜM scriptleri zincirleme SKIPPED yapıyordu.
+  for _ in $(seq 1 60); do
+    bad=$(kubectl -n "$NS" get pods -o json 2>/dev/null | jq -r '
+      [ .items[]
+        | select(.status.phase != "Succeeded")
+        | select(.metadata.deletionTimestamp == null)
+        | select(any(.status.containerStatuses[]?; .ready | not))
+        | .metadata.name ] | join(", ")')
+    [[ -z "${bad:-}" ]] && return 0
+    sleep 2
+  done
+  warn "2 dk sonra hâlâ hazır olmayan pod(lar): $bad — ortam bozukken ölçüm yapılmaz (kubectl describe)"
+  exit 2
 }
 
 ensure_healthy() {
