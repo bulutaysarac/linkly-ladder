@@ -420,7 +420,28 @@ crash_line_of() {
 
 # k6: senaryo adı + ek argümanlar. Özet JSON'u $K6_SUMMARY'ye yazar.
 K6_SUMMARY=${K6_SUMMARY:-/tmp/k6-$NS-$PROBLEM_ID.summary.json}
-k6run() { local s=$1; shift; "$LADDER_ROOT/platform/lib/k6run.sh" "$s" --summary-export "$K6_SUMMARY" "$@"; }
+# Her yük koşusu ZAMAN SINIRLI: süre + 4 dk pay (setup/teardown). Bir k6 takılırsa yalnızca o
+# adım düşer, doğrulama turunun tamamı değil (P07-07 bir kez 43 dakika asılı kaldı).
+k6run() {
+  local s=$1; shift
+  # NOT: döngü gövdesinin son komutu `[[ ]] && ...` olursa döngünün çıkış kodu 1 olur ve
+  # `set -e` fonksiyonu orada bitirir — bu merdivende defalarca ısırdı. `if` kullan.
+  local args=("$@") dur="" secs=300 i
+  for (( i=0; i<${#args[@]}; i++ )); do
+    if [[ "${args[i]}" == "--duration" ]]; then dur="${args[i+1]:-}"; fi
+  done
+  if [[ -n "$dur" ]]; then
+    case "$dur" in
+      *m) secs=$(( ${dur%m} * 60 )) ;;
+      *s) secs=${dur%s} ;;
+      *)  secs=$dur ;;
+    esac
+  fi
+  # --duration yoksa senaryo kendi aşamalarını (stages) tanımlıyordur: stairs ~200 sn,
+  # burst ~70 sn. 300 sn taban + 240 sn pay, hepsini rahatça kapsar.
+  [[ "$secs" =~ ^[0-9]+$ ]] || secs=300
+  with_timeout $(( secs + 240 )) "$LADDER_ROOT/platform/lib/k6run.sh" "$s" --summary-export "$K6_SUMMARY" "${args[@]}"
+}
 # k6 özeti YOKSA (koşu hiç başlamadıysa) jq dosya bulamayıp hata veriyor ve `set -e` scripti
 # öldürüyor. Yokluk bir ölçüm sonucudur: 0 döndür ama STDERR'e söyle.
 _k6q() {
