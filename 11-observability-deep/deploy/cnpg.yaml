@@ -57,10 +57,16 @@ spec:
       secret:
         name: pg-app-user
   postgresql:
+    # shared_preload_libraries CNPG'nin YÖNETTİĞİ sabit bir parametre: `parameters` altına
+    # yazılırsa Cluster "Can't set fixed configuration parameter" ile REDDEDİLİR ve seviye hiç
+    # ayağa kalkmaz. Operatöre "şu eklentiyi de yükle" demenin yolu bu ayrı alan.
+    # Ders: bir operatör, altındaki sistemin bazı ayarlarını KENDİ sözleşmesine alır; o ayarları
+    # eski yoldan vermeye çalışmak sessiz bir uyumsuzluk değil, açık bir REDDİR.
+    shared_preload_libraries:
+      - pg_stat_statements
     parameters:
       max_connections: "100"        # BİLEREK aynı: Pooler'ın neden gerektiğini görelim
       shared_buffers: "128MB"
-      shared_preload_libraries: "pg_stat_statements"
       # P09-04: uzun okuma sorguları replikada iptal edilmesin diye primary'ye geri bildirim.
       # Bedeli: primary'de vacuum gecikir, şişme artar. Her ayarın bir faturası var.
       hot_standby_feedback: "on"
