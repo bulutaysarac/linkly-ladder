@@ -117,10 +117,21 @@ last_reason() { kpods -o jsonpath='{range .items[*]}{.status.containerStatuses[0
 # rollout restart atarken denk gelir. Gerçekte oldu: P04-07 kendi sorunuyla ilgisiz bir hata
 # verdi, sebebi bir önceki adımın sildiği pod'du. Bir kez tekrar dene, sonra yoluna devam et.
 wait_ready() {
-  local d
+  local d r want got
   for d in $(kubectl -n "$NS" get deploy -o name 2>/dev/null); do
     kubectl -n "$NS" rollout status "$d" --timeout=180s >/dev/null 2>&1 \
       || kubectl -n "$NS" rollout status "$d" --timeout=180s >/dev/null 2>&1 || true
+  done
+  # Argo Rollout'u `kubectl rollout status` TANIMIYOR (o yalnızca yerleşik türleri bilir) ve
+  # `kubectl argo rollouts` eklentisi burada kurulu değil. 12+'da hazır olmayı beklemezsek
+  # ölçüm, henüz trafiğe girmemiş pod'larla başlar. Hazır replika sayısını kendimiz sayıyoruz.
+  for r in $(kubectl -n "$NS" get rollout -o name 2>/dev/null); do
+    want=$(kubectl -n "$NS" get "$r" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo 1)
+    for _ in $(seq 1 90); do
+      got=$(kubectl -n "$NS" get "$r" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo 0)
+      (( ${got:-0} >= ${want:-1} )) && break
+      sleep 2
+    done
   done
 }
 
@@ -169,8 +180,21 @@ serving() {
 # Seviyenin İLAN ETTİĞİ replika sayısına dön. Önceki bir deney ölçeği değiştirip bıraktıysa (P00-03 gibi)
 # sonraki deney yanlış tabandan başlar ve başka bir sorunu ölçtüğünü sanır.
 ensure_baseline_scale() {
-  local want live
-  want=$(kubectl kustomize "$(dirname "$0")/../deploy" 2>/dev/null \
+  local want live svc; svc=$(app_name)
+  # Manifest'teki replika sayısını, BU scriptin ilgilendiği iş yükünden oku.
+  # İlk hâl "ilk Deployment"ı alıyordu; 07'den sonra deploy/ içinde birden çok iş yükü var
+  # (redirect, api, analytics) ve alfabetik sırada gelen başkasının sayısını redirect'e
+  # uygulamak sessizce yanlış bir tabandan başlamak demek. 12'den sonra redirect artık
+  # Deployment bile değil (Argo Rollout) — kind listesi ona göre.
+  want=$(kubectl kustomize "$(dirname "$0")/../deploy" 2>/dev/null | awk -v want_name="$svc" '
+    /^kind: (Deployment|Rollout|StatefulSet)$/ { kind=$2; name=""; reps=""; next }
+    /^kind: /                                  { kind="";  name=""; reps=""; next }
+    kind != "" && /^  name: /                  { if (name == "") name=$2 }
+    kind != "" && /^  replicas: /              { reps=$2 }
+    kind != "" && name == want_name && reps != "" { print reps; exit }
+  ')
+  # Ada göre bulunamadıysa eski davranış: ilk Deployment
+  [[ -z "$want" ]] && want=$(kubectl kustomize "$(dirname "$0")/../deploy" 2>/dev/null \
           | awk '/^kind: Deployment$/{d=1} d&&/^  replicas:/{print $2; exit}')
   [[ -z "$want" ]] && return 0
   live=$(replicas_of)
@@ -225,22 +249,41 @@ fatal_line() {
     || kubectl -n "$NS" logs "$pod" --tail=400 2>/dev/null | grep -m1 -F "$pattern"
 }
 
-scale()       { kubectl -n "$NS" scale deploy -l "$APP_SELECTOR" --replicas="$1" >/dev/null; wait_ready; }
+# 12'den sonra redirect bir Deployment değil, Argo Rollout. Ölçek/okuma yardımcıları iş yükünün
+# TÜRÜNÜ sormak zorunda; "deploy" varsaymak "error: no objects passed to scale" ile patlıyordu.
+workload_kind() {
+  if kubectl -n "$NS" get rollout -l "$APP_SELECTOR" -o name 2>/dev/null | grep -q .; then
+    printf 'rollout'
+  else
+    printf 'deploy'
+  fi
+}
+scale()       { kubectl -n "$NS" scale "$(workload_kind)" -l "$APP_SELECTOR" --replicas="$1" >/dev/null; wait_ready; }
 # Service endpoint'leri ölçeğe yetişene kadar bekle. rollout status "pod hazır" der ama ingress'in
 # upstream listesi birkaç saniye geriden gelir; o pencerede tüm istekler TEK pod'a düşer ve
 # yük dağılımına dayanan deneyler (P00-03 gibi) yanlış negatif verir.
+# Bu scriptin ilgilendiği iş yükünün ADI. 00-06'da tek servis var (linkly); 07'den sonra
+# uygulama redirect/api diye BÖLÜNÜYOR ve scriptler APP_SELECTOR'ü buna göre değiştiriyor.
+# Servis adını sabit "linkly" varsaymak, 07+ seviyelerde wait_endpoints'i her seferinde
+# 60 saniye boş bekletip uyarı bastırıyordu — sessiz ama her deneye 1 dakika ekleyen bir hata.
+app_name() {
+  case "$APP_SELECTOR" in
+    *app.kubernetes.io/name=*) printf '%s' "${APP_SELECTOR##*app.kubernetes.io/name=}" ;;
+    *)                         printf 'linkly' ;;
+  esac
+}
 wait_endpoints() {
-  local want=$1 got
+  local want=$1 got svc; svc=$(app_name)
   for _ in $(seq 1 30); do
-    got=$(kubectl -n "$NS" get endpointslice -l "kubernetes.io/service-name=linkly" \
+    got=$(kubectl -n "$NS" get endpointslice -l "kubernetes.io/service-name=$svc" \
             -o jsonpath='{range .items[*]}{range .endpoints[*]}{.addresses[0]}{"\n"}{end}{end}' 2>/dev/null | grep -c . || echo 0)
     (( got >= want )) && { sleep 3; return 0; }
     sleep 2
   done
-  warn "endpoint sayısı $want'e ulaşmadı (şu an $got)"
+  warn "endpoint sayısı $want'e ulaşmadı (servis=$svc, şu an $got)"
 }
 
-replicas_of() { kubectl -n "$NS" get deploy -l "$APP_SELECTOR" -o jsonpath='{.items[0].spec.replicas}' 2>/dev/null || echo 1; }
+replicas_of() { kubectl -n "$NS" get "$(workload_kind)" -l "$APP_SELECTOR" -o jsonpath='{.items[0].spec.replicas}' 2>/dev/null || echo 1; }
 # cAdvisor bu ortamda `container` label'ı üretmiyor → konteyner serilerini image üzerinden seç (bkz. dashboards/gen.py).
 # Örneklenen tepe bellek. DİKKAT: Prometheus 15 sn'de bir örnekler; hızlı dolup ölen bir konteynerin
 # gerçek tepesini KAÇIRIR (örnekler arasında doldu, öldü, sıfırdan başladı). Yani bu değer daima

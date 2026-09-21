@@ -49,8 +49,18 @@ push: build ## Local registry'ye push
 deploy: ## kubectl apply -k deploy/ (IMAGE_TAG yerine gerçek tag)
 	@kubectl kustomize deploy/ | sed 's|:IMAGE_TAG|:$(TAG)|g' | kubectl apply -f -
 
-wait: ## Rollout'ları bekle
+wait: ## Deployment/StatefulSet + (varsa) Argo Rollout hazır olana kadar bekle
 	@for d in $$(kubectl -n $(NS) get deploy,statefulset -o name 2>/dev/null); do kubectl -n $(NS) rollout status $$d --timeout=240s || exit 1; done
+	@# `kubectl rollout status` Argo Rollout'u tanımaz (yalnızca yerleşik türler). 12+ seviyelerde
+	@# beklemezsek smoke, henüz hazır olmayan bir uygulamaya çarpar.
+	@for r in $$(kubectl -n $(NS) get rollout -o name 2>/dev/null); do \
+	  want=$$(kubectl -n $(NS) get $$r -o jsonpath='{.spec.replicas}'); \
+	  for i in $$(seq 1 120); do \
+	    got=$$(kubectl -n $(NS) get $$r -o jsonpath='{.status.readyReplicas}' 2>/dev/null); \
+	    [ "$${got:-0}" -ge "$${want:-1}" ] && break; sleep 2; \
+	  done; \
+	  echo "  $$r hazır: $${got:-0}/$${want:-1}"; \
+	done
 
 smoke: ## POST + GET 30x
 	@$(EXPORT_ENV) $(PLATFORM)/lib/smoke.sh
