@@ -6,10 +6,10 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 ensure_healthy
 LIMIT=${LIMIT:-40}
 orig=$(replicas_of)
-on_cleanup "kubectl -n \"$NS\" set env deploy/linkly RATE_LIMIT_PER_SEC=5000 RATE_LIMIT_BURST=10000"
+on_cleanup "kubectl -n \"$NS\" set env "$(app_workload)" RATE_LIMIT_PER_SEC=5000 RATE_LIMIT_BURST=10000"
 on_cleanup "kubectl -n \"$NS\" scale deploy -l \"$APP_SELECTOR\" --replicas=$orig"
 step "Limiti pod başına $LIMIT rps yap, TEK pod ile ölç"
-kubectl -n "$NS" set env deploy/linkly RATE_LIMIT_PER_SEC="$LIMIT" RATE_LIMIT_BURST="$LIMIT" >/dev/null
+kubectl -n "$NS" set env "$(app_workload)" RATE_LIMIT_PER_SEC="$LIMIT" RATE_LIMIT_BURST="$LIMIT" >/dev/null
 scale 1; wait_endpoints 1; sleep 3
 k6run redirect --vus 20 --duration 20s >/dev/null 2>&1 || true
 one_ok=$(( $(k6_reqs) - $(k6_429) ))

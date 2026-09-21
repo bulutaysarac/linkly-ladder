@@ -17,7 +17,7 @@ plain=$(printf '%s' "$b64" | base64 -d 2>/dev/null)
 note "kubectl get secret → '$b64' → base64 -d → '$plain'"
 note "base64 şifreleme değildir; RBAC'i olan herkes okuyabilir."
 step "3) Pod'un içinden görünüyor mu?"
-podenv=$(kubectl -n "$NS" get deploy linkly -o jsonpath='{.spec.template.spec.containers[0].envFrom[*].secretRef.name}') || true
+podenv=$(kubectl -n "$NS" get "$(app_workload)" -o jsonpath='{.spec.template.spec.containers[0].envFrom[*].secretRef.name}') || true
 note "deployment envFrom: $podenv → parola süreç ortam değişkenlerinde"
 note "Bir crash dump, bir /proc okuması, yanlış bir log satırı ya da bir debug endpoint'i onu sızdırabilir."
 step "4) Kim okuyabilir?"

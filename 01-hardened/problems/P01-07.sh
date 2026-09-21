@@ -5,14 +5,14 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # trafik dalgası → probe hız sınırına takılır → kubelet pod'u ÖLDÜRÜR → yük kalan pod'a biner →
 # o da ölür. Yani yük artışı, kendi kendine bir KESİNTİYE dönüşür.
 ensure_healthy
-on_cleanup 'kubectl -n "$NS" set env deploy/linkly TRAP_LIVENESS_STRICT- RATE_LIMIT_PER_SEC=5000 RATE_LIMIT_BURST=10000'
+on_cleanup 'kubectl -n "$NS" set env "$(app_workload)" TRAP_LIVENESS_STRICT- RATE_LIMIT_PER_SEC=5000 RATE_LIMIT_BURST=10000'
 step "Tuzağı aç: sağlık uçları iş zincirine giriyor + limit düşük"
-kubectl -n "$NS" set env deploy/linkly TRAP_LIVENESS_STRICT=true RATE_LIMIT_PER_SEC=30 RATE_LIMIT_BURST=30 >/dev/null
-kubectl -n "$NS" rollout status deploy/linkly --timeout=120s >/dev/null || true
+kubectl -n "$NS" set env "$(app_workload)" TRAP_LIVENESS_STRICT=true RATE_LIMIT_PER_SEC=30 RATE_LIMIT_BURST=30 >/dev/null
+kubectl -n "$NS" rollout status "$(app_workload)" --timeout=120s >/dev/null || true
 for _ in $(seq 1 20); do serving && break; sleep 2; done
 pod=$(pod_name); before=$(restarts_of "$pod")
 note "pod: $pod (restart: $before) · limit 30 rps · liveness her 10 sn'de bir /healthz"
-note "liveness toleransı: failureThreshold($(kubectl -n "$NS" get deploy linkly -o jsonpath='{.spec.template.spec.containers[0].livenessProbe.failureThreshold}')) × periodSeconds($(kubectl -n "$NS" get deploy linkly -o jsonpath='{.spec.template.spec.containers[0].livenessProbe.periodSeconds}')) sn — yük bundan UZUN sürmeli"
+note "liveness toleransı: failureThreshold($(kubectl -n "$NS" get "$(app_workload)" -o jsonpath='{.spec.template.spec.containers[0].livenessProbe.failureThreshold}')) × periodSeconds($(kubectl -n "$NS" get "$(app_workload)" -o jsonpath='{.spec.template.spec.containers[0].livenessProbe.periodSeconds}')) sn — yük bundan UZUN sürmeli"
 step "Limitin üstünde trafik ver (150 sn) — probe da aynı kovadan içiyor"
 k6run redirect --vus 10 --duration "${DURATION:-150s}" >/dev/null 2>&1 || true
 sleep 20
@@ -26,8 +26,8 @@ note "readiness de aynı kovadan içiyor: probe 429 alınca pod Endpoints'ten D�
 note "Doğrusu: sağlık uçları hız sınırının ve iş timeout'unun DIŞINDA kalır; liveness yalnızca"
 note "'süreç kurtarılamaz mı?' sorusunu sorar. Bağımlılık kontrolü liveness'a girerse aynı tuzak 10'da büyür (P10-02)."
 step "Tuzağı kapat"
-kubectl -n "$NS" set env deploy/linkly TRAP_LIVENESS_STRICT- RATE_LIMIT_PER_SEC=5000 RATE_LIMIT_BURST=10000 >/dev/null
-kubectl -n "$NS" rollout status deploy/linkly --timeout=120s >/dev/null || true
+kubectl -n "$NS" set env "$(app_workload)" TRAP_LIVENESS_STRICT- RATE_LIMIT_PER_SEC=5000 RATE_LIMIT_BURST=10000 >/dev/null
+kubectl -n "$NS" rollout status "$(app_workload)" --timeout=120s >/dev/null || true
 { (( ${after:-0} > before )) || (( probe429 > 0 )) || (( ready429 > 0 )); } \
   && reproduced "yük altında sağlık probe'ları düştü (liveness $probe429, readiness $ready429 olay; restart ${before}→${after:-?}) — trafik artışı kendini kesintiye çevirdi"
 not_reproduced "sağlık uçları yükten etkilenmedi — zincirin dışındalar"

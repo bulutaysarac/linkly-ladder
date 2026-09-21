@@ -5,7 +5,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # veriyor: artık tıklamaları ciddi ciddi sayıyoruz ve 301, tıklamaların sunucuya hiç ulaşmamasına
 # yol açıyor. Aynı bug, farklı seviyede farklı sonuç — düzeltmelerin neden geri gelmemesi gerektiğinin kanıtı.
 ensure_healthy
-on_cleanup "kubectl -n \"$NS\" set env deploy/linkly TRAP_REDIRECT_301-"
+on_cleanup "kubectl -n \"$NS\" set env "$(app_workload)" TRAP_REDIRECT_301-"
 step "Varsayılan (302 + no-store): aynı client'tan N tıklama"
 code=$(create_link "https://example.com/counted")
 N=${N:-50}
@@ -16,8 +16,8 @@ c302=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0')
 st302=$(status_of "$code"); cc=$(header_of "$code" Cache-Control)
 note "302 modunda: durum=$st302 · Cache-Control='${cc:-<yok>}' · sayılan tıklama=$c302 / $N"
 step "Tuzağı aç: 301 (Cache-Control yok)"
-kubectl -n "$NS" set env deploy/linkly TRAP_REDIRECT_301=true >/dev/null
-kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null || true
+kubectl -n "$NS" set env "$(app_workload)" TRAP_REDIRECT_301=true >/dev/null
+kubectl -n "$NS" rollout status "$(app_workload)" --timeout=180s >/dev/null || true
 for _ in $(seq 1 20); do serving && break; sleep 2; done
 code2=$(create_link "https://example.com/uncounted")
 st301=$(status_of "$code2"); cc2=$(header_of "$code2" Cache-Control)

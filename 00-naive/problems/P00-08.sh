@@ -9,7 +9,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 ensure_healthy
 ensure_fresh_pod
 pod=$(pod_name)
-lim=$(kubectl -n "$NS" get deploy linkly -o jsonpath='{.spec.template.spec.containers[0].resources.limits.memory}') || true
+lim=$(kubectl -n "$NS" get "$(app_workload)" -o jsonpath='{.spec.template.spec.containers[0].resources.limits.memory}') || true
 step "Uzun URL'lerle sürekli link üret (tek akış), working set'i limite doğru izle"
 note "konteyner bellek limiti: $lim — store'da eviction yok, TTL yok, üst sınır yok"
 note "başlangıç working set: $(working_set_mb) MB"

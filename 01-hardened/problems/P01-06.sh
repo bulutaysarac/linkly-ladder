@@ -5,10 +5,10 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # üretir; Prometheus'un belleği seri sayısıyla büyür ve bir noktada sorgular da Prometheus da yavaşlar.
 ensure_healthy
 N=${N:-400}
-on_cleanup 'kubectl -n "$NS" set env deploy/linkly TRAP_METRIC_LABEL_CODE-'
+on_cleanup 'kubectl -n "$NS" set env "$(app_workload)" TRAP_METRIC_LABEL_CODE-'
 step "Tuzağı aç: TRAP_METRIC_LABEL_CODE=true"
-kubectl -n "$NS" set env deploy/linkly TRAP_METRIC_LABEL_CODE=true >/dev/null
-kubectl -n "$NS" rollout status deploy/linkly --timeout=120s >/dev/null || true
+kubectl -n "$NS" set env "$(app_workload)" TRAP_METRIC_LABEL_CODE=true >/dev/null
+kubectl -n "$NS" rollout status "$(app_workload)" --timeout=120s >/dev/null || true
 for _ in $(seq 1 20); do serving && break; sleep 2; done
 before=$(promq 'prometheus_tsdb_head_series')
 note "Prometheus toplam seri sayısı (öncesi): ${before%%.*}"
@@ -25,8 +25,8 @@ note "Prometheus toplam seri: ${before%%.*} → ${after%%.*} (fark: $(( ${after%
 note "1 milyon linkte bu label 1 milyon seri demek. Kural: label'lar SINIRLI kümelerden olmalı"
 note "(route, method, status). Tekil kimlikler metriğe değil, log'a ve trace'e (exemplar) gider — 11."
 step "Tuzağı kapat"
-kubectl -n "$NS" set env deploy/linkly TRAP_METRIC_LABEL_CODE- >/dev/null
-kubectl -n "$NS" rollout status deploy/linkly --timeout=120s >/dev/null || true
+kubectl -n "$NS" set env "$(app_workload)" TRAP_METRIC_LABEL_CODE- >/dev/null
+kubectl -n "$NS" rollout status "$(app_workload)" --timeout=120s >/dev/null || true
 awk -v s="${series%%.*}" 'BEGIN{exit !(s>50)}' \
   && reproduced "tek bir label ${series%%.*} yeni zaman serisi üretti; toplam seri $(( ${after%%.*} - ${before%%.*} )) arttı"
 not_reproduced "kardinalite artmadı — kısa kod label olarak kullanılmıyor"

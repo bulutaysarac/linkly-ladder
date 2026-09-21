@@ -12,14 +12,14 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 SHORT_TTL=${SHORT_TTL:-5s}
 VUS=${VUS:-60}
 ensure_healthy
-on_cleanup "kubectl -n \"$NS\" set env deploy/linkly TRAP_NO_SINGLEFLIGHT- CACHE_TTL-"
+on_cleanup "kubectl -n \"$NS\" set env "$(app_workload)" TRAP_NO_SINGLEFLIGHT- CACHE_TTL-"
 step "Doldurma maliyetini gerçekçi yap: Postgres'e 200 ms gecikme (Chaos Mesh)"
 chaos_apply pg-delay-200ms
 sleep 5
 gets() { promq "sum(db_queries_total{namespace=\"$NS\",op=\"get\"})"; }
 run_hot() {
   local g0 g1
-  kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null || true
+  kubectl -n "$NS" rollout status "$(app_workload)" --timeout=180s >/dev/null || true
   for _ in $(seq 1 30); do serving && break; sleep 2; done
   g0=$(gets)
   # SEED küçük + HOT_SHARE yüksek: soğuk anahtarların ıskaları sinyali boğmasın.
@@ -29,13 +29,13 @@ run_hot() {
   awk -v a="${g0:-0}" -v b="${g1:-0}" 'BEGIN{d=b-a; if (d<0) d=0; printf "%.0f", d}'
 }
 step "Koruma AÇIK (varsayılan), TTL $SHORT_TTL — sıcak anahtar sürekli dolup duruyor"
-kubectl -n "$NS" set env deploy/linkly CACHE_TTL="$SHORT_TTL" TRAP_NO_SINGLEFLIGHT- >/dev/null
+kubectl -n "$NS" set env "$(app_workload)" CACHE_TTL="$SHORT_TTL" TRAP_NO_SINGLEFLIGHT- >/dev/null
 guarded=$(run_hot)
 sf=$(promq "sum(increase(cache_stampede_wait_total{namespace=\"$NS\"}[5m]))")
 note "korumalı:   yük boyunca DB get sorgusu = $guarded · singleflight'ta bekleyen çağrı = ${sf%%.*}"
 note "cache_stampede_wait_total'ın YÜKSEK olması iyi haberdir: o kadar çağrı DB'ye gitmek yerine bekledi."
 step "Korumayı KAPAT (TRAP_NO_SINGLEFLIGHT), aynı yük"
-kubectl -n "$NS" set env deploy/linkly TRAP_NO_SINGLEFLIGHT=true >/dev/null
+kubectl -n "$NS" set env "$(app_workload)" TRAP_NO_SINGLEFLIGHT=true >/dev/null
 unguarded=$(run_hot)
 note "korumasız: yük boyunca DB get sorgusu = $unguarded"
 grafana_hint "04 · Cache → 'stampede wait/s' · 'cache miss vs DB qps' · 05 · Postgres → 'DB CPU'"

@@ -5,7 +5,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # temizliyor, diğer N-1 pod hiçbir şey duymuyor. Kullanıcı "sildim" diyor, link hâlâ çalışıyor.
 ensure_healthy
 reps=$(replicas_of)
-ttl=$(kubectl -n "$NS" get deploy linkly -o jsonpath='{range .spec.template.spec.containers[0].env[?(@.name=="CACHE_TTL")]}{.value}{end}') || true
+ttl=$(kubectl -n "$NS" get "$(app_workload)" -o jsonpath='{range .spec.template.spec.containers[0].env[?(@.name=="CACHE_TTL")]}{.value}{end}') || true
 step "Bir link oluştur ve TÜM pod'ların önbelleğine girmesini sağla"
 code=$(create_link "https://example.com/silinecek")
 for i in $(seq 1 $(( reps * 12 ))); do status_of "$code" >/dev/null; done

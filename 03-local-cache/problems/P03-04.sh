@@ -27,8 +27,8 @@ misses() { promq "sum(cache_ops_total{namespace=\"$NS\",result=\"miss\"})"; }
 measure() {
   local reps=$1 h0 a0 m0 h1 a1 m1
   scale "$reps"; wait_endpoints "$reps"
-  kubectl -n "$NS" rollout restart deploy/linkly >/dev/null
-  kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null 2>&1 || true
+  kubectl -n "$NS" rollout restart "$(app_workload)" >/dev/null
+  kubectl -n "$NS" rollout status "$(app_workload)" --timeout=180s >/dev/null 2>&1 || true
   wait_endpoints "$reps"; sleep 5
   h0=$(hits); a0=$(allops); m0=$(misses)
   # SEED_BUDGET_MS yüksek: iki koşu AYNI sayıda kod görmeli, yoksa karşılaştırma anlamsız.

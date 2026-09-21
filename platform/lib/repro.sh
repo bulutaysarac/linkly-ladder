@@ -368,10 +368,21 @@ scale()       { kubectl -n "$NS" scale "$(workload_kind)/$(app_name)" --replicas
 # 60 saniye boş bekletip uyarı bastırıyordu — sessiz ama her deneye 1 dakika ekleyen bir hata.
 app_name() {
   case "$APP_SELECTOR" in
-    *app.kubernetes.io/name=*) printf '%s' "${APP_SELECTOR##*app.kubernetes.io/name=}" ;;
-    *)                         printf 'linkly' ;;
+    *app.kubernetes.io/name=*) printf '%s' "${APP_SELECTOR##*app.kubernetes.io/name=}"; return ;;
   esac
+  # APP_SELECTOR ad vermiyorsa KÜMEYE SOR. Neden: 06'nın scriptleri `deploy/linkly` diye
+  # yazılmıştı; 07'de uygulama redirect/api diye bölününce `verify-prev` o scriptleri çalıştırdı
+  # ve hepsi "deployments.apps 'linkly' not found" ile ERROR verdi. Merdivenin kontratı "bir
+  # sonraki seviye bunu ÇÖZER" demek; scriptin çalışamaması bunu DOĞRULAMAZ, yalnızca gizler.
+  local n
+  for n in linkly redirect app; do
+    kubectl -n "$NS" get "deploy/$n" >/dev/null 2>&1 && { printf '%s' "$n"; return; }
+    kubectl -n "$NS" get "rollout/$n" >/dev/null 2>&1 && { printf '%s' "$n"; return; }
+  done
+  printf 'linkly'
 }
+# Bu seviyedeki uygulama iş yükünün tam adı: `deploy/linkly` ya da `rollout/redirect`.
+app_workload() { printf '%s/%s' "$(workload_kind)" "$(app_name)"; }
 wait_endpoints() {
   local want=$1 got svc; svc=$(app_name)
   for _ in $(seq 1 30); do

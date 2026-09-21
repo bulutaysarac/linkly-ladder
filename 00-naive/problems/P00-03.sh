@@ -14,6 +14,6 @@ miss=0; tot=60
 for i in $(seq 1 $tot); do [[ "$(status_of "$code")" == 404 ]] && miss=$((miss+1)) || true; done
 grafana_hint "03 · App Business → 'redirect 404 by pod'"
 note "$tot okumadan $miss tanesi 404 (linkin olmadığı pod'lara düştü)"
-note "eski replika sayısına dönmek için: kubectl -n $NS scale deploy/linkly --replicas=$orig"
+note "eski replika sayısına dönmek için: kubectl -n $NS scale "$(app_workload)" --replicas=$orig"
 (( miss > 0 )) && reproduced "%$(( miss * 100 / tot )) 404 — store pod'lar arasında paylaşılmıyor"
 not_reproduced "hiç 404 yok — store paylaşımlı (02)"

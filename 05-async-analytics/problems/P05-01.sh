@@ -5,14 +5,14 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # (OOM, kill -9, node arızası) tampondaki her şey gider. Teslimat garantisi bir TERCİHTİR
 # ve bu seviyede "en fazla bir kez" seçildi — ucuz ve sayaçlar için yeterli, faturalama için değil.
 ensure_healthy
-on_cleanup "kubectl -n \"$NS\" set env deploy/linkly ANALYTICS_FLUSH_INTERVAL- ANALYTICS_BATCH_SIZE-"
+on_cleanup "kubectl -n \"$NS\" set env "$(app_workload)" ANALYTICS_FLUSH_INTERVAL- ANALYTICS_BATCH_SIZE-"
 # ÖLÇÜM NOTU: kaybedebileceğin şey, o an TAMPONDA olandır. Varsayılan flush 1 sn olduğu için
 # tampon en fazla 1 saniyelik tıklama tutar; yavaş üreten bir döngüyle öldürdüğünde çoğu zaman
 # tampon boş yakalanır ve deney "kayıp yok" der. Bu, tasarımın güvenli olduğunu DEĞİL, ölçümün
 # şanslı olduğunu gösterir. Pencereyi 15 sn'ye açıyoruz: kaybın büyüklüğü artık tesadüf değil.
 step "Tamponu görünür yap: flush aralığı 15s, batch 5000 (erken flush olmasın)"
-kubectl -n "$NS" set env deploy/linkly ANALYTICS_FLUSH_INTERVAL=15s ANALYTICS_BATCH_SIZE=5000 >/dev/null
-kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null || true
+kubectl -n "$NS" set env "$(app_workload)" ANALYTICS_FLUSH_INTERVAL=15s ANALYTICS_BATCH_SIZE=5000 >/dev/null
+kubectl -n "$NS" rollout status "$(app_workload)" --timeout=180s >/dev/null || true
 for _ in $(seq 1 30); do serving && break; sleep 2; done
 code=$(create_link "https://example.com/atmostonce")
 step "Sayacı sıfırla ve bilinen sayıda tıklama üret"
@@ -31,8 +31,8 @@ step "Karşılaştırma: aynı senaryo GRACEFUL kapanışla (drain devrede)"
 code2=$(create_link "https://example.com/graceful")
 b2=$(curl -s "$BASE_URL/api/links/$code2/stats" | jq -r '.clicks // 0')
 for i in $(seq 1 "$N"); do status_of "$code2" >/dev/null; done
-kubectl -n "$NS" rollout restart deploy/linkly >/dev/null
-kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null 2>&1 || true
+kubectl -n "$NS" rollout restart "$(app_workload)" >/dev/null
+kubectl -n "$NS" rollout status "$(app_workload)" --timeout=180s >/dev/null 2>&1 || true
 for _ in $(seq 1 25); do serving && break; sleep 2; done
 sleep 8
 g=$(curl -s "$BASE_URL/api/links/$code2/stats" | jq -r '.clicks // 0')

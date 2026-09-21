@@ -14,8 +14,8 @@ ensure_healthy
 ensure_fresh_pod
 
 step "Yapısal durum: pod'un trafik almaya hazır olduğunu kim söylüyor?"
-probes=$(kubectl -n "$NS" get deploy linkly -o jsonpath='{.spec.template.spec.containers[0].readinessProbe}') || true
-prestop=$(kubectl -n "$NS" get deploy linkly -o jsonpath='{.spec.template.spec.containers[0].lifecycle.preStop}') || true
+probes=$(kubectl -n "$NS" get "$(app_workload)" -o jsonpath='{.spec.template.spec.containers[0].readinessProbe}') || true
+prestop=$(kubectl -n "$NS" get "$(app_workload)" -o jsonpath='{.spec.template.spec.containers[0].lifecycle.preStop}') || true
 note "readinessProbe: ${probes:-YOK — konteyner başlar başlamaz Endpoint'e ekleniyor}"
 note "preStop hook:   ${prestop:-YOK — pod, ingress'in listesinden düşmeden ölmeye başlıyor}"
 
@@ -26,8 +26,8 @@ kpid=$!
 sleep 12
 for i in $(seq 1 "$ROLLOUTS"); do
   step "rollout restart #$i/$ROLLOUTS"
-  kubectl -n "$NS" rollout restart deploy/linkly >/dev/null
-  kubectl -n "$NS" rollout status deploy/linkly --timeout=60s >/dev/null 2>&1 || true
+  kubectl -n "$NS" rollout restart "$(app_workload)" >/dev/null
+  kubectl -n "$NS" rollout status "$(app_workload)" --timeout=60s >/dev/null 2>&1 || true
   sleep 5
 done
 wait $kpid || true
