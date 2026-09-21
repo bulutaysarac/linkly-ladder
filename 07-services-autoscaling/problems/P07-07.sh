@@ -11,6 +11,14 @@ nodes=$(kubectl -n "$NS" get pods -l "$APP_SELECTOR" -o jsonpath='{range .items[
 reps=$(kubectl -n "$NS" get deploy redirect -o jsonpath='{.status.readyReplicas}') || true
 note "replika=$reps · farklı node=$nodes · dağılım kuralı: $(kubectl -n "$NS" get deploy redirect -o jsonpath='{.spec.template.spec.topologySpreadConstraints[0].whenUnsatisfiable}')"
 need_confirm "bir worker node DONDURULACAK (docker pause) — deney sonunda çözülür"
+# AYRI BAYRAK: bu deney node'un kubelet'ini donduruyor ve çözdükten sonra containerd'nin PLEG'i
+# ölü kalabiliyor (bir kez node 49 dakika NotReady kaldı ve bütün kümeyi çürüttü). Otomatik
+# doğrulama turunda üç kez saatlerce asılı kaldı. Değerli bir deney ama YIKICI: elle, bilerek
+# çalıştır. Kural: bir deneyin bedeli ortamın tamamıysa, onu varsayılan yapma.
+[[ "${FREEZE_NODE:-}" == 1 ]] || {
+  warn "bu deney node donduruyor; elle çalıştır: FREEZE_NODE=1 CONFIRM=1 make repro P=P07-07"
+  exit 2
+}
 victim=$(kubectl -n "$NS" get pods -l "$APP_SELECTOR" -o jsonpath='{.items[0].spec.nodeName}') || true
 # Temizlik yalnızca `docker unpause` DEĞİL: dondurulmuş bir node'da containerd'nin PLEG'i
 # ölüyor ve kubelet "container runtime is down" diyerek NotReady kalıyor — gerçekte oldu,

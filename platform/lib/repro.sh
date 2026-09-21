@@ -118,12 +118,21 @@ peak_avg() {
 # Neden: P07-07 bir node'u dondurup çözdükten sonra 43 dakika asılı kaldı — k6 bitmişti ama
 # script ilerlemiyordu. Bir deneyin adımları SINIRLI sürmeli; süresiz bekleyen bir adım,
 # doğrulama turunun tamamını durdurur ve hangi adımda takıldığını bile söylemez.
+# Süreç AĞACINI öldür. Neden: bir bash alt kabuğuna TERM göndermek, o kabuk ön plandaki
+# çocuğunu (k6 gibi) beklerken İŞE YARAMAZ — bash sinyali çocuk bitene kadar erteler.
+# İlk with_timeout sürümü tam olarak buna takıldı: P07-07 iki kez saatlerce asılı kaldı
+# ve watchdog "öldürdüm" sanıyordu. Çocukları önce, ebeveyni sonra öldür.
+kill_tree() {
+  local p=$1 c
+  for c in $(pgrep -P "$p" 2>/dev/null); do kill_tree "$c"; done
+  kill -KILL "$p" 2>/dev/null || true
+}
 with_timeout() {
   local secs=$1; shift
   ( "$@" ) & local pid=$!
-  ( sleep "$secs"; kill -TERM "$pid" 2>/dev/null; sleep 3; kill -KILL "$pid" 2>/dev/null ) & local watchdog=$!
+  ( sleep "$secs"; kill_tree "$pid" ) & local watchdog=$!
   local rc=0; wait "$pid" 2>/dev/null || rc=$?
-  kill "$watchdog" 2>/dev/null; wait "$watchdog" 2>/dev/null || true
+  kill "$watchdog" 2>/dev/null || true; wait "$watchdog" 2>/dev/null || true
   return "$rc"
 }
 

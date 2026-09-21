@@ -191,6 +191,12 @@ pod'u hâlâ Ready sanıyor. `node-monitor-grace-period` (40 sn) + eviction time
 trafik ölü pod'lara gider. [Topic · Konu: Düğüm arızası, sağlık algılama gecikmesi]
 
 **Reproduce:** `CONFIRM=1 make repro P=P07-07` — node'u dondurur, NotReady süresini ve 5xx'i ölçer,
+
+**Bu deney varsayılan olarak ATLANIR.** Node'un kubelet'ini donduruyor ve çözdükten sonra
+containerd'nin PLEG'i ölü kalabiliyor — bir kez node 49 dakika `NotReady` kaldı, o node'daki
+Chaos Mesh/Argo/KEDA pod'ları çürüdü ve sonraki bütün ölçümler bozuk bir kümede koştu.
+Bilerek çalıştır: `FREEZE_NODE=1 CONFIRM=1 make repro P=P07-07`.
+*Bir deneyin bedeli ortamın tamamıysa, onu varsayılan yapma.*
 sonra çözer.
 
 **Grafana:** `09 · Autoscaling` → "Pod dağılımı / node"; `02 · App RED` → 5xx.
