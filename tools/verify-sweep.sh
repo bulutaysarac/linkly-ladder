@@ -26,7 +26,7 @@ run_level() {
   "$R/platform/lib/profile.sh" "$lvl"
   cd "$R/$L" || return 1
   echo "═══ $L · make up"
-  local upout; upout=$(hard_timeout "${UP_TIMEOUT:-900}" make up 2>&1) || {
+  local upout; upout=$(hard_timeout "${UP_TIMEOUT:-1500}" make up 2>&1) || {
     echo "✘ $L ayağa kalkmadı"
     echo "$upout" | tail -12 | sed 's/^/         ! /'
     # TEMİZLE: başarısız kurulum namespace'i AYAKTA bırakıyordu ve bir sonraki seviye onun

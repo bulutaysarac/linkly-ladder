@@ -54,7 +54,10 @@ if (( n >= 9 )); then on cnpg-system; else off cnpg-system; fi
 # Loki + Alloy (log toplama): 11'den itibaren.
 # Ölçüldü: Loki ~270 MB, Alloy 3 pod × ~120 MB ve sürekli CPU. Yalnızca P11-05 log hacmini
 # ölçüyor; geri kalan seviyeler için bu, ölçtüğün sistemden çalınan bütçedir.
-if (( n >= 11 )); then
+# YALNIZCA 11: log/trace yığınını gerçekten kullanan tek seviye o (P11-02 trace, P11-05 Loki).
+# 13 ve 14 en ağır seviyeler (CNPG + Redpanda + Redis + 3 servis + güvenlik yığını) ve bu
+# VM'de ek 800 MB onları ayağa kaldıramaz hâle getiriyordu.
+if (( n == 11 )); then
   kubectl -n monitoring scale statefulset loki --replicas=1 >/dev/null 2>&1
   kubectl -n monitoring patch daemonset alloy --type=json -p '[{"op":"remove","path":"/spec/template/spec/nodeSelector"}]' >/dev/null 2>&1
 else
@@ -62,7 +65,7 @@ else
   kubectl -n monitoring patch daemonset alloy -p '{"spec":{"template":{"spec":{"nodeSelector":{"kapali":"true"}}}}}' >/dev/null 2>&1
 fi
 # Tempo: 11'den itibaren (trace)
-if (( n >= 11 )); then kubectl -n monitoring scale statefulset tempo --replicas=1 >/dev/null 2>&1; \
+if (( n == 11 )); then kubectl -n monitoring scale statefulset tempo --replicas=1 >/dev/null 2>&1; \
                  else kubectl -n monitoring scale statefulset tempo --replicas=0 >/dev/null 2>&1; fi
 # Argo CD + Rollouts: 12'den itibaren
 if (( n >= 12 )); then on argocd with-sts; on argo-rollouts; else off argocd; off argo-rollouts; fi
@@ -70,7 +73,7 @@ if (( n >= 12 )); then on argocd with-sts; on argo-rollouts; else off argocd; of
 if (( n >= 13 )); then on cert-manager; else off cert-manager; fi
 # Grafana: otomatik doğrulama turunda gerekmiyor (dashboard'lara insan bakar), ~200 MB.
 # 11+ açık kalsın ki gözlemlenebilirlik seviyeleri elle de incelenebilsin.
-if (( n >= 11 )); then kubectl -n monitoring scale deploy kps-grafana --replicas=1 >/dev/null 2>&1
+if (( n == 11 )); then kubectl -n monitoring scale deploy kps-grafana --replicas=1 >/dev/null 2>&1
 else                   kubectl -n monitoring scale deploy kps-grafana --replicas=0 >/dev/null 2>&1; fi
 # Kyverno: 13'ten önce KAPALI (ölçüldü: ~90 MB × 2 controller ve bu VM'de yer yok).
 # Politika YOKKEN Kyverno webhook'larını kendisi kaldırır, yani replikayı 0'a çekmek güvenli.
@@ -82,4 +85,4 @@ else                   kubectl -n monitoring scale deploy kps-grafana --replicas
 # zaten hiçbir şey yapmaz (13'ten önce `platform && make security` çalıştırılmamış olur).
 if (( n >= 13 )); then on kyverno; else kubectl -n kyverno scale deploy --all --replicas=0 >/dev/null 2>&1; fi
 
-echo "profil: seviye $L → chaos=$(( n>=2 )) keda=$(( n>=7 )) cnpg=$(( n>=9 )) log=$(( n>=11 )) tempo=$(( n>=11 )) argo=$(( n>=12 )) güvenlik=$(( n>=13 ))"
+echo "profil: seviye $L → chaos=$(( n>=2 )) keda=$(( n>=7 )) cnpg=$(( n>=9 )) log=$(( n==11 )) tempo=$(( n==11 )) argo=$(( n>=12 )) güvenlik=$(( n>=13 ))"
