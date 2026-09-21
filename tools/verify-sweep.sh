@@ -11,6 +11,11 @@ run_level() {
   local upout; upout=$(make up 2>&1) || {
     echo "✘ $L ayağa kalkmadı"
     echo "$upout" | tail -12 | sed 's/^/         ! /'
+    # TEMİZLE: başarısız kurulum namespace'i AYAKTA bırakıyordu ve bir sonraki seviye onun
+    # üstüne kuruluyordu. Üç seviye aynı anda çalışınca etcd "request timed out" vermeye
+    # başladı — yani bir seviyenin arızası, sonraki seviyelerin ölçümünü bozdu.
+    echo "═══ $L · make down (başarısız kurulum temizleniyor)"
+    make down >/dev/null 2>&1
     return 1
   }
   echo "═══ $L · verify-prev"
