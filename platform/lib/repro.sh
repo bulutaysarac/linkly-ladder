@@ -152,7 +152,20 @@ chaos_apply() {
   local c=$1 out rc=0
   out=$("$LADDER_ROOT/platform/lib/chaos.sh" apply "$c" 2>&1) || rc=$?
   case $rc in
-    0) on_cleanup "$LADDER_ROOT/platform/lib/chaos.sh delete $c"; note "chaos uygulandı: $c"; return 0 ;;
+    0) on_cleanup "$LADDER_ROOT/platform/lib/chaos.sh delete $c"
+       # "Nesne oluştu" ile "arıza ENJEKTE EDİLDİ" aynı şey değil: chaos-daemon sağlıksızsa nesne
+       # Run fazında kalır ve hiçbir şey olmaz. AllInjected koşulunu bekle, olmazsa yüksek sesle söyle.
+       local kind name injected=""
+       kind=$(awk '/^kind:/{print tolower($2); exit}' "$LADDER_ROOT/platform/chaos/$c.yaml")
+       name=$(sed -n 's/.*name: *\([a-z0-9-]*\).*/\1/p' "$LADDER_ROOT/platform/chaos/$c.yaml" | head -1)
+       for _ in $(seq 1 15); do
+         injected=$(kubectl -n "$NS" get "$kind" "$name" -o jsonpath='{.status.conditions[?(@.type=="AllInjected")].status}' 2>/dev/null || true)
+         [[ "$injected" == "True" ]] && break
+         sleep 2
+       done
+       if [[ "$injected" == "True" ]]; then note "chaos uygulandı ve enjekte edildi: $c"
+       else warn "chaos nesnesi oluştu ama ENJEKTE EDİLMEDİ ($c, AllInjected=${injected:-bilinmiyor}) — chaos-daemon sağlıklı mı?"; fi
+       return 0 ;;
     2) warn "Chaos Mesh kurulu değil: cd platform && make chaos"; exit 2 ;;
     3) warn "chaos hedefi bu seviyede yok ($c) — ETİKET UYUŞMUYOR, arıza enjekte edilemedi"; exit 2 ;;
     *) warn "chaos uygulanamadı ($c): $out"; exit 2 ;;
