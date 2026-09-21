@@ -12,13 +12,15 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # gösteriyoruz. Ölçemediğin bir sınırı, sınırın KENDİSİNİ ölçerek göster.
 ensure_healthy
 rpod=$(dep_pod app.kubernetes.io/name=redis) || exit 2   # bağımlılık hazır değilse ölçüm anlamsız
-# redis-benchmark -q çıktısı sürüme göre değişiyor ("GET: 85178.88 requests per second" ya da
-# "GET: 85178.88 requests per second, p50=0.295 msec"). Alan numarasına güvenme: SATIRDAKİ İLK
-# SAYIYI al. İlk sürüm alan numarasına güveniyordu ve boş dönüp "tavanın %1126716'sı kullanılıyor"
-# gibi saçma bir satır üretti — ayrıştırma hatası, ölçüm hatasının en sessiz türüdür.
+# redis-benchmark'ın ÇIKTISI bir metin değil, bir EKRANDIR: ilerleme satırlarını \r ile üstüne
+# yazar ve `-q` bunu susturmuyor. `tr -d '\r'` hepsini TEK satıra yapıştırınca alan numarası da,
+# "ilk sayı" da anlamsızlaşıyor (ilk denemede "tavanın %1126716'sı" gibi bir satır çıktı).
+# Doğrusu: \r'yi SATIR SONUNA çevir, "N requests per second" kalıbının SONUNCUSUNU al.
+# Ders: bir aracın çıktısını ayrıştırırken, o çıktının insan için mi makine için mi yazıldığını sor.
 bench() {
-  kubectl -n "$NS" exec "$rpod" -c redis -- redis-benchmark -q -t get -n "${2:-100000}" -c 50 -r "$1" 2>/dev/null \
-    | tr -d '\r' | awk '/^GET/ {for (i=1; i<=NF; i++) if ($i+0 > 0) {printf "%d", $i; exit}}'
+  local out
+  out=$(kubectl -n "$NS" exec "$rpod" -c redis -- redis-benchmark -q -t get -n "${2:-100000}" -c 50 -r "$1" 2>/dev/null | tr '\r' '\n') || true
+  { printf '%s\n' "$out" | grep -oE '[0-9]+(\.[0-9]+)? requests per second' | tail -1 | cut -d' ' -f1 | cut -d. -f1; } || true
 }
 step "Tavanı DOĞRUDAN ölç: 100k anahtara dağıtılmış GET vs TEK anahtara GET (ağ dışı, pod içinde)"
 spread_ceiling=$(bench 100000)

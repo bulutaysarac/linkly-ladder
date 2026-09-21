@@ -14,23 +14,20 @@ TTLS=${TTLS:-30s}
 LOAD=${LOAD:-150}
 ensure_healthy
 on_cleanup "kubectl -n \"$NS\" set env deploy/linkly TRAP_NO_TTL_JITTER- CACHE_TTL-"
-on_cleanup "port_forward_stop"
 
 warm_and_watch() {
-  local out=$1 pod port=18307
+  local out=$1 pod
   kubectl -n "$NS" rollout status deploy/linkly --timeout=180s >/dev/null
   for _ in $(seq 1 30); do serving && break; sleep 2; done
   pod=$(pod_name)
-  port_forward "$pod" "$port"
   # Sabit, orta yoğunluklu okuma: 300 kod tek seferde ısınır, sonra TTL boyunca sürekli okunur.
   # Darbeler yalnızca TTL dolmalarından gelir.
   SEED=300 k6run redirect --vus 20 --duration "${LOAD}s" >/dev/null 2>&1 &
   local k6pid=$!
   # result="expired": TTL dolduğu için yapılan ıska. İlk ısınmanın ıskalarını saymaz —
   # yani ölçtüğümüz şey TAM OLARAK TTL dolmaları.
-  sample_series "$port" "$LOAD" "$out" '^cache_ops_total\{.*result="expired"'
+  sample_series "$pod" "$LOAD" "$out" '^cache_ops_total\{.*result="expired"'
   wait "$k6pid" 2>/dev/null || true
-  port_forward_stop
 }
 
 step "Jitter AÇIK (varsayılan, ±%20), TTL $TTLS — ${LOAD}s boyunca saniyede bir örnekleniyor"
