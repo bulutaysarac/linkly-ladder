@@ -7,6 +7,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
 on_cleanup "kubectl -n \"$NS\" set env deploy/redirect TRAP_READY_CHECKS_REDIS-"
+on_cleanup "kubectl -n \"$NS\" rollout status statefulset/redis --timeout=180s"
 on_cleanup "kubectl -n \"$NS\" scale statefulset redis --replicas=1"
 measure_outage() {
   local label=$1

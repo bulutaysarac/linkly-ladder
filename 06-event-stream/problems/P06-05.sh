@@ -12,6 +12,7 @@ base_p99=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_second
 note "broker ayakta: redirect p99=$(awk -v v="$base_p99" 'BEGIN{printf "%.0f", v*1000}') ms"
 need_confirm "redpanda durdurulacak"
 step "Broker'ı durdur (replicas=0) ve AYNI yükü ver"
+on_cleanup "kubectl -n \"$NS\" rollout status statefulset/redpanda --timeout=180s"
 on_cleanup "kubectl -n \"$NS\" scale statefulset redpanda --replicas=1"
 kubectl -n "$NS" scale statefulset redpanda --replicas=0 >/dev/null
 sleep 10

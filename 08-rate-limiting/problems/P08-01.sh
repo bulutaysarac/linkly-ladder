@@ -8,6 +8,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
 on_cleanup "kubectl -n \"$NS\" set env deploy/redirect RATE_LIMIT_FAIL_OPEN=true"
+on_cleanup "kubectl -n \"$NS\" rollout status statefulset/redis --timeout=180s"
 on_cleanup "kubectl -n \"$NS\" scale statefulset redis --replicas=1"
 step "Normal çalışma: limit uygulanıyor mu?"
 k6run abuser --duration 30s >/dev/null 2>&1 || true

@@ -16,6 +16,7 @@ for _ in $(seq 1 20); do serving && break; sleep 2; done
 need_confirm "postgres pod'u silinecek"
 ( k6run redirect --vus 5 --duration 100s >/tmp/p0210.k6 2>&1 ) & kpid=$!
 sleep 10
+on_cleanup "kubectl -n \"$NS\" rollout status statefulset/postgres --timeout=180s"   # sonraki deney hazır bir DB bulmalı
 kubectl -n "$NS" delete pod -l app.kubernetes.io/name=postgres --wait=false >/dev/null
 min_ep=99; zero_seconds=0
 for _ in $(seq 1 40); do

@@ -9,6 +9,7 @@ need_confirm "postgres pod'u silinecek (veri PVC'de kalır)"
 sleep 15
 step "Postgres'i öldür — uygulama pod'larına DOKUNMUYORUZ"
 t0=$(date +%s)
+on_cleanup "kubectl -n \"$NS\" rollout status statefulset/postgres --timeout=180s"   # sonraki deney hazır bir DB bulmalı
 kubectl -n "$NS" delete pod -l app.kubernetes.io/name=postgres --wait=false >/dev/null
 down=0
 for _ in $(seq 1 90); do
