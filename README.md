@@ -76,7 +76,8 @@ make verify-prev  # önceki seviyenin sorunları burada çözülmüş mü?
 | `ladder.mk`, `tools/lint-skeleton.sh`, `tools/newlevel.sh`, `tools/ladder-matrix` | ✅ |
 | `docs/` (API kontratı, seviye şablonu, sorun şablonu, ADR'ler) | ✅ |
 | 15 seviyenin tamamı (`00-naive` … `14-modern`) | ✅ kod + deploy + README + reproduce scriptleri yazıldı |
-| Doğrulama (`make repro`, `make verify-prev`) | 🔄 00/01/02 tam doğrulandı, 03+ sürüyor |
+| Doğrulama (`make repro`, `make verify-prev`) | 🔄 00-05 doğrulandı (03: 6/7), 06+ sürüyor |
+| `platform/lib/profile.sh` (seviyeye göre bileşen aç/kapat) | ✅ **seviyeden önce koş** — küme 6 CPU |
 
 ## Faz A ölçüm sonuçları
 
@@ -91,6 +92,19 @@ make verify-prev  # önceki seviyenin sorunları burada çözülmüş mü?
 **%66 404** · rollout penceresinde **142×5xx** ayrı, restart sonrası **38 734×404** ayrı sayıldı ·
 tepe heap **185 MB / 62 872 link** → OOMKilled · sağlık ucu iş zincirine sokulunca
 **77 readiness Unhealthy** olayı (pod ölmeden Endpoints'ten düşüyor).
+
+## Ortamın kendisi de ölçülmeli
+
+Bu merdivenin en pahalı dersi seviyelerin içinden değil, **altından** çıktı: doğrulama turlarındaki
+"açıklanamayan" sonuçların çoğu uygulamanın değil, kümenin durumuydu.
+
+| Ne oldu | Nasıl göründü | Kalıcı çözüm |
+|---|---|---|
+| Redpanda v24.2.7 `--set redpanda.*` bayraklarını reddediyor | Broker 06'dan beri crash-loop; stream deneyleri **ölü broker'ı ölçtü** ("75 bin üretici hatası" bulgu sanıldı) | Bayraklar kaldırıldı; topic'ler görünür bir **Job** ile oluşuyor |
+| `docker pause` edilen node, unpause sonrası containerd PLEG'i ölü kalıyor | Bir node ~1 saat NotReady; oradaki Chaos Mesh/Argo/KEDA çürüdü, chaos sessizce çalışmadı | P07-07 containerd'yi restart edip **Ready'yi doğruluyor** |
+| Tüm operatörler + gözlemlenebilirlik yığını boşta 6 çekirdeğin 5.6'sını yiyor | VM swap'te; kubelet NotReady, controller-manager lider kaybı, k6 120 sn'de 13 istek | `platform/lib/profile.sh` + Prometheus 6s/30s → CPU %560 → %236 |
+| 07'den sonra altyapı ServiceMonitor'ları kayıp | `promq` "0" döndü, script "sorun yok" dedi | Ortak `servicemonitor.yaml` + `need_metric` |
+| `make down` namespace'i arka planda siliyor | Sonraki `make up` "namespace is being terminated" ile düştü | `make deploy` silinmeyi **bekliyor** |
 
 ## Ölçüm dersleri (deneyleri koşarken öğrenilenler)
 
