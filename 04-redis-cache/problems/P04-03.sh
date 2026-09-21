@@ -27,7 +27,7 @@ spread_ceiling=$(bench 100000)
 single_ceiling=$(bench 0)
 if [[ -z "${spread_ceiling:-}" || -z "${single_ceiling:-}" ]]; then
   warn "redis-benchmark çıktısı ayrıştırılamadı — ham çıktı:"
-  kubectl -n "$NS" exec "$rpod" -c redis -- redis-benchmark -q -t get -n 1000 -c 10 -r 0 2>&1 | head -3 | sed 's/^/    /'
+  kubectl -n "$NS" exec "$rpod" -c redis -- redis-benchmark -q -t get -n 1000 -c 10 -r 0 2>&1 | head -3 | sed 's/^/    /' || true
   exit 2
 fi
 note "dağıtık GET tavanı: ${spread_ceiling:-?} ops/s"

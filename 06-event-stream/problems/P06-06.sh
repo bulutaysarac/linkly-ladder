@@ -55,5 +55,5 @@ note "Tabloyu oku: varsayılan mod sayıyı KORUR (tekrarları yutar); TRAP modu
 note "Ne pahasına: processed_events tablosunda tıklama başına bir satır (saklama penceresi kadar)."
 note "'Tam bir kez' pazarlama terimidir; gerçekte en-az-bir-kez + idempotent yazma vardır."
 awk -v d="$def" -v t="$trap_res" -v n="${N:-2000}" 'BEGIN{exit !(d >= t)}' \
-  && reproduced "yaz→commit $d, commit→yaz $t (üretilen $n) — commit noktası teslimat garantisini belirliyor"
+  && reproduced "yaz→commit $def, commit→yaz $trap_res (üretilen ${N:-2000}) — commit noktası teslimat garantisini belirliyor"
 not_reproduced "iki mod arasında fark ölçülemedi (N'i artırıp tekrar dene)"

@@ -9,7 +9,7 @@ on_cleanup "kubectl -n \"$NS\" scale deploy/$CONSUMER --replicas=1"
 rp=$(dep_pod app.kubernetes.io/name=redpanda) || exit 2   # bağımlılık hazır değilse ölçüm anlamsız
 rpk() { kubectl -n "$NS" exec "$rp" -- rpk "$@" 2>/dev/null; }
 step "Topic'in partition sayısı"
-rpk topic describe clicks 2>/dev/null | head -6 | sed 's/^/    /'
+rpk topic describe clicks 2>/dev/null | head -6 | sed 's/^/    /' || true
 parts=$(rpk topic describe clicks -p 2>/dev/null | grep -c '^[0-9]' || echo 1)
 note "partition sayısı: ${parts:-1}"
 measure() {
