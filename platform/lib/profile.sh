@@ -35,7 +35,13 @@ if (( n >= 11 )); then kubectl -n monitoring scale statefulset tempo --replicas=
                  else kubectl -n monitoring scale statefulset tempo --replicas=0 >/dev/null 2>&1; fi
 # Argo CD + Rollouts: 12'den itibaren
 if (( n >= 12 )); then on argocd with-sts; on argo-rollouts; else off argocd; off argo-rollouts; fi
-# cert-manager + Kyverno: 13'ten itibaren
-if (( n >= 13 )); then on cert-manager; on kyverno; else off cert-manager; off kyverno; fi
+# cert-manager: 13'ten itibaren
+if (( n >= 13 )); then on cert-manager; else off cert-manager; fi
+# Kyverno: yalnızca AÇILIR, asla kapatılmaz.
+# Kyverno bir ADMISSION WEBHOOK'tur: replikayı 0'a çekmek webhook'u ortada bırakır ve
+# failurePolicy=Fail olan kurallar KÜME GENELİNDE pod oluşturmayı reddettirir. Yani "kaynak
+# tasarrufu" için kapatmak, bütün merdiveni çalışamaz hâle getirebilir. Kurulmamışsa bu satır
+# zaten hiçbir şey yapmaz (13'ten önce `platform && make security` çalıştırılmamış olur).
+if (( n >= 13 )); then on kyverno; fi
 
 echo "profil: seviye $L → chaos=$(( n>=2 )) keda=$(( n>=7 )) cnpg=$(( n>=9 )) tempo=$(( n>=11 )) argo=$(( n>=12 )) güvenlik=$(( n>=13 ))"
