@@ -21,7 +21,7 @@ sleep 20
 after=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0')
 dlq=$(promq "sum(increase(consumer_records_total{namespace=\"$NS\",result=\"dlq\"}[10m]))")
 errs=$(promq "sum(increase(consumer_records_total{namespace=\"$NS\",result=\"error\"}[10m]))")
-restarts=$(kubectl -n "$NS" get pods -l app.kubernetes.io/name=$CONSUMER -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}' 2>/dev/null)
+restarts=$(kubectl -n "$NS" get pods -l app.kubernetes.io/name=$CONSUMER -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}' 2>/dev/null) || true
 dlqcount=$(kubectl -n "$NS" exec "$rp" -- rpk topic describe clicks-dlq 2>/dev/null | grep -c . || echo 0)
 grafana_hint "08 · Stream → 'consumer records by result' (dlq) + 'consumer lag by partition'"
 note "bozuk mesaj sonrası geçerli tıklamalar: $(( after - before )) / $N (ARKASINDAKİLER İŞLENDİ Mİ?)"

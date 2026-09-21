@@ -16,7 +16,7 @@ rc=0; kubectl -n "$NS" rollout status deploy/linkly --timeout=150s >/dev/null 2>
 sleep 5
 restarts=$(restarts)
 logerr=$(kubectl -n "$NS" logs -l "$APP_SELECTOR" --tail=200 --all-containers 2>/dev/null | grep -ci 'migration\|lock\|deadlock\|already exists' || true)
-mig=$(kubectl -n "$NS" logs -l "$APP_SELECTOR" --tail=300 --all-containers 2>/dev/null | grep -i 'migration koşuluyor' | wc -l | tr -d ' ')
+mig=$(kubectl -n "$NS" logs -l "$APP_SELECTOR" --tail=300 --all-containers 2>/dev/null | grep -i 'migration koşuluyor' | wc -l | tr -d ' ') || true
 grafana_hint "01 · Pods & Resources → 'Restart sayısı' · 02 · App RED → 5xx"
 note "rollout sonucu: $([[ $rc == 0 ]] && echo tamam || echo "TIMEOUT ($rc)") · toplam restart: $restarts"
 note "'migration koşuluyor' diyen pod sayısı: $mig (tek seferlik olması gereken iş, $mig kez yapıldı)"

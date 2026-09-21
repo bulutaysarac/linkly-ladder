@@ -10,7 +10,7 @@ prim=$(dep_pod 'cnpg.io/cluster=pg,cnpg.io/instanceRole=primary') || exit 2   # 
 psql() { kubectl -n "$NS" exec "$prim" -c postgres -- psql -U postgres -d linkly -tAc "$1" 2>/dev/null; }
 step "Şema sürümü ve uygulama sürümü ayrı ayrı izleniyor mu?"
 dbver=$(psql "SELECT max(version_id) FROM goose_db_version")
-appimg=$(kubectl -n "$NS" get rollout redirect -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null | sed 's/.*://')
+appimg=$(kubectl -n "$NS" get rollout redirect -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null | sed 's/.*://') || true
 note "şema sürümü (goose): ${dbver:-?} · uygulama imaj etiketi: ${appimg:-?}"
 note "Bu iki sayı BAĞIMSIZ ilerliyor ve hiçbir yerde birbirine bağlı değil. 'Hangi kod hangi"
 note "şemayla uyumlu?' sorusunun cevabı yalnızca insan hafızasında."

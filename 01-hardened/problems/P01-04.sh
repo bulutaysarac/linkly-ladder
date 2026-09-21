@@ -8,7 +8,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 ensure_healthy
 ensure_fresh_pod
 pod=$(pod_name)
-lim=$(kubectl -n "$NS" get deploy linkly -o jsonpath='{.spec.template.spec.containers[0].resources.limits.memory}')
+lim=$(kubectl -n "$NS" get deploy linkly -o jsonpath='{.spec.template.spec.containers[0].resources.limits.memory}') || true
 step "Sürekli link üret; heap, links_total ve konteyner belleği birlikte nasıl tırmanıyor?"
 h0=$(promq "max(go_memstats_heap_alloc_bytes{namespace=\"$NS\"})")
 note "başlangıç heap: $(( ${h0%%.*} / 1024 / 1024 )) MB · konteyner limiti: $lim · store'da eviction/TTL YOK"

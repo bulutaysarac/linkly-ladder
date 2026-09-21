@@ -5,7 +5,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # çalıştırmaya DEVAM ediyor: bağlantı meşgul kalıyor, havuz doluyor, yeni istekler bekliyor.
 # Vazgeçmek, işin durmasını sağlamaz — yalnızca beklemeyi bırakır.
 ensure_healthy
-st=$(kubectl -n "$NS" get deploy linkly -o jsonpath='{range .spec.template.spec.containers[0].env[?(@.name=="STATEMENT_TIMEOUT")]}{.value}{end}')
+st=$(kubectl -n "$NS" get deploy linkly -o jsonpath='{range .spec.template.spec.containers[0].env[?(@.name=="STATEMENT_TIMEOUT")]}{.value}{end}') || true
 step "Ayarlar"
 note "client tarafı DB_QUERY_TIMEOUT: $(kubectl -n "$NS" get deploy linkly -o jsonpath='{range .spec.template.spec.containers[0].env[?(@.name=="DB_QUERY_TIMEOUT")]}{.value}{end}')"
 note "sunucu tarafı STATEMENT_TIMEOUT: '${st:-<boş — KAPALI>}'"

@@ -11,7 +11,7 @@ on_cleanup "kubectl -n \"$NS\" set env deploy/redirect TRAP_READY_ALWAYS-"
 # Endpoints'ten düşene kadar trafiği emiyor ve readiness'ın "HAYIR" diyebilmesinin değerini
 # GİZLİYOR — ilk koşuda iki mod da 5xx=0 verdi, yani deney kendi güvenlik ağını ölçüyordu.
 # Bir korumanın değerini ölçmek istiyorsan, aynı işi yapan DİĞER korumayı geçici olarak kaldır.
-orig_prestop=$(kubectl -n "$NS" get deploy redirect -o jsonpath='{.spec.template.spec.containers[0].lifecycle.preStop.sleep.seconds}' 2>/dev/null)
+orig_prestop=$(kubectl -n "$NS" get deploy redirect -o jsonpath='{.spec.template.spec.containers[0].lifecycle.preStop.sleep.seconds}' 2>/dev/null) || true
 on_cleanup "kubectl -n \"$NS\" patch deploy redirect --type=json -p '[{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/lifecycle/preStop/sleep/seconds\",\"value\":${orig_prestop:-5}}]'"
 kubectl -n "$NS" patch deploy redirect --type=json \
   -p '[{"op":"replace","path":"/spec/template/spec/containers/0/lifecycle/preStop/sleep/seconds","value":0}]' >/dev/null 2>&1 \

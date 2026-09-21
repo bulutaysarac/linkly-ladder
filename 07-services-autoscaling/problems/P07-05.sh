@@ -7,7 +7,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
 on_cleanup "kubectl -n \"$NS\" scale deploy/redirect --replicas=2"
-orig_lim=$(kubectl -n "$NS" get deploy redirect -o jsonpath='{.spec.template.spec.containers[0].resources.limits.cpu}' 2>/dev/null)
+orig_lim=$(kubectl -n "$NS" get deploy redirect -o jsonpath='{.spec.template.spec.containers[0].resources.limits.cpu}' 2>/dev/null) || true
 on_cleanup "kubectl -n \"$NS\" set resources deploy/redirect --requests=cpu=150m --limits=cpu=${orig_lim:-300m}"
 step "Küme kapasitesi"
 kubectl get nodes -o custom-columns=NODE:.metadata.name,CPU:.status.allocatable.cpu,BELLEK:.status.allocatable.memory --no-headers | sed 's/^/    /'
@@ -22,8 +22,8 @@ kubectl -n "$NS" set resources deploy/redirect --requests=cpu=900m --limits=cpu=
 kubectl -n "$NS" scale deploy/redirect --replicas=10 >/dev/null
 sleep 45
 pending=$(kubectl -n "$NS" get pods -l "$APP_SELECTOR" --field-selector status.phase=Pending --no-headers 2>/dev/null | grep -c . || true)
-ready=$(kubectl -n "$NS" get deploy redirect -o jsonpath='{.status.readyReplicas}')
-reason=$(kubectl -n "$NS" get events --field-selector reason=FailedScheduling -o jsonpath='{range .items[-1:]}{.message}{end}' 2>/dev/null | head -c 160)
+ready=$(kubectl -n "$NS" get deploy redirect -o jsonpath='{.status.readyReplicas}') || true
+reason=$(kubectl -n "$NS" get events --field-selector reason=FailedScheduling -o jsonpath='{range .items[-1:]}{.message}{end}' 2>/dev/null | head -c 160) || true
 grafana_hint "09 · Autoscaling → 'Pending pod' + 'Node CPU allocatable vs requests'"
 note "istenen replika=10 · hazır=${ready:-0} · PENDING=$pending"
 [[ -n "$reason" ]] && note "scheduler diyor ki: $reason"

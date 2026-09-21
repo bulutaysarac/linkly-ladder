@@ -32,7 +32,7 @@ for _ in $(seq 1 40); do
 done
 t1=$(date +%s)
 self=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0')
-reps=$(kubectl -n "$NS" get deploy/$CONSUMER -o jsonpath='{.spec.replicas}' 2>/dev/null)
+reps=$(kubectl -n "$NS" get deploy/$CONSUMER -o jsonpath='{.spec.replicas}' 2>/dev/null) || true
 note "120 sn sonra: tüketici replikası=${reps:-?} · sayım $(( self - before ))/$N · kendiliğinden toparlandı mı: $( ((recovered)) && echo EVET || echo HAYIR)"
 step "Şimdi ELLE aç — verinin kaybolmadığını göster (dayanıklı log)"
 kubectl -n "$NS" scale deploy/$CONSUMER --replicas=1 >/dev/null

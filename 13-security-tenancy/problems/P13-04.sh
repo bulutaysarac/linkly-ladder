@@ -11,12 +11,12 @@ step "Git'te düz metin sır var mı?"
 hits=$(grep -rn 'API_KEYS:\|POSTGRES_PASSWORD:\|linkly:linkly@' "$(dirname "$0")/../deploy/" 2>/dev/null | grep -v 'secretKeyRef' | head -4)
 echo "${hits:-    (bulunamadı)}" | sed 's/^/    /'
 step "sealed-secrets controller kurulu mu?"
-sc=$(kubectl -n kube-system get pods -l app.kubernetes.io/name=sealed-secrets --no-headers 2>/dev/null | awk '{print $1, $3}')
+sc=$(kubectl -n kube-system get pods -l app.kubernetes.io/name=sealed-secrets --no-headers 2>/dev/null | awk '{print $1, $3}') || true
 note "controller: ${sc:-YOK}"
-crd=$(kubectl get crd sealedsecrets.bitnami.com -o name 2>/dev/null)
+crd=$(kubectl get crd sealedsecrets.bitnami.com -o name 2>/dev/null) || true
 note "CRD: ${crd:-YOK}"
 step "Cluster'ın açık anahtarı alınabiliyor mu? (kubeseal bunu kullanır)"
-cert=$(kubectl -n kube-system get secret -l sealedsecrets.bitnami.com/sealed-secrets-key -o name 2>/dev/null | head -1)
+cert=$(kubectl -n kube-system get secret -l sealedsecrets.bitnami.com/sealed-secrets-key -o name 2>/dev/null | head -1) || true
 note "şifreleme anahtarı: ${cert:-bulunamadı}"
 step "Çözüm — bu komut düz Secret'ı şifreli bir SealedSecret'a çevirir:"
 note "  kubectl -n $NS create secret generic linkly-api-keys \\"

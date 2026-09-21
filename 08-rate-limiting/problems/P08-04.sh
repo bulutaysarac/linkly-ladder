@@ -6,8 +6,8 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
 on_cleanup "kubectl -n \"$NS\" set env deploy/redirect TRAP_FIXED_WINDOW-"
-win=$(kubectl -n "$NS" get deploy redirect -o jsonpath='{range .spec.template.spec.containers[0].env[?(@.name=="RATE_LIMIT_WINDOW")]}{.value}{end}')
-lim=$(kubectl -n "$NS" get deploy redirect -o jsonpath='{range .spec.template.spec.containers[0].env[?(@.name=="RATE_LIMIT_PER_IP")]}{.value}{end}')
+win=$(kubectl -n "$NS" get deploy redirect -o jsonpath='{range .spec.template.spec.containers[0].env[?(@.name=="RATE_LIMIT_WINDOW")]}{.value}{end}') || true
+lim=$(kubectl -n "$NS" get deploy redirect -o jsonpath='{range .spec.template.spec.containers[0].env[?(@.name=="RATE_LIMIT_PER_IP")]}{.value}{end}') || true
 note "pencere=${win:-10s} · IP başına limit=${lim:-300}"
 step "Pencere sınırına hizalanmış burst: sınırın hemen öncesi ve hemen sonrası"
 # burst senaryosu pencere sınırını yakalayacak şekilde iki kez koşulur

@@ -6,7 +6,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
 step "Tek pod kapasitesini ÖLÇ (kademeli yük)"
-orig=$(kubectl -n "$NS" get rollout redirect -o jsonpath='{.spec.replicas}' 2>/dev/null || kubectl -n "$NS" get deploy redirect -o jsonpath='{.spec.replicas}')
+orig=$(kubectl -n "$NS" get rollout redirect -o jsonpath='{.spec.replicas}' 2>/dev/null || kubectl -n "$NS" get deploy redirect -o jsonpath='{.spec.replicas}') || true
 on_cleanup "kubectl -n \"$NS\" scale rollout/redirect --replicas=$orig 2>/dev/null || kubectl -n \"$NS\" scale deploy/redirect --replicas=$orig"
 kubectl -n "$NS" scale rollout/redirect --replicas=1 >/dev/null 2>&1 || kubectl -n "$NS" scale deploy/redirect --replicas=1 >/dev/null
 sleep 15; wait_endpoints 1

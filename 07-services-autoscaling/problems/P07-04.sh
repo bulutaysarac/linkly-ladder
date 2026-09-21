@@ -13,8 +13,8 @@ APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
 has_throttle=$(curl -s "$PROM_URL/api/v1/label/__name__/values" | jq -r '.data[]' | grep -c 'container_cpu_cfs_throttled' || true)
 note "throttling metriği mevcut mu: $([[ ${has_throttle:-0} -gt 0 ]] && echo evet || echo HAYIR — ortam sınırı)"
-lim=$(kubectl -n "$NS" get deploy redirect -o jsonpath='{.spec.template.spec.containers[0].resources.limits.cpu}')
-req=$(kubectl -n "$NS" get deploy redirect -o jsonpath='{.spec.template.spec.containers[0].resources.requests.cpu}')
+lim=$(kubectl -n "$NS" get deploy redirect -o jsonpath='{.spec.template.spec.containers[0].resources.limits.cpu}') || true
+req=$(kubectl -n "$NS" get deploy redirect -o jsonpath='{.spec.template.spec.containers[0].resources.requests.cpu}') || true
 on_cleanup "kubectl -n \"$NS\" set resources deploy/redirect --limits=cpu=$lim"
 on_cleanup "kubectl -n \"$NS\" scale deploy/redirect --replicas=2"
 step "Sıkı CPU limiti ($lim, istek $req) ile sabit yük"

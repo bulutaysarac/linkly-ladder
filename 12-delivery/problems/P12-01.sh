@@ -7,7 +7,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
 on_cleanup "kubectl -n \"$NS\" set env rollout/redirect BAD_VERSION_ERROR_PCT=0 2>/dev/null || true"
-has_rollout=$(kubectl -n "$NS" get rollout redirect -o name 2>/dev/null)
+has_rollout=$(kubectl -n "$NS" get rollout redirect -o name 2>/dev/null) || true
 [[ -z "$has_rollout" ]] && { warn "Rollout bulunamadı (Argo Rollouts kurulu mu? cd platform && make argo)"; exit 2; }
 step "Mevcut sürüm sağlıklı mı?"
 kubectl -n "$NS" get rollout redirect -o custom-columns=AŞAMA:.status.phase,HAZIR:.status.readyReplicas,GÜNCEL:.status.updatedReplicas --no-headers 2>/dev/null | sed 's/^/    /'
@@ -18,7 +18,7 @@ kubectl -n "$NS" set env rollout/redirect BAD_VERSION_ERROR_PCT=25 >/dev/null
 note "canary başladı: %10 trafik kötü sürüme gidiyor, analiz 30 sn sonra ilk ölçümü alacak"
 phase=""; aborted=0
 for i in $(seq 1 45); do
-  phase=$(kubectl -n "$NS" get rollout redirect -o jsonpath='{.status.phase}' 2>/dev/null)
+  phase=$(kubectl -n "$NS" get rollout redirect -o jsonpath='{.status.phase}' 2>/dev/null) || true
   [[ "$phase" == "Degraded" ]] && { aborted=1; note "  → analiz BAŞARISIZ: rollout $((i*4)) sn içinde durduruldu"; break; }
   [[ "$phase" == "Healthy" ]] && { note "  → rollout tamamlandı (analiz geçti?)"; break; }
   sleep 4
@@ -26,7 +26,7 @@ done
 wait $kpid || true
 e5=$(k6_5xx); reqs=$(k6_reqs)
 err_ratio=$(awk -v a="$e5" -v b="$reqs" 'BEGIN{printf "%.2f", (b>0? a*100/b : 0)}')
-analysis=$(kubectl -n "$NS" get analysisrun -o jsonpath='{range .items[*]}{.metadata.name}{" → "}{.status.phase}{"\n"}{end}' 2>/dev/null | tail -3)
+analysis=$(kubectl -n "$NS" get analysisrun -o jsonpath='{range .items[*]}{.metadata.name}{" → "}{.status.phase}{"\n"}{end}' 2>/dev/null | tail -3) || true
 grafana_hint "13 · Rollout → '5xx oranı by version' (stable vs canary yan yana)"
 note "rollout durumu: ${phase:-?} · k6: $reqs istek, $e5 tanesi 5xx (%$err_ratio)"
 [[ -n "$analysis" ]] && { note "analiz koşuları:"; echo "$analysis" | sed 's/^/      /'; }

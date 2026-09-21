@@ -7,11 +7,11 @@ APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
 step "Replikalar hangi node'larda?"
 kubectl -n "$NS" get pods -l "$APP_SELECTOR" -o custom-columns=POD:.metadata.name,NODE:.spec.nodeName --no-headers | sed 's/^/    /'
-nodes=$(kubectl -n "$NS" get pods -l "$APP_SELECTOR" -o jsonpath='{range .items[*]}{.spec.nodeName}{"\n"}{end}' | sort -u | grep -c .)
-reps=$(kubectl -n "$NS" get deploy redirect -o jsonpath='{.status.readyReplicas}')
+nodes=$(kubectl -n "$NS" get pods -l "$APP_SELECTOR" -o jsonpath='{range .items[*]}{.spec.nodeName}{"\n"}{end}' | sort -u | grep -c .) || true
+reps=$(kubectl -n "$NS" get deploy redirect -o jsonpath='{.status.readyReplicas}') || true
 note "replika=$reps · farklı node=$nodes · dağılım kuralı: $(kubectl -n "$NS" get deploy redirect -o jsonpath='{.spec.template.spec.topologySpreadConstraints[0].whenUnsatisfiable}')"
 need_confirm "bir worker node DONDURULACAK (docker pause) — deney sonunda çözülür"
-victim=$(kubectl -n "$NS" get pods -l "$APP_SELECTOR" -o jsonpath='{.items[0].spec.nodeName}')
+victim=$(kubectl -n "$NS" get pods -l "$APP_SELECTOR" -o jsonpath='{.items[0].spec.nodeName}') || true
 # Temizlik yalnızca `docker unpause` DEĞİL: dondurulmuş bir node'da containerd'nin PLEG'i
 # ölüyor ve kubelet "container runtime is down" diyerek NotReady kalıyor — gerçekte oldu,
 # node 49 dakika NotReady kaldı ve kümenin geri kalanı (Chaos Mesh, Argo, KEDA) o node'a
@@ -34,7 +34,7 @@ sleep 12
 docker pause "$victim" >/dev/null
 note "donduruldu. Kubernetes bunu ~40 sn sonra NotReady, ~5 dk sonra evict olarak görür."
 for i in $(seq 1 20); do
-  st=$(kubectl get node "$victim" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)
+  st=$(kubectl get node "$victim" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null) || true
   [[ "$st" != "True" ]] && { note "node NotReady oldu (~$((i*5)) sn)"; break; }
   sleep 5
 done

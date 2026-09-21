@@ -8,14 +8,14 @@ rp=$(dep_pod app.kubernetes.io/name=redpanda) || exit 2   # bağımlılık hazı
 step "Topic yapılandırması"
 parts=$(kubectl -n "$NS" exec "$rp" -- rpk topic describe clicks -p 2>/dev/null | grep -c '^[0-9]' || echo "?")
 note "clicks partition sayısı: ${parts:-?}"
-kedamax=$(kubectl -n "$NS" get scaledobject analytics -o jsonpath='{.spec.maxReplicaCount}' 2>/dev/null)
+kedamax=$(kubectl -n "$NS" get scaledobject analytics -o jsonpath='{.spec.maxReplicaCount}' 2>/dev/null) || true
 note "KEDA maxReplicaCount: ${kedamax:-?} (partition sayısını AŞMAMALI — fazlası boşta oturur)"
 step "Yoğun tıklama yükü ver, tüketicinin ölçeklenmesini izle"
 ( k6run hot-key --vus 60 --duration 60s >/dev/null 2>&1 || true ) &
 kpid=$!
 maxreps=0
 for i in $(seq 1 25); do
-  r=$(kubectl -n "$NS" get deploy analytics -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+  r=$(kubectl -n "$NS" get deploy analytics -o jsonpath='{.status.readyReplicas}' 2>/dev/null) || true
   (( ${r:-0} > maxreps )) && maxreps=${r:-0}
   sleep 3
 done

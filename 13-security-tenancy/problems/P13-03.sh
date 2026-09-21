@@ -11,7 +11,7 @@ kubectl -n "$NS" delete pod netcheck --ignore-not-found --wait=true >/dev/null 2
 out=$(kubectl -n "$NS" run netcheck --image=busybox:1.36 --restart=Never --command --timeout=90s \
       -- sh -c 'nc -z -w 3 pg-pooler-rw 5432 && echo POSTGRES_ERISILEBILIR || echo POSTGRES_ENGELLENDI; nc -z -w 3 redis 6379 && echo REDIS_ERISILEBILIR || echo REDIS_ENGELLENDI' 2>&1)
 sleep 12
-logs=$(kubectl -n "$NS" logs netcheck 2>/dev/null)
+logs=$(kubectl -n "$NS" logs netcheck 2>/dev/null) || true
 kubectl -n "$NS" delete pod netcheck --ignore-not-found --wait=false >/dev/null 2>&1
 note "yetkisiz pod'dan sonuç:"; echo "${logs:-<log alınamadı>}" | sed 's/^/      /'
 step "Yetkili bir pod (redirect) aynı şeyi yapabiliyor mu?"

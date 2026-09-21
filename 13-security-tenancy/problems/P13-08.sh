@@ -8,17 +8,17 @@ APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
 pod=$(pod_name)
 step "Çalışma imajı ve kullanıcı"
-img=$(kubectl -n "$NS" get pod "$pod" -o jsonpath='{.spec.containers[0].image}')
+img=$(kubectl -n "$NS" get pod "$pod" -o jsonpath='{.spec.containers[0].image}') || true
 note "imaj: $img"
-sc=$(kubectl -n "$NS" get pod "$pod" -o jsonpath='{.spec.containers[0].securityContext}')
+sc=$(kubectl -n "$NS" get pod "$pod" -o jsonpath='{.spec.containers[0].securityContext}') || true
 note "securityContext: ${sc:-<yok>}"
 step "Konteynerde shell var mı? (distroless doğrulaması)"
-shell_out=$(kubectl -n "$NS" exec "$pod" -- /bin/sh -c 'echo VAR' 2>&1 | head -c 120)
+shell_out=$(kubectl -n "$NS" exec "$pod" -- /bin/sh -c 'echo VAR' 2>&1 | head -c 120) || true
 note "sh denemesi: $shell_out"
 step "Yazılabilir kök dosya sistemi var mı?"
-rofs=$(kubectl -n "$NS" get pod "$pod" -o jsonpath='{.spec.containers[0].securityContext.readOnlyRootFilesystem}')
-nonroot=$(kubectl -n "$NS" get pod "$pod" -o jsonpath='{.spec.containers[0].securityContext.runAsNonRoot}')
-caps=$(kubectl -n "$NS" get pod "$pod" -o jsonpath='{.spec.containers[0].securityContext.capabilities.drop}')
+rofs=$(kubectl -n "$NS" get pod "$pod" -o jsonpath='{.spec.containers[0].securityContext.readOnlyRootFilesystem}') || true
+nonroot=$(kubectl -n "$NS" get pod "$pod" -o jsonpath='{.spec.containers[0].securityContext.runAsNonRoot}') || true
+caps=$(kubectl -n "$NS" get pod "$pod" -o jsonpath='{.spec.containers[0].securityContext.capabilities.drop}') || true
 note "readOnlyRootFilesystem=${rofs:-?} · runAsNonRoot=${nonroot:-varsayılan(imajdan)} · drop=${caps:-?}"
 step "Eksik kalan tedarik zinciri adımları"
 note "  · imaj TARAMASI (Trivy/Grype) — CI'da var mı? .github/workflows/ci.yml'e bak"

@@ -8,9 +8,9 @@ APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
 on_cleanup "$LADDER_ROOT/platform/lib/chaos.sh delete pg-delay-2s"
 step "Bütçe zinciri"
-ht=$(kubectl -n "$NS" get deploy redirect -o jsonpath='{range .spec.template.spec.containers[0].env[?(@.name=="HANDLER_TIMEOUT")]}{.value}{end}')
-dt=$(kubectl -n "$NS" get deploy redirect -o jsonpath='{range .spec.template.spec.containers[0].env[?(@.name=="DEP_TIMEOUT")]}{.value}{end}')
-qt=$(kubectl -n "$NS" get deploy redirect -o jsonpath='{range .spec.template.spec.containers[0].env[?(@.name=="DB_QUERY_TIMEOUT")]}{.value}{end}')
+ht=$(kubectl -n "$NS" get deploy redirect -o jsonpath='{range .spec.template.spec.containers[0].env[?(@.name=="HANDLER_TIMEOUT")]}{.value}{end}') || true
+dt=$(kubectl -n "$NS" get deploy redirect -o jsonpath='{range .spec.template.spec.containers[0].env[?(@.name=="DEP_TIMEOUT")]}{.value}{end}') || true
+qt=$(kubectl -n "$NS" get deploy redirect -o jsonpath='{range .spec.template.spec.containers[0].env[?(@.name=="DB_QUERY_TIMEOUT")]}{.value}{end}') || true
 note "handler=${ht:-5s} · bağımlılık=${dt:-2s} · sorgu=${qt:-3s}"
 note "Doğru sıra: handler > bağımlılık ≥ sorgu. Sorgu timeout'u handler'dan BÜYÜKSE, handler"
 note "vazgeçtikten sonra sorgu çalışmaya devam eder — tam olarak bu sorunun kaynağı."

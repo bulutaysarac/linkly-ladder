@@ -16,7 +16,7 @@ for i in $(seq 1 "$N"); do status_of "$code" >/dev/null; done
 sleep 20
 after=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0')
 unknown=$(promq "sum(increase(consumer_records_total{namespace=\"$NS\",result=\"unknown_version\"}[10m]))")
-restarts=$(kubectl -n "$NS" get pods -l app.kubernetes.io/name=analytics -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}' 2>/dev/null)
+restarts=$(kubectl -n "$NS" get pods -l app.kubernetes.io/name=analytics -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}' 2>/dev/null) || true
 grafana_hint "08 · Stream → 'consumer records by result' (unknown_version)"
 note "bilinmeyen sürüm sayacı: ${unknown%%.*} · tüketici restart: ${restarts:-0}"
 note "sonraki normal tıklamalar: $(( after - before )) / $N (boru hattı akmaya devam etti mi?)"

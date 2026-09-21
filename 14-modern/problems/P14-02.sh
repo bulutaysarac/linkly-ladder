@@ -33,7 +33,7 @@ step "(2) TRAP_NO_INVALIDATION_PUBSUB: L1 var, yayın YOK (03'ün hâli)"
 setenv TRAP_NO_INVALIDATION_PUBSUB=true
 off_bad=$(stale_after_delete)
 note "yayın kapalı: 40 okumadan $off_bad tanesi hâlâ yönlendiriyor"
-l1ttl=$(kubectl -n "$NS" get rollout redirect -o jsonpath='{range .spec.template.spec.containers[0].env[?(@.name=="L1_TTL")]}{.value}{end}' 2>/dev/null)
+l1ttl=$(kubectl -n "$NS" get rollout redirect -o jsonpath='{range .spec.template.spec.containers[0].env[?(@.name=="L1_TTL")]}{.value}{end}' 2>/dev/null) || true
 grafana_hint "04 · Cache → 'hit ratio by pod' · yeni metrik: cache_invalidation_messages_total"
 note "L1_TTL=${l1ttl:-10s} — yayın kaçarsa bayatlık penceresi TAM OLARAK bu kadar."
 note "Pub/sub EN-İYİ-ÇABA'dır: Redis yeniden başlarsa, bir pod abone olamazsa ya da mesaj düşerse"

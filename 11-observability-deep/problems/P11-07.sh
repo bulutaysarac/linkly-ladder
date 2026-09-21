@@ -9,7 +9,7 @@ GRAFANA_USER=${GRAFANA_USER:-admin}
 GRAFANA_PASS=${GRAFANA_PASS:-ladder}
 step "Dashboard'lar nereden geliyor?"
 note "kaynak: platform/dashboards/gen.py → out/*.json → ConfigMap (grafana_dashboard=1) → sidecar"
-cm=$(kubectl -n monitoring get configmap ladder-dashboards -o jsonpath='{.metadata.resourceVersion}' 2>/dev/null)
+cm=$(kubectl -n monitoring get configmap ladder-dashboards -o jsonpath='{.metadata.resourceVersion}' 2>/dev/null) || true
 note "ConfigMap resourceVersion: ${cm:-?}"
 step "Grafana'daki dashboard'ları say ve düzenlenebilirliği kontrol et"
 dash=$(curl -s -u "$GRAFANA_USER:$GRAFANA_PASS" "$GRAFANA_URL/api/search?type=dash-db&limit=100" 2>/dev/null | jq -r '[.[] | select(.title|startswith("Ladder"))] | length')

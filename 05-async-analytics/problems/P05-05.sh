@@ -4,8 +4,8 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # Drain kodu doğru yazılmış olabilir; kubelet süreci bitirmesine izin vermezse hiçbir anlamı yok.
 # "Kod doğru" ile "sistem doğru" aynı şey değildir — aradaki fark bir YAML satırı.
 ensure_healthy
-orig_grace=$(kubectl -n "$NS" get deploy linkly -o jsonpath='{.spec.template.spec.terminationGracePeriodSeconds}')
-orig_prestop=$(kubectl -n "$NS" get deploy linkly -o jsonpath='{.spec.template.spec.containers[0].lifecycle.preStop.sleep.seconds}')
+orig_grace=$(kubectl -n "$NS" get deploy linkly -o jsonpath='{.spec.template.spec.terminationGracePeriodSeconds}') || true
+orig_prestop=$(kubectl -n "$NS" get deploy linkly -o jsonpath='{.spec.template.spec.containers[0].lifecycle.preStop.sleep.seconds}') || true
 # İkisini TEK patch'te geri al: API sunucusu preStop.sleep < grace şartını nesnenin SON hâlinde
 # doğruluyor; ayrı ayrı göndermek geçersiz bir ara hâl üretir ve reddedilir.
 on_cleanup "kubectl -n \"$NS\" patch deploy linkly --type=json -p '[{\"op\":\"replace\",\"path\":\"/spec/template/spec/terminationGracePeriodSeconds\",\"value\":$orig_grace},{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/lifecycle/preStop/sleep/seconds\",\"value\":$orig_prestop}]'"

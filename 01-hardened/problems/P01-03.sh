@@ -8,8 +8,8 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # Yani PDB erişilebilirlik ÜRETMEZ; yalnızca var olan yedekliliği korur. Yedeklilik yoksa
 # koruyacak bir şey de yoktur — sadece bakımı kilitler. [Topic · Konu: HA, PDB, yedeklilik]
 ensure_healthy
-node=$(kubectl -n "$NS" get pod -l "$APP_SELECTOR" -o jsonpath='{.items[0].spec.nodeName}')
-allowed=$(kubectl -n "$NS" get pdb linkly -o jsonpath='{.status.disruptionsAllowed}')
+node=$(kubectl -n "$NS" get pod -l "$APP_SELECTOR" -o jsonpath='{.items[0].spec.nodeName}') || true
+allowed=$(kubectl -n "$NS" get pdb linkly -o jsonpath='{.status.disruptionsAllowed}') || true
 step "PDB ne vaat ediyor?"
 note "minAvailable=$(kubectl -n "$NS" get pdb linkly -o jsonpath='{.spec.minAvailable}') · izin verilen kesinti=$allowed · replika=$(replicas_of) · pod node'u=$node"
 [[ "$allowed" == "0" ]] && note "izin verilen kesinti 0: PDB şu an her gönüllü tahliyeyi REDDEDECEK"

@@ -9,9 +9,9 @@ APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
 step "Mevcut önbellek anahtar formatı"
 rpod=$(dep_pod app.kubernetes.io/name=redis) || exit 2   # bağımlılık hazır değilse ölçüm anlamsız
-keys=$(kubectl -n "$NS" exec "$rpod" -c redis -- redis-cli --scan --pattern 'linkly:link:*' 2>/dev/null | head -3)
+keys=$(kubectl -n "$NS" exec "$rpod" -c redis -- redis-cli --scan --pattern 'linkly:link:*' 2>/dev/null | head -3) || true
 note "örnek anahtarlar:"; echo "${keys:-<yok>}" | sed 's/^/      /'
-prefixes=$(kubectl -n "$NS" exec "$rpod" -c redis -- redis-cli --scan --pattern 'linkly:*' 2>/dev/null | sed 's/:[^:]*$//' | sort -u | head -5)
+prefixes=$(kubectl -n "$NS" exec "$rpod" -c redis -- redis-cli --scan --pattern 'linkly:*' 2>/dev/null | sed 's/:[^:]*$//' | sort -u | head -5) || true
 note "farklı önek sayısı: $(echo "$prefixes" | grep -c . )"
 step "Senaryo: canary anahtar önekini 'linkly:link:v2:' yapsaydı ne olurdu?"
 k6run redirect --vus 20 --duration 30s >/dev/null 2>&1 || true

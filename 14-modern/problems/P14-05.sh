@@ -23,7 +23,7 @@ note "  [00:45] Postgres'e %30 paket kaybı"
 chaos_apply pg-loss-30
 sleep 30
 note "  [01:15] bir redirect pod'u öldürülüyor"
-victim=$(kubectl -n "$NS" get pod -l "$APP_SELECTOR" -o jsonpath='{.items[0].metadata.name}')
+victim=$(kubectl -n "$NS" get pod -l "$APP_SELECTOR" -o jsonpath='{.items[0].metadata.name}') || true
 kubectl -n "$NS" delete pod "$victim" --force --grace-period=0 >/dev/null 2>&1 || true
 sleep 30
 note "  [01:45] arızalar kaldırılıyor"

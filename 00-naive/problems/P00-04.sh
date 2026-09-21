@@ -14,8 +14,8 @@ ensure_healthy
 ensure_fresh_pod
 
 step "Yapısal durum: pod'un trafik almaya hazır olduğunu kim söylüyor?"
-probes=$(kubectl -n "$NS" get deploy linkly -o jsonpath='{.spec.template.spec.containers[0].readinessProbe}')
-prestop=$(kubectl -n "$NS" get deploy linkly -o jsonpath='{.spec.template.spec.containers[0].lifecycle.preStop}')
+probes=$(kubectl -n "$NS" get deploy linkly -o jsonpath='{.spec.template.spec.containers[0].readinessProbe}') || true
+prestop=$(kubectl -n "$NS" get deploy linkly -o jsonpath='{.spec.template.spec.containers[0].lifecycle.preStop}') || true
 note "readinessProbe: ${probes:-YOK — konteyner başlar başlamaz Endpoint'e ekleniyor}"
 note "preStop hook:   ${prestop:-YOK — pod, ingress'in listesinden düşmeden ölmeye başlıyor}"
 
