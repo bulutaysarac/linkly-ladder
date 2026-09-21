@@ -7,6 +7,16 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
 on_cleanup "kubectl -n \"$NS\" set env deploy/redirect TRAP_READY_ALWAYS-"
+# preStop beklemesini deney süresince 0 yap (İKİ FAZDA DA). Neden: 5 saniyelik preStop, pod
+# Endpoints'ten düşene kadar trafiği emiyor ve readiness'ın "HAYIR" diyebilmesinin değerini
+# GİZLİYOR — ilk koşuda iki mod da 5xx=0 verdi, yani deney kendi güvenlik ağını ölçüyordu.
+# Bir korumanın değerini ölçmek istiyorsan, aynı işi yapan DİĞER korumayı geçici olarak kaldır.
+orig_prestop=$(kubectl -n "$NS" get deploy redirect -o jsonpath='{.spec.template.spec.containers[0].lifecycle.preStop.sleep.seconds}' 2>/dev/null)
+on_cleanup "kubectl -n \"$NS\" patch deploy redirect --type=json -p '[{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/lifecycle/preStop/sleep/seconds\",\"value\":${orig_prestop:-5}}]'"
+kubectl -n "$NS" patch deploy redirect --type=json \
+  -p '[{"op":"replace","path":"/spec/template/spec/containers/0/lifecycle/preStop/sleep/seconds","value":0}]' >/dev/null 2>&1 \
+  || warn "preStop 0 yapılamadı (sürüm sleep hook'unu desteklemiyor olabilir)"
+kubectl -n "$NS" rollout status deploy/redirect --timeout=180s >/dev/null 2>&1 || true
 run_rollout_test() {
   ( k6run redirect --vus 10 --duration 60s >/tmp/p0708.k6 2>&1 ) & local kp=$!
   sleep 12
@@ -31,6 +41,7 @@ note "Aynı hatanın kuzenleri: readiness'ı TCP kontrolüne indirgemek (port a�
 note "değil), /healthz'i readiness olarak kullanmak (kapanışta HAYIR diyemez — 01'de bunu ayırmıştık),"
 note "ve readiness'a bağımlılık koymak (P02-10: kısmi arıza tam kesintiye dönüşür). Üçü de aynı kökten:"
 note "probe'un NE SORDUĞUNU tanımlamamak."
+note "preStop bu deney boyunca 0 (normalde ${orig_prestop:-5}s) — iki faz da aynı koşulda."
 (( trap5 > ok5 )) \
   && reproduced "sabit-hazır probe rollout'ta 5xx'i $ok5 → $trap5'e çıkardı — hazır olmayan pod trafik aldı"
 not_reproduced "fark ölçülemedi (rollout çok hızlı geçmiş olabilir; yükü artırıp tekrar dene)"

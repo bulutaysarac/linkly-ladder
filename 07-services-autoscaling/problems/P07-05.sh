@@ -7,14 +7,18 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
 on_cleanup "kubectl -n \"$NS\" scale deploy/redirect --replicas=2"
-on_cleanup "kubectl -n \"$NS\" set resources deploy/redirect --requests=cpu=150m"
+orig_lim=$(kubectl -n "$NS" get deploy redirect -o jsonpath='{.spec.template.spec.containers[0].resources.limits.cpu}' 2>/dev/null)
+on_cleanup "kubectl -n \"$NS\" set resources deploy/redirect --requests=cpu=150m --limits=cpu=${orig_lim:-300m}"
 step "Küme kapasitesi"
 kubectl get nodes -o custom-columns=NODE:.metadata.name,CPU:.status.allocatable.cpu,BELLEK:.status.allocatable.memory --no-headers | sed 's/^/    /'
 alloc=$(promq 'sum(kube_node_status_allocatable{resource="cpu"})')
 reqd=$(promq 'sum(kube_pod_container_resource_requests{resource="cpu"})')
 note "toplam ayrılabilir CPU=$(awk -v v="$alloc" 'BEGIN{printf "%.1f", v}') · şu an istenen=$(awk -v v="$reqd" 'BEGIN{printf "%.1f", v}')"
 step "İsteği büyüt ve çok replika iste — kapasiteyi kasıtlı olarak aş"
-kubectl -n "$NS" set resources deploy/redirect --requests=cpu=900m >/dev/null
+# LİMİTİ DE BÜYÜT: Kubernetes `requests > limits` olan bir pod'u REDDEDER. İlk hâlde yalnızca
+# request 900m'e çekiliyordu ve limit 300m olduğu için API isteği geri çeviriyordu; script
+# `set -e` ile ölüyor, deney hiç kurulmuyordu (HATA).
+kubectl -n "$NS" set resources deploy/redirect --requests=cpu=900m --limits=cpu=1 >/dev/null
 kubectl -n "$NS" scale deploy/redirect --replicas=10 >/dev/null
 sleep 45
 pending=$(kubectl -n "$NS" get pods -l "$APP_SELECTOR" --field-selector status.phase=Pending --no-headers 2>/dev/null | grep -c . || true)

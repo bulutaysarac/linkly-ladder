@@ -13,6 +13,14 @@ note "replika=$reps · farklı node=$nodes · dağılım kuralı: $(kubectl -n "
 need_confirm "bir worker node DONDURULACAK (docker pause) — deney sonunda çözülür"
 victim=$(kubectl -n "$NS" get pods -l "$APP_SELECTOR" -o jsonpath='{.items[0].spec.nodeName}')
 on_cleanup "docker unpause $victim"
+# ÖNCE TABAN: donma sırasındaki sayıyı neyle kıyaslayacağız? İlk koşuda 120 saniyede yalnızca
+# 13 istek tamamlandı ve 5xx=0 çıktı — script "etkisiz kaldı" dedi. Oysa asıl kanıt tam da oydu:
+# istekler ölü pod'lara yönlendirilip ASILI KALDI, yani 5xx üretmeden ÜRETKENLİK çöktü.
+# Bir arızanın işareti her zaman hata kodu değildir; bazen sadece "iş bitmiyor"dur.
+step "Taban: donma öncesi tamamlanan istek hızı"
+k6run redirect --vus 10 --duration 30s >/dev/null 2>&1 || true
+base_reqs=$(k6_reqs); base_rps=$(awk -v r="$base_reqs" 'BEGIN{printf "%.1f", r/30}')
+note "taban: $base_reqs istek / 30 sn = $base_rps istek/s"
 step "Node '$victim' donduruluyor — kubelet cevap veremeyecek"
 ( k6run redirect --vus 10 --duration 120s >/tmp/p0707.k6 2>&1 ) & kpid=$!
 sleep 12
@@ -28,13 +36,14 @@ docker unpause "$victim" >/dev/null
 wait $kpid || true
 e5=$(k6_5xx); reqs=$(k6_reqs)
 grafana_hint "09 · Autoscaling → 'Pod dağılımı / node' · 02 · App RED → 5xx"
-note "donma sırasında: $reqs istek, $e5 tanesi 5xx (hata oranı ~%$(awk -v a="$e5" -v b="$reqs" 'BEGIN{printf "%.1f", (b>0? a*100/b : 0)}'))"
+froz_rps=$(awk -v r="$reqs" 'BEGIN{printf "%.1f", r/120}')
+note "donma sırasında: $reqs istek / 120 sn = $froz_rps istek/s (tabanın %$(awk -v a="$froz_rps" -v b="$base_rps" 'BEGIN{printf "%.0f", (b>0? a*100/b : 0)}')'i) · 5xx=$e5"
 note "Kritik ayrıntı: donmuş node'daki pod'lar Endpoints'te KALDI (kubelet cevap vermiyor ama"
 note "API server pod'u hâlâ Ready sanıyor). Yani trafik ölü pod'lara gitmeye devam etti."
 note "Kubernetes'in düğüm arızasını fark etmesi dakikalar sürer: node-monitor-grace-period (40 sn)"
 note "+ pod eviction timeout (5 dk). Bu süre boyunca yedekliliğin İŞE YARAMAZ."
 note "Araçlar: ingress/servis seviyesinde aktif sağlık kontrolü + hızlı devre kesme (10),"
 note "topologySpread'i DoNotSchedule yapmak (ama kapasiteyi zorlar), PDB + çoklu node."
-{ (( nodes < reps )) || (( e5 > 0 )); } \
-  && reproduced "node donması $e5 isteği düşürdü (replikalar $nodes farklı node'da, $reps replika)"
-not_reproduced "node donması etkisiz kaldı (replikalar iyi dağılmış ve trafik yönlendirilmiş)"
+{ awk -v f="$froz_rps" -v b="$base_rps" 'BEGIN{exit !(b > 0 && f < b*0.5)}' || (( e5 > 0 )); } \
+  && reproduced "node donunca üretkenlik $base_rps → $froz_rps istek/s'e düştü ($e5 adet 5xx) — trafik ölü pod'lara gitmeye devam etti"
+not_reproduced "node donması ölçülebilir etki yaratmadı ($base_rps → $froz_rps istek/s, $e5 adet 5xx)"
