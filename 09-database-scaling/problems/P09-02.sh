@@ -7,7 +7,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 ensure_healthy
 step "Mevcut topoloji"
 kubectl -n "$NS" get pods -l cnpg.io/cluster=pg -L cnpg.io/instanceRole --no-headers 2>/dev/null | sed 's/^/    /'
-primary=$(kubectl -n "$NS" get pods -l 'cnpg.io/cluster=pg,cnpg.io/instanceRole=primary' -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+primary=$(dep_pod 'cnpg.io/cluster=pg,cnpg.io/instanceRole=primary') || exit 2   # CNPG rolü hazır değilse ölçüm anlamsız
 note "primary: ${primary:-bulunamadı}"
 [[ -z "$primary" ]] && { warn "CNPG primary bulunamadı"; exit 2; }
 need_confirm "primary pod silinecek (failover tetiklenecek)"
@@ -18,7 +18,9 @@ t0=$(date +%s)
 kubectl -n "$NS" delete pod "$primary" --wait=false >/dev/null
 newp=""
 for i in $(seq 1 60); do
-  newp=$(kubectl -n "$NS" get pods -l 'cnpg.io/cluster=pg,cnpg.io/instanceRole=primary' -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+  # BURADA dep_pod KULLANMA: failover sırasında primary rolü bir süre HİÇ YOK ve ölçmek
+  # istediğimiz şey tam olarak o boşluk. Bekleyen bir yardımcı, ölçtüğün olayı yutar.
+  newp=$(kubectl -n "$NS" get pods -l 'cnpg.io/cluster=pg,cnpg.io/instanceRole=primary' -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
   [[ -n "$newp" && "$newp" != "$primary" ]] && break
   sleep 2
 done

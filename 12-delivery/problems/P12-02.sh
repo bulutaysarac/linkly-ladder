@@ -6,7 +6,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # update, iki sürümün BİR ARADA yaşayacağını garanti eder.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
-prim=$(kubectl -n "$NS" get pods -l 'cnpg.io/cluster=pg,cnpg.io/instanceRole=primary' -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+prim=$(dep_pod 'cnpg.io/cluster=pg,cnpg.io/instanceRole=primary') || exit 2   # CNPG rolü hazır değilse ölçüm anlamsız
 psql() { kubectl -n "$NS" exec "$prim" -c postgres -- psql -U postgres -d linkly -tAc "$1" 2>&1; }
 on_cleanup "kubectl -n \"$NS\" exec $prim -c postgres -- psql -U postgres -d linkly -tAc \"ALTER TABLE links RENAME COLUMN url_old TO url\" >/dev/null 2>&1 || true"
 step "Şu anki şema (expand uygulanmış: hem url hem target_url var)"

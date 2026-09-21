@@ -5,8 +5,8 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # gereken bir satırı hâlâ okuyorsa çakışma olur ve Postgres SORGUYU İPTAL EDER. Yani replikaya
 # "okuma yükünü at" demek, uzun sorguların iptal edilebileceğini kabul etmektir.
 ensure_healthy
-pgpod=$(kubectl -n "$NS" get pods -l 'cnpg.io/cluster=pg,cnpg.io/instanceRole=replica' -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
-prim=$(kubectl -n "$NS" get pods -l 'cnpg.io/cluster=pg,cnpg.io/instanceRole=primary' -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+pgpod=$(dep_pod 'cnpg.io/cluster=pg,cnpg.io/instanceRole=replica') || exit 2   # CNPG rolü hazır değilse ölçüm anlamsız
+prim=$(dep_pod 'cnpg.io/cluster=pg,cnpg.io/instanceRole=primary') || exit 2   # CNPG rolü hazır değilse ölçüm anlamsız
 [[ -z "$pgpod" ]] && { warn "replika bulunamadı"; exit 2; }
 rpsql() { kubectl -n "$NS" exec "$pgpod" -c postgres -- psql -U postgres -d linkly -tAc "$1" 2>&1; }
 ppsql() { kubectl -n "$NS" exec "$prim"  -c postgres -- psql -U postgres -d linkly -tAc "$1" 2>&1; }

@@ -4,7 +4,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # Uygulama seviyesindeki filtreler, biri WHERE'i unutana kadar doğrudur. O hata HİÇBİR HATA
 # ÜRETMEZ: yalnızca başkalarının verisi yanıta girer. Katmanlı savunma tam da bunun içindir.
 ensure_healthy
-prim=$(kubectl -n "$NS" get pods -l 'cnpg.io/cluster=pg,cnpg.io/instanceRole=primary' -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+prim=$(dep_pod 'cnpg.io/cluster=pg,cnpg.io/instanceRole=primary') || exit 2   # CNPG rolü hazır değilse ölçüm anlamsız
 psql() { kubectl -n "$NS" exec "$prim" -c postgres -- psql -U postgres -d linkly -tAc "$1" 2>&1; }
 step "RLS etkin mi?"
 rls=$(psql "SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE relname='links'")

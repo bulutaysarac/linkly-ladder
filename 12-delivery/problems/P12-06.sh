@@ -6,7 +6,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # İLERİ bir işlemdir (yeni bir migration) ve veri kaybettirebilir.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
-prim=$(kubectl -n "$NS" get pods -l 'cnpg.io/cluster=pg,cnpg.io/instanceRole=primary' -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+prim=$(dep_pod 'cnpg.io/cluster=pg,cnpg.io/instanceRole=primary') || exit 2   # CNPG rolü hazır değilse ölçüm anlamsız
 psql() { kubectl -n "$NS" exec "$prim" -c postgres -- psql -U postgres -d linkly -tAc "$1" 2>/dev/null; }
 step "Şema sürümü ve uygulama sürümü ayrı ayrı izleniyor mu?"
 dbver=$(psql "SELECT max(version_id) FROM goose_db_version")

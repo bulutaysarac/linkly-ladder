@@ -5,7 +5,8 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # yedekleme yapabiliyor. Bu script yedeğin VAR OLDUĞUNU değil, GERİ YÜKLENEBİLİR olduğunu sorar:
 # test edilmemiş bir yedek, yedek değildir.
 ensure_healthy
-prim=$(kubectl -n "$NS" get pods -l 'cnpg.io/cluster=pg,cnpg.io/instanceRole=primary' -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+prim=$(dep_pod 'cnpg.io/cluster=pg,cnpg.io/instanceRole=primary') || exit 2   # CNPG rolü hazır değilse ölçüm anlamsız
+repl=$(dep_pod 'cnpg.io/cluster=pg,cnpg.io/instanceRole=replica') || exit 2
 psql() { kubectl -n "$NS" exec "$prim" -c postgres -- psql -U postgres -d linkly -tAc "$1" 2>/dev/null; }
 step "Yedekleme yapılandırması var mı?"
 backup=$(kubectl -n "$NS" get cluster pg -o jsonpath='{.spec.backup}' 2>/dev/null)
@@ -22,11 +23,11 @@ note "mevcut WAL LSN=${lsn:-?} · wal_keep_size=${walkeep:-?}"
 step "Replikalar bir yedek DEĞİLDİR: silmeyi de replike ederler"
 code=$(create_link "https://example.com/oops")
 sleep 3
-before_r=$(kubectl -n "$NS" exec "$(kubectl -n "$NS" get pods -l 'cnpg.io/cluster=pg,cnpg.io/instanceRole=replica' -o jsonpath='{.items[0].metadata.name}')" -c postgres -- psql -U postgres -d linkly -tAc "SELECT count(*) FROM links WHERE code='$code'" 2>/dev/null)
+before_r=$(kubectl -n "$NS" exec "$repl" -c postgres -- psql -U postgres -d linkly -tAc "SELECT count(*) FROM links WHERE code='$code'" 2>/dev/null)
 need_confirm "test linki silinecek (yalnızca bu satır)"
 psql "DELETE FROM links WHERE code='$code'" >/dev/null
 sleep 3
-after_r=$(kubectl -n "$NS" exec "$(kubectl -n "$NS" get pods -l 'cnpg.io/cluster=pg,cnpg.io/instanceRole=replica' -o jsonpath='{.items[0].metadata.name}')" -c postgres -- psql -U postgres -d linkly -tAc "SELECT count(*) FROM links WHERE code='$code'" 2>/dev/null)
+after_r=$(kubectl -n "$NS" exec "$repl" -c postgres -- psql -U postgres -d linkly -tAc "SELECT count(*) FROM links WHERE code='$code'" 2>/dev/null)
 grafana_hint "05 · Postgres → replication lag"
 note "silme öncesi replikada: ${before_r:-?} satır · silme sonrası: ${after_r:-?} satır"
 note "Replikasyon bir YEDEK DEĞİLDİR: hatanı da saniyeler içinde kopyalar."
