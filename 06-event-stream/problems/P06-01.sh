@@ -20,12 +20,17 @@ N=${N:-2000}
 before=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0')
 clicks "$code" "$N" 20
 note "$N tıklama üretildi, hepsi topic'te bekliyor (tüketici kapalı)"
-# PENCEREYİ GÖRÜNÜR YAP: tekrar teslim, "yazdım ama henüz commit etmedim" aralığında öldürülürse
-# olur. Bu aralık normalde milisaniyelerdir — tüketici partiyi yazıp hemen commit eder ve ne kadar
-# öldürürsen öldür o aralığa denk gelmezsin (ilk ölçümde duplicate=0 çıktı). Postgres'e gecikme
-# enjekte edince yazma saniyeler sürüyor ve aralık ölçülebilir genişliğe geliyor.
-# P03-05 ile aynı ders: bir yarışın penceresi, onu besleyen işlemin süresidir.
-chaos_apply pg-delay-2s
+# PENCEREYİ GÖRÜNÜR YAP — ve DOĞRU pencereyi seç.
+# Tekrar teslim, "veritabanına YAZDIM ama offset'i henüz COMMIT ETMEDİM" aralığında öldürülürse
+# olur. Bu aralık normalde milisaniyelerdir.
+# İlk hâl POSTGRES'i geciktiriyordu (pg-delay-2s). O, pencereyi yazmanın ÖNCESİNDE genişletir:
+# orada öldürürsen işlem GERİ ALINIR, hiçbir şey uygulanmamıştır, tekrar teslim onu İLK KEZ
+# uygular ve gözlenecek bir duplicate olmaz — ölçüm tam olarak bu yüzden hep 0 çıkıyordu.
+# Önemli olan pencere offset commit'idir, yani yavaşlatılacak şey BROKER'dır.
+# P03-05 ile aynı ders bir adım ileri: bir yarışın penceresi onu besleyen işlemin süresidir ve
+# hangi işlemin beslediğini yanlış bilirsen, kusursuz koşan ama etkiyi GÖSTEREMEYEN bir deney
+# elde edersin.
+chaos_apply redpanda-delay-2s
 step "Tüketiciyi aç ve birikimi işlerken ÖLDÜR — commit edilmemiş partiler yeniden teslim edilecek"
 kubectl -n "$NS" scale deploy/$CONSUMER --replicas=1 >/dev/null
 # Öldürmeden ÖNCE işlemeye zaman ver: sert öldürülen tüketicinin grubu yeniden dengelemesi
