@@ -94,5 +94,21 @@ func (m *Metrics) ObserveRequest(route, method, code, shortCode string) {
 }
 
 func (m *Metrics) Handler() http.Handler {
-	return promhttp.HandlerFor(m.reg, promhttp.HandlerOpts{Registry: m.reg})
+	// EnableOpenMetrics: EXEMPLAR'LARIN TEK KAPISI.
+	// EN: The code above carefully attaches a trace_id exemplar to every histogram observation.
+	//     With this flag false — the default — promhttp serves the classic text format, which has
+	//     no place to put an exemplar, so every one of them is silently dropped at the door.
+	//     Prometheus then stores no exemplars, /api/v1/query_exemplars returns nothing, and
+	//     P11-01's "jump from the metric to the trace" step reported "no exemplar found" while
+	//     both sides of the bridge were fully implemented. A feature that is built, wired and
+	//     then dropped by a serialization default is indistinguishable from a feature nobody wrote.
+	// TR: Yukarıdaki kod her histogram gözlemine özenle bir trace_id exemplar'ı iliştiriyor.
+	//     Bu bayrak false iken — ki VARSAYILAN budur — promhttp klasik metin formatını servis
+	//     eder; o formatta exemplar'ı koyacak yer YOKTUR, yani hepsi kapıda sessizce düşer.
+	//     Prometheus hiç exemplar saklamaz, /api/v1/query_exemplars boş döner ve P11-01'in
+	//     "metrikten trace'e atla" adımı, köprünün İKİ UCU DA yazılmışken "exemplar bulunamadı"
+	//     der. Yazılmış, bağlanmış ve bir serileştirme varsayılanı yüzünden düşen bir özellik,
+	//     hiç yazılmamış bir özellikten ayırt edilemez.
+	// [Topic · Konu: Exemplar, OpenMetrics, sessiz varsayılanlar]
+	return promhttp.HandlerFor(m.reg, promhttp.HandlerOpts{Registry: m.reg, EnableOpenMetrics: true})
 }
