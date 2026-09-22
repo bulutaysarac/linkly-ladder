@@ -206,6 +206,13 @@ kendini yokluyor.
 **Eksik kalanlar:** imaj tarama (Trivy) · imza (cosign) + `verifyImages` politikası · SBOM ·
 base imaj güncelleme otomasyonu.
 
+> **Bu bölüm bir süre YANLIŞTI.** Yukarıdaki `readOnlyRootFilesystem: true` / `drop ALL` /
+> non-root satırları README'de yazıyordu ama manifest'lerde `securityContext` **hiç yoktu**.
+> Scripti koşan fark etti: P13-08 `NOT-REPRODUCED` dedi ve haklıydı. Belgeyi kodla değil,
+> **ölçümle** doğrula — README bir iddiadır, `kubectl get pod -o jsonpath` bir kanıttır.
+> ("İmaj nonroot koşuyor" imaj hakkında bir iddiadır; `runAsNonRoot` API sunucusunun
+> kontrol ettiği bir iddiadır — ikisi aynı şey değil.)
+
 ## 7. Seviye içi alıştırmalar (TRAP_ bayrakları)
 
 | Bayrak | Ne yapar | Reproduce | Düzeltme |
