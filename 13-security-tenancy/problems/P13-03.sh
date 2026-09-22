@@ -27,8 +27,23 @@ ov='{"spec":{"containers":[{"name":"netcheck","image":"busybox:1.36","command":[
 out=$(kubectl -n "$NS" run netcheck --image=busybox:1.36 --restart=Never --timeout=90s \
       --overrides="$ov" 2>&1) || true
 printf '%s' "$out" | grep -qi 'denied\|blocked' && { warn "test pod'u admission tarafından reddedildi: $(printf '%s' "$out" | head -c 200)"; exit 2; }
-sleep 12
+# SABİT BEKLEME YERİNE POD'UN BİTMESİNİ BEKLE.
+# EN: the first version slept 12s and read the logs. On a busy node the image pull alone can take
+#     longer, so the logs came back EMPTY and the verdict read that as "the unauthorised pod
+#     reached the database" — the exact opposite of what happened. An empty measurement is not a
+#     negative measurement; wait for the thing you are measuring to actually finish.
+# TR: ilk hâl 12 sn uyuyup log'u okuyordu. Yoğun bir node'da yalnızca imaj çekme bile daha uzun
+#     sürebiliyor, log BOŞ dönüyor ve karar bunu "yetkisiz pod veritabanına ulaştı" diye okuyordu
+#     — olanın tam tersi. Boş bir ölçüm, OLUMSUZ bir ölçüm değildir; ölçtüğün şeyin gerçekten
+#     bitmesini bekle.
+logs=""
+for _ in $(seq 1 45); do
+  ph=$(kubectl -n "$NS" get pod netcheck -o jsonpath='{.status.phase}' 2>/dev/null) || true
+  case "${ph:-}" in Succeeded|Failed) break ;; esac
+  sleep 2
+done
 logs=$(kubectl -n "$NS" logs netcheck 2>/dev/null) || true
+[[ -z "${logs:-}" ]] && { warn "netcheck pod'u çıktı üretmedi (faz: ${ph:-yok}) — ölçüm yapılamadı"; exit 2; }
 kubectl -n "$NS" delete pod netcheck --ignore-not-found --wait=false >/dev/null 2>&1
 note "yetkisiz pod'dan sonuç:"; echo "${logs:-<log alınamadı>}" | sed 's/^/      /'
 step "Yetkili bir pod (redirect) aynı şeyi yapabiliyor mu?"
