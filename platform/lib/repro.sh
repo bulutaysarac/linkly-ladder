@@ -58,7 +58,18 @@ promq() {
     rm -f "$err"; echo 0; return 0
   fi
   rm -f "$err"
-  printf '%s' "$out" | jq -r '.data.result[0].value[1] // "0"'
+  # NaN/Inf TEK YERDE ETKİSİZLEŞTİRİLİR.
+  # EN: `histogram_quantile` over an empty window returns the string "NaN", and a histogram with
+  #     an open top bucket can return "+Inf". Passed to awk these are not numbers: BSD awk reads
+  #     them as 0 (so every comparison quietly fails), while gawk keeps them as STRINGS and
+  #     "NaN" > "0" is TRUE lexicographically — the same script would reach opposite verdicts on
+  #     macOS and Linux. 190 call sites cannot each remember this; normalise at the source.
+  # TR: boş pencerede `histogram_quantile` "NaN" döner, üst kovası açık bir histogram "+Inf"
+  #     dönebilir. awk'a verildiğinde bunlar sayı değildir: BSD awk 0 okur (her karşılaştırma
+  #     sessizce yanlış olur), gawk ise METİN olarak tutar ve "NaN" > "0" sözlük sırasına göre
+  #     DOĞRUdur — aynı script macOS'ta ve Linux'ta ZIT hükümlere varır. 190 çağrı yerinin her
+  #     biri bunu hatırlayamaz; kaynağında normalleştir.
+  num "$(printf '%s' "$out" | jq -r '.data.result[0].value[1] // "0"')"
 }
 # Sorgu hiç seri döndürmüyor mu? (metrik yok)
 prom_absent() {
