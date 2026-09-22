@@ -61,6 +61,11 @@ note "'Tam bir kez' pazarlama terimidir; gerçekte en-az-bir-kez + idempotent ya
 # TR: "b >= a", hiçbir şey ölçülmediğinde de doğrudur (0 >= 0). Yani başarısız bir ölçüm, GEÇEN
 #     bir deneye dönüşür — mümkün olan en gürültülü yanlış pozitif, çünkü kanıt gibi görünür.
 #     Karşılaştırmayı "gerçekten bir şey ölçtük mü?" koşuluyla koru.
-awk -v d="$def" -v t="$trap_res" 'BEGIN{exit !(d > 0 && d >= t)}' \
+#     Aynı sebeple "d >= t" de yetmez: def==trap iken İKİ MOD ARASINDA FARK YOKTUR, oysa
+#     hüküm "commit noktası teslimat garantisini belirliyor" diyor. Farkı iddia ediyorsan farkı ölç.
+# EN: for the same reason "d >= t" is not enough either: when def==trap there is NO difference
+#     between the modes, yet the verdict claims the commit point decides the guarantee. If you
+#     assert a difference, measure a difference — require t < d, not t <= d.
+awk -v d="$def" -v t="$trap_res" 'BEGIN{exit !(d > 0 && t < d)}' \
   && reproduced "yaz→commit $def, commit→yaz $trap_res (üretilen ${N:-2000}) — commit noktası teslimat garantisini belirliyor"
 not_reproduced "iki mod arasında fark ölçülemedi (N'i artırıp tekrar dene)"

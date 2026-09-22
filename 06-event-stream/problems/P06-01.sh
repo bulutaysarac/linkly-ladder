@@ -31,6 +31,18 @@ note "$N tıklama üretildi, hepsi topic'te bekliyor (tüketici kapalı)"
 # hangi işlemin beslediğini yanlış bilirsen, kusursuz koşan ama etkiyi GÖSTEREMEYEN bir deney
 # elde edersin.
 chaos_apply redpanda-delay
+# ÖLÇÜM PENCERESİ DENEYİN KENDİSİ KADAR OLMALI.
+# EN: the first version queried `increase(...[10m])`. verify-prev had just replayed level 05's
+#     scripts into this very namespace, so the 10-minute window contained ~50k records that had
+#     nothing to do with this experiment — `ok=50460` looked like a healthy consumer while the
+#     consumer had in fact processed ZERO records of our backlog. A window wider than the
+#     experiment measures the neighbours, not the experiment.
+# TR: ilk hâli `increase(...[10m])` soruyordu. verify-prev hemen öncesinde 05'in scriptlerini
+#     AYNI namespace'e koşmuştu; yani 10 dakikalık pencerede bu deneyle ilgisi olmayan ~50 bin
+#     kayıt vardı — `ok=50460` sağlıklı bir tüketici gibi görünüyordu, oysa tüketici bizim
+#     birikimimizden SIFIR kayıt işlemişti. Deneyden geniş bir pencere, deneyi değil
+#     KOMŞULARINI ölçer.
+T0=$(date +%s)
 step "Tüketiciyi aç ve birikimi işlerken ÖLDÜR — commit edilmemiş partiler yeniden teslim edilecek"
 kubectl -n "$NS" scale "$(wl $CONSUMER)" --replicas=1 >/dev/null
 # Öldürmeden ÖNCE işlemeye zaman ver: sert öldürülen tüketicinin grubu yeniden dengelemesi
@@ -51,8 +63,9 @@ for _ in $(seq 1 60); do
 done
 after=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0') || true
 counted=$(( after - before ))
-dup=$(promq "sum(increase(consumer_records_total{namespace=\"$NS\",result=\"duplicate\"}[10m]))")
-ok=$(promq "sum(increase(consumer_records_total{namespace=\"$NS\",result=\"ok\"}[10m]))")
+WIN=$(( $(date +%s) - T0 + 30 ))   # deney süresi + scrape payı
+dup=$(promq "sum(increase(consumer_records_total{namespace=\"$NS\",result=\"duplicate\"}[${WIN}s]))")
+ok=$(promq "sum(increase(consumer_records_total{namespace=\"$NS\",result=\"ok\"}[${WIN}s]))")
 grafana_hint "08 · Stream → 'consumer records by result' (duplicate) · 07 · Analytics → tıklama farkı"
 note "üretilen: $N · sayılan: $counted · tüketici ok=${ok%%.*} duplicate=${dup%%.*}"
 note "duplicate>0 demek: aynı olay birden fazla teslim edildi ve İDEMPOTENCY onu yuttu."
@@ -60,6 +73,22 @@ note "Sayım $N'e yakınsa 'tam bir kez ETKİ' çalışıyor: en-az-bir-kez tesl
 note "Ters uç için: setenv "$(wl $CONSUMER)" TRAP_COMMIT_BEFORE_WRITE=true"
 note "  → commit yazmadan önce yapılır; tüketici ölürse o kayıtlar bir daha GELMEZ (veri kaybı)."
 note "Dağıtık sistemlerde 'tam bir kez teslimat' yoktur; olan şey en-az-bir-kez + idempotency'dir."
+# DENEY HİÇ ÇALIŞMADIYSA HÜKÜM VERME.
+# EN: if the consumer processed nothing in the window, the redelivery we are looking for could
+#     not have happened — reporting NOT-REPRODUCED would read as "the system is fine" when the
+#     truth is "we never ran the experiment". Fail loudly instead; a missing measurement is not
+#     a green result. (This is exactly how the 2s delay hid itself: it stopped the consumer dead
+#     and the script called that a clean run.)
+# TR: tüketici pencere boyunca hiçbir kayıt işlemediyse aradığımız tekrar teslim OLAMAZDI —
+#     NOT-REPRODUCED demek "sistem sağlam" diye okunur, oysa gerçek "deneyi hiç koşmadık".
+#     Yüksek sesle hata ver; EKSİK ÖLÇÜM yeşil bir sonuç değildir. (2 sn'lik gecikme tam olarak
+#     böyle saklanmıştı: tüketiciyi tamamen durdurmuştu, script de buna temiz koşu demişti.)
+if awk -v o="${ok%%.*}" 'BEGIN{exit !(o+0==0)}'; then
+  warn "ölçüm yapılamadı: tüketici ${WIN}s'lik pencerede TEK KAYIT işlemedi (sayılan=$counted)."
+  warn "Broker gecikmesi tüketiciyi yavaşlatmak yerine DURDURMUŞ olabilir; platform/chaos/redpanda-delay.yaml"
+  warn "içindeki latency'yi düşür ve tekrar dene. Bu bir NOT-REPRODUCED değil, EKSİK ÖLÇÜMdür."
+  exit 2
+fi
 awk -v d="${dup%%.*}" 'BEGIN{exit !(d>0)}' \
   && reproduced "${dup%%.*} olay tekrar teslim edildi ve çift sayılmadı (sayım $counted/$N) — en az bir kez + idempotency"
 not_reproduced "tekrar teslim gözlenmedi (tüketici partiyi tamamlamış olabilir; N'i artırıp tekrar dene)"
