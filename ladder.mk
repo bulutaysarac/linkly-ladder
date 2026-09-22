@@ -50,12 +50,16 @@ deploy: ## kubectl apply -k deploy/ (IMAGE_TAG yerine gerçek tag)
 	@# Önceki `make down` namespace silmeyi ARKA PLANDA bırakır (--wait=false). Hemen ardından
 	@# `make up` çağırmak "namespace is being terminated" ile düşer: deneyin kendi temizliği bir
 	@# sonraki kurulumu devirir. Sil → bekle → kur sırasını burada garanti altına al.
-	@for i in $$(seq 1 90); do \
-	  ph=$$(kubectl get ns $(NS) -o jsonpath='{.status.phase}' 2>/dev/null); \
-	  [ "$$ph" = "Terminating" ] || break; \
-	  [ $$i = 1 ] && echo "  $(NS) siliniyor, bitmesi bekleniyor..."; \
-	  sleep 2; \
+	@# Namespace TAMAMEN gitmiş olmalı. Yalnızca "Terminating değil" demek yetmiyor: silme
+	@# finalize olurken namespace bir an için sorgulanamaz hâle geliyor, apply namespace'i
+	@# yeniden yaratıyor ve ardından eski silme işlemi onu TEKRAR siliyor — CNPG o pencerede
+	@# "namespace is being terminated" diyerek Cluster'ı kuramıyor (14 gece turunda böyle düştü).
+	@for i in $$(seq 1 120); do \
+	  ph=$$(kubectl get ns $(NS) -o jsonpath='{.status.phase}' 2>/dev/null || echo YOK); \
+	  case "$$ph" in Terminating) [ $$i = 1 ] && echo "  $(NS) siliniyor, bitmesi bekleniyor..."; sleep 3;; *) break;; esac; \
 	done
+	@# Silme bittiyse bir an bekle: API sunucusunun garbage collector'ı arkadan geliyor.
+	@sleep 3
 	@# Tek seferlik Job'lar (migrate, topics) IMMUTABLE: namespace ayakta kalmışsa ve imaj etiketi
 	@# değiştiyse `apply` "field is immutable" ile düşer ve seviye hiç kurulamaz. Bunlar zaten
 	@# bir kez koşup biten işler; yeniden uygulamadan ÖNCE sil.
