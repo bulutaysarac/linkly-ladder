@@ -11,7 +11,7 @@ on_cleanup "$LADDER_ROOT/platform/lib/chaos.sh delete redis-delay-200ms; $LADDER
 step "Taban: her şey sağlıklıyken"
 k6run mixed --vus 20 --duration 30s >/dev/null 2>&1 || true
 sleep 10
-base_p99=$(num "$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le))")")
+base_p99=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le))")
 note "taban p99=$(awk -v v="$base_p99" 'BEGIN{printf "%.0f", v*1000}') ms"
 step "GAME DAY başlıyor: üç arıza üst üste"
 ( k6run mixed --vus 25 --duration 150s >/tmp/p1405.k6 2>&1 ) & kpid=$!

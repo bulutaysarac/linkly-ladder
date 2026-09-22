@@ -13,7 +13,7 @@ note "kaydedilen tıklama: $clicks / 300"
 step "Yazma, okuma yolunun İÇİNDE mi? Hot key ile p99'a bak"
 k6run hot-key --vus 50 --duration 30s >/dev/null 2>&1 || true
 sleep 12
-p99=$(num "$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le))")")
+p99=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le))")
 note "hot-key yükünde redirect p99: $(awk -v v="$p99" 'BEGIN{printf "%.1f", v*1000}') ms"
 step "Pod'u yeniden başlat: sayaç hayatta kalıyor mu?"
 need_confirm "pod yeniden başlatılacak"

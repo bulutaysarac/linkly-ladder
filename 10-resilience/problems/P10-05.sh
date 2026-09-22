@@ -16,7 +16,7 @@ k6run redirect --vus 30 --duration 45s >/dev/null 2>&1 || true
 sleep 10
 g_on=$(promq "max_over_time(sum(go_goroutines{namespace=\"$NS\",pod=~\"redirect.*\"})[3m:15s])")
 m_on=$(peak_working_set_mb 4m)
-p99_on=$(num "$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\"}[2m])) by (le))")")
+p99_on=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\"}[2m])) by (le))")
 e5_on=$(k6_5xx)
 note "timeout var: tepe goroutine=${g_on%%.*} · tepe bellek=${m_on}MB · p99=$(awk -v v="$p99_on" 'BEGIN{printf "%.0f", v*1000}') ms · 5xx=$e5_on"
 step "(2) TRAP_NO_DEP_TIMEOUT: bağımlılık timeout'u yok"
@@ -27,7 +27,7 @@ k6run redirect --vus 30 --duration 45s >/dev/null 2>&1 || true
 sleep 10
 g_off=$(promq "max_over_time(sum(go_goroutines{namespace=\"$NS\",pod=~\"redirect.*\"})[3m:15s])")
 m_off=$(peak_working_set_mb 4m)
-p99_off=$(num "$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\"}[2m])) by (le))")")
+p99_off=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\"}[2m])) by (le))")
 restarts=$(restarts)
 grafana_hint "01 · Pods → 'Goroutine' + 'Bellek working set' · 11 · Resilience → 'in-flight by pod'"
 note "timeout yok: tepe goroutine=${g_off%%.*} · tepe bellek=${m_off}MB · p99=$(awk -v v="$p99_off" 'BEGIN{printf "%.0f", v*1000}') ms · restart=$restarts"

@@ -41,14 +41,14 @@ phase_load() {   # $1 = "keys" ise yükün ortasında /debug/keys çağrılır
   wait_pid_quiet "$kpid"
   sleep 20                       # son kazıma yükün tamamını kapsasın
   dur=$(( $(date +%s) - t0 ))
-  PHASE_P99=$(num "$(promq "max_over_time(histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[30s])) by (le))[${dur}s:15s])")")
+  PHASE_P99=$(promq "max_over_time(histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[30s])) by (le))[${dur}s:15s])")
 }
 step "(1) TABAN: aynı yük, KEYS çağrısı YOK"
 phase_load; base_max=$PHASE_P99
 note "taban tepe p99=$(awk -v v="$base_max" 'BEGIN{printf "%.0f", v*1000}') ms"
 step "(2) Aynı yükün ortasında /debug/keys (KEYS *) çağır"
 phase_load keys; maxp99=$PHASE_P99
-p99=$(num "$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le))")")
+p99=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le))")
 grafana_hint "06 · Redis → 'commands by type' (KEYS görünürse alarm) + 'App → Redis latency p99'"
 note "KEYS fazı: p99=$(awk -v v="$p99" 'BEGIN{printf "%.0f", v*1000}') ms · pencere içi TEPE p99=$(awk -v v="$maxp99" 'BEGIN{printf "%.0f", v*1000}') ms (taban tepe $(awk -v v="$base_max" 'BEGIN{printf "%.0f", v*1000}') ms)"
 note "KEYS'in süresi anahtar sayısıyla doğru orantılı: ${keys:-?} anahtarda milisaniyeler,"

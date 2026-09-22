@@ -38,7 +38,7 @@ run_phase() {
   PH_REACH=$(awk -v a="$all" -v o="$open" 'BEGIN{d=a-o; printf "%d", (d<0?0:d)}')
   PH_REQS=$(promq "sum(increase(http_requests_total{namespace=\"$NS\"}[${dur}s]))")
   PH_REQS=${PH_REQS%%.*}
-  PH_P99=$(num "$(promq "max_over_time(histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\"}[30s])) by (le))[${dur}s:15s])")")
+  PH_P99=$(promq "max_over_time(histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\"}[30s])) by (le))[${dur}s:15s])")
 }
 step "(1) Devre kesici AÇIK (varsayılan)"
 run_phase

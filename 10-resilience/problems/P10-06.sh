@@ -14,7 +14,7 @@ run_overload() {
   sleep 10
   # Kabul edilen isteklerin p99'u (503'ler hariç) — asıl bakılacak sayı bu.
   local p99 shed
-  p99=$(num "$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",code!=\"503\"}[2m])) by (le))")")
+  p99=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",code!=\"503\"}[2m])) by (le))")
   shed=$(promq "sum(increase(load_shed_total{namespace=\"$NS\"}[4m]))")
   echo "$p99 ${shed%%.*}"
 }

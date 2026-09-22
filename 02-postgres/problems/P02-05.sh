@@ -28,7 +28,7 @@ step "API üzerinden list — kullanıcının hissettiği süre"
 t=$(curl -s -o /dev/null -w '%{time_total}' -H 'X-Tenant-ID: acme' "$BASE_URL/api/links")
 sleep 12
 seq_after=$(promq "sum(pg_stat_user_tables_seq_scan{namespace=\"$NS\",relname=\"links\"})")
-listp99=$(num "$(promq "histogram_quantile(0.99, sum(rate(db_query_duration_seconds_bucket{namespace=\"$NS\",op=\"list\"}[5m])) by (le))")")
+listp99=$(promq "histogram_quantile(0.99, sum(rate(db_query_duration_seconds_bucket{namespace=\"$NS\",op=\"list\"}[5m])) by (le))")
 grafana_hint "05 · Postgres → 'seq scan / idx scan' · 'DB query p99 by op' (op=list)"
 note "GET /api/links süresi: ${t}s · list p99: $(awk -v v="$listp99" 'BEGIN{printf "%.0f", v*1000}') ms · seq_scan sayacı: ${seq_before%%.*} → ${seq_after%%.*}"
 note "ÇÖZÜM (002 migration, CONCURRENTLY):"

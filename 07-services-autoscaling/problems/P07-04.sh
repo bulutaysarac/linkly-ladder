@@ -44,7 +44,7 @@ kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=180s >/dev/null 2>&1 
 wait_endpoints 1; sleep 5
 k6run redirect --vus 120 --duration 60s >/dev/null 2>&1 || true
 sleep 15
-tight_p99=$(num "$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[1m])) by (le))")")
+tight_p99=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[1m])) by (le))")
 tight_cpu=$(promq "sum(rate(container_cpu_usage_seconds_total{namespace=\"$NS\",pod=~\"redirect.*\",image!=\"\",image!~\".*pause.*\"}[1m]))")
 tight_thr=$(promq "sum(rate(container_cpu_cfs_throttled_seconds_total{namespace=\"$NS\",pod=~\"redirect.*\"}[1m]))")
 note "limitli: p99=$(awk -v v="$tight_p99" 'BEGIN{printf "%.0f", v*1000}') ms · CPU=$(awk -v v="$tight_cpu" 'BEGIN{printf "%.2f", v}') çekirdek · throttle=$(awk -v v="$tight_thr" 'BEGIN{printf "%.2f", v}') s/s"
@@ -77,7 +77,7 @@ kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=180s >/dev/null 2>&1 
 wait_endpoints 1; sleep 5
 k6run redirect --vus 120 --duration 60s >/dev/null 2>&1 || true
 sleep 15
-free_p99=$(num "$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[1m])) by (le))")")
+free_p99=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[1m])) by (le))")
 free_cpu=$(promq "sum(rate(container_cpu_usage_seconds_total{namespace=\"$NS\",pod=~\"redirect.*\",image!=\"\",image!~\".*pause.*\"}[1m]))")
 grafana_hint "01 · Pods & Resources → 'CPU throttling (s/s)' (bu ortamda BOŞ) + 'CPU kullanımı' · 02 · App RED → p99"
 note "limitsiz: p99=$(awk -v v="$free_p99" 'BEGIN{printf "%.0f", v*1000}') ms · CPU=$(awk -v v="$free_cpu" 'BEGIN{printf "%.2f", v}') çekirdek"

@@ -18,8 +18,8 @@ dball=$(promq "sum(rate(db_queries_total{namespace=\"$NS\"}[2m]))")
 httprps=$(promq "sum(rate(http_requests_total{namespace=\"$NS\",route=\"/{code}\"}[2m]))")
 ratio=$(awk -v a="$dbqps" -v b="$httprps" 'BEGIN{printf "%.1f", (b>0? a/b : 0)}')
 pgcpu=$(promq "sum(rate(container_cpu_usage_seconds_total{namespace=\"$NS\",pod=~\"postgres.*\",image!=\"\",image!~\".*pause.*\"}[2m]))")
-p99=$(num "$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le))")")
-getp99=$(num "$(promq "histogram_quantile(0.99, sum(rate(db_query_duration_seconds_bucket{namespace=\"$NS\",op=\"get\"}[2m])) by (le))")")
+p99=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le))")
+getp99=$(promq "histogram_quantile(0.99, sum(rate(db_query_duration_seconds_bucket{namespace=\"$NS\",op=\"get\"}[2m])) by (le))")
 grafana_hint "05 · Postgres → 'DB queries by op' + 'DB CPU' · 02 · App RED → 'p99 by route'"
 note "HTTP redirect/s: ${httprps%%.*} · DB OKUMA/s: ${dbqps%%.*} → istek başına ~${ratio} okuma"
 note "(tüm DB sorguları: ${dball%%.*}/s — okuma + tıklama UPDATE'i; UPDATE 05'te kalkacak)"

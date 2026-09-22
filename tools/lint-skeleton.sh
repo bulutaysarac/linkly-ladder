@@ -163,5 +163,26 @@ for f in "$D"/cmd/*/main.go; do
   grep -q 'SetRedis(' "$f" || err "$(basename "$(dirname "$f")")/main.go: redis.NewClient var ama api.SetRedis çağrılmıyor — Redis'e bağlı tuzaklar sessizce ölü"
 done
 
+# 13. İÇ İÇE TIRNAKLI KOMUT İKAMESİ SORGUYU SESSİZCE BOZAR.
+# EN: `num "$(promq "...{namespace=\"$NS\",code!=\"503\"}...")"` does NOT pass what it looks like.
+#     Inside `"$( ... )"` the inner `\"` escapes end the inner quoting, the `{a,b}` is left
+#     unquoted and bash BRACE-EXPANDS it: the braces disappear and the selector is cut in half.
+#     Prometheus then answers `parse error: unexpected "=" in aggregation`, `promq` returns 0 and
+#     the experiment compares zeros — P10-06 printed "p99=0 ms" for BOTH phases and P07-03 built a
+#     verdict on a baseline of zero. 45 call sites in 26 files were affected. Call it plainly:
+#     `x=$(promq "...")` — promq already normalises NaN/Inf, so the `num` wrapper is redundant.
+# TR: `num "$(promq "...")"` göründüğü şeyi GEÇİRMEZ. `"$( ... )"` içinde iç `\"` kaçışları iç
+#     tırnaklamayı bitirir, `{a,b}` tırnaksız kalır ve bash onu SÜSLÜ PARANTEZ GENİŞLETMESİne
+#     sokar: parantezler kaybolur, seçici ikiye bölünür. Prometheus `parse error` der, `promq` 0
+#     döndürür ve deney sıfırları karşılaştırır — P10-06 iki fazda da "p99=0 ms" bastı, P07-03
+#     hükmünü sıfır bir tabanın üstüne kurdu. 26 dosyada 45 çağrı etkilenmişti. Düz çağır:
+#     `x=$(promq "...")` — promq zaten NaN/Inf normalleştiriyor, `num` sarmalayıcısı gereksiz.
+for f in "$D"/problems/P*.sh; do
+  [[ -e "$f" ]] || continue
+  if grep -Fq '"$(promq "' "$f"; then
+    err "$(basename "$f"): iç içe tırnaklı \$(promq ...) — süslü parantezler genişler, sorgu bozulur"
+  fi
+done
+
 [[ $fail == 0 ]] && echo "  ✔ $name iskelet OK"
 exit $fail

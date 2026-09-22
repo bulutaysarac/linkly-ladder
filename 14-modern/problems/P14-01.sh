@@ -26,8 +26,8 @@ measure() {
   HOT_SHARE=0.9 k6run hot-key --vus 40 --duration 40s >/dev/null 2>&1 || true
   sleep 12
   local p50 p99 redisops
-  p50=$(num "$(promq "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le))")")
-  p99=$(num "$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le))")")
+  p50=$(promq "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le))")
+  p99=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le))")
   redisops=$(promq "sum(rate(redis_commands_processed_total{namespace=\"$NS\"}[2m]))")
   echo "$p50 $p99 $redisops"
 }

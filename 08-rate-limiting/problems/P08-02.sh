@@ -9,10 +9,10 @@ need_metric redis_commands_processed_total "redis ServiceMonitor deploy/servicem
 step "Limit kontrolünün kendi süresi"
 k6run redirect --vus 20 --duration 40s >/dev/null 2>&1 || true
 sleep 10
-rl_p99=$(num "$(promq "histogram_quantile(0.99, sum(rate(ratelimit_check_duration_seconds_bucket{namespace=\"$NS\"}[2m])) by (le))")")
-rl_p50=$(num "$(promq "histogram_quantile(0.50, sum(rate(ratelimit_check_duration_seconds_bucket{namespace=\"$NS\"}[2m])) by (le))")")
-req_p50=$(num "$(promq "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le))")")
-req_p99=$(num "$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le))")")
+rl_p99=$(promq "histogram_quantile(0.99, sum(rate(ratelimit_check_duration_seconds_bucket{namespace=\"$NS\"}[2m])) by (le))")
+rl_p50=$(promq "histogram_quantile(0.50, sum(rate(ratelimit_check_duration_seconds_bucket{namespace=\"$NS\"}[2m])) by (le))")
+req_p50=$(promq "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le))")
+req_p99=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le))")
 share=$(awk -v a="$rl_p50" -v b="$req_p50" 'BEGIN{printf "%.0f", (b>0? a*100/b : 0)}')
 redis_ops=$(promq "sum(rate(redis_commands_processed_total{namespace=\"$NS\"}[2m]))")
 http_rps=$(promq "sum(rate(http_requests_total{namespace=\"$NS\",route=\"/{code}\"}[2m]))")

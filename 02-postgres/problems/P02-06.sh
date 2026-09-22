@@ -15,7 +15,7 @@ sleep 5
 k6run mixed --vus 40 --duration 60s || true
 sleep 12
 e5=$(k6_5xx); p99=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\"}[2m])) by (le))")
-acq=$(num "$(promq "histogram_quantile(0.99, sum(rate(db_pool_acquire_duration_seconds_bucket{namespace=\"$NS\"}[2m])) by (le))")")
+acq=$(promq "histogram_quantile(0.99, sum(rate(db_pool_acquire_duration_seconds_bucket{namespace=\"$NS\"}[2m])) by (le))")
 empty=$(promq "sum(increase(db_pool_empty_acquire_total{namespace=\"$NS\"}[5m]))")
 inflight=$(promq "max_over_time(sum(http_in_flight_requests{namespace=\"$NS\"})[5m:15s])")
 notready=$(kubectl -n "$NS" get pods -l "$APP_SELECTOR" --no-headers | grep -vc '1/1' || true)

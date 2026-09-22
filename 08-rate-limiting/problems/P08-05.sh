@@ -21,7 +21,7 @@ measure() {
   k6run redirect --vus 40 --duration 40s >/dev/null 2>&1 || true
   sleep 10
   local p99 cpu
-  p99=$(num "$(promq "histogram_quantile(0.99, sum(rate(ratelimit_check_duration_seconds_bucket{namespace=\"$NS\"}[2m])) by (le))")")
+  p99=$(promq "histogram_quantile(0.99, sum(rate(ratelimit_check_duration_seconds_bucket{namespace=\"$NS\"}[2m])) by (le))")
   cpu=$(promq "max_over_time(sum(rate(container_cpu_usage_seconds_total{namespace=\"$NS\",pod=~\"redis.*\",image!=\"\",image!~\".*pause.*\"}[30s]))[3m:15s])")
   echo "$p99 $cpu"
 }

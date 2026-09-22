@@ -24,7 +24,7 @@ sleep 10
 dropped=$(promq "sum(increase(analytics_events_total{namespace=\"$NS\",result=\"dropped\"}[5m]))")
 enq=$(promq "sum(increase(analytics_events_total{namespace=\"$NS\",result=\"enqueued\"}[5m]))")
 depth=$(promq "max_over_time(sum(analytics_queue_depth{namespace=\"$NS\"})[5m:15s])")
-p99=$(num "$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le))")")
+p99=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le))")
 grafana_hint "07 · Analytics → 'events by result' + 'queue depth by pod' · 02 · App RED → p99"
 note "kuyruğa alınan: ${enq%%.*} · DÜŞÜRÜLEN: ${dropped%%.*} · tepe derinlik: ${depth%%.*}"
 note "ÖNEMLİ: redirect p99'u $(awk -v v="$p99" 'BEGIN{printf "%.0f", v*1000}') ms — yazıcı boğulurken bile okuma yolu ETKİLENMEDİ."

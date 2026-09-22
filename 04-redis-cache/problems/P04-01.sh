@@ -22,7 +22,7 @@ sleep 12
 db_cold=$(promq "max_over_time(sum(rate(db_queries_total{namespace=\"$NS\",op=\"get\"}[30s]))[3m:15s])")
 e5=$(k6_5xx); fr=$(k6_failed_rate)
 cerr=$(promq "sum(increase(cache_errors_total{namespace=\"$NS\"}[5m]))")
-p99=$(num "$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le))")")
+p99=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le))")
 grafana_hint "06 · Redis → 'redis_up' · 04 · Cache → 'cache load error' · 05 · Postgres → 'DB queries by op'"
 note "önbellek yokken: DB get/s TEPE=$(awk -v v="$db_cold" 'BEGIN{printf "%.0f", v}') · önbellek hatası=${cerr%%.*} · 5xx=$e5 · p99=$(awk -v v="$p99" 'BEGIN{printf "%.0f", v*1000}') ms"
 note "HİZMET DEVAM ETTİ (5xx=$e5) — fail-open çalıştı. Ama DB yükü $(awk -v a="$db_warm" -v b="$db_cold" 'BEGIN{printf "%.0fx", (a>0? b/a : 0)}') arttı."
