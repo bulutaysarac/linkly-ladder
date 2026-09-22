@@ -45,8 +45,12 @@ run_level() {
     out=$(CONFIRM=1 hard_timeout "${REPRO_TIMEOUT:-900}" make repro P="$p" 2>&1)
     r=$(echo "$out" | grep -oE 'NOT-REPRODUCED|REPRODUCED' | tail -1)
     printf '%-8s %s\n' "$p" "${r:-HATA}"
-    if [[ -z "$r" ]]; then echo "$out" | sed 's/\x1b\[[0-9;]*m//g' | tail -8 | sed 's/^/         ! /'
-    else echo "$out" | sed 's/\x1b\[[0-9;]*m//g' | grep -E '^(  |▶)' | tail -10 | sed 's/^/         · /'; fi
+    # ÖLÇÜLEN SAYILARI SAKLA: ilk hâl son 8/10 satırı basıyordu ve bu, kararı veren satırların
+    # (ölçülen değerler) tam olarak kesildiği yerdi — sonuçta "NOT-REPRODUCED" görünüyor ama
+    # NEYİN ölçüldüğü görünmüyordu, yani rapor teşhis edilemiyordu. Bir tur kaydı, tekrar
+    # koşmayı gerektirmeyecek kadar bilgi taşımalı.
+    if [[ -z "$r" ]]; then echo "$out" | sed 's/\x1b\[[0-9;]*m//g' | tail -20 | sed 's/^/         ! /'
+    else echo "$out" | sed 's/\x1b\[[0-9;]*m//g' | grep -E '^(  |▶)' | sed 's/^/         · /'; fi
   done
   echo "═══ $L · make down"; make down >/dev/null 2>&1
   echo "═══ $L · bitti"
