@@ -352,6 +352,7 @@ Pool metrikleri (`acquire_count`, `acquire_duration`, `empty_acquire`) expose ed
 | P02-07 | Migration'ı N pod aynı anda koşar → kilit hatası/yarış | sıfırdan 5 replika deploy | crash loop ilk saniyeler | 07 (Job) |
 | P02-08 | Senkron click `UPDATE` → hot link'te satır kilidi kuyruğu, WAL şişmesi | `make load S=hot-key` 500 VU tek kod | `pg_locks`, redirect p99, WAL bytes | 05 |
 | P02-09 | Sır ConfigMap/env'de düz metin | `kubectl get deploy -o yaml` | — | 13 |
+| P02-10 | **TRAP_READYZ_CHECKS_DB**: readiness bağımlılığı kontrol edince kısmi arıza TAM kesinti olur | tuzağı aç + DB'yi yavaşlat | hazır pod sayısı, 5xx | seviye içi (readiness ≠ bağımlılık sağlığı) |
 
 ---
 
@@ -372,6 +373,7 @@ gerçeği* ile tanışırız.
 | P03-04 | Hit ratio pod sayısıyla düşer (rastgele LB) | replicas 1→3→6, hit ratio karşılaştır | hit ratio vs replika paneli | 04 · consistent hashing (tartışma) |
 | P03-05 | **TRAP_NO_SINGLEFLIGHT**: TTL dolan hot key'de stampede | bayrak + hot-key load | DB qps ani tepe, `cache_stampede_wait`=0 | seviye içi |
 | P03-06 | **TRAP_NO_NEGATIVE_CACHE**: rastgele kod taraması hep miss → DB | k6 rastgele kod | `cache_miss` = DB qps | seviye içi |
+| P03-07 | **TRAP_NO_TTL_JITTER**: aynı anda yazılan anahtarlar aynı anda dolar → periyodik DB tepesi | tuzağı aç, 1 sn çözünürlükle örnekle | tepe/ortalama DB qps | seviye içi (jitter) |
 
 ---
 
@@ -476,6 +478,7 @@ bucket / sliding window), tenant ve IP bazlı, `429 + Retry-After`; ingress'te i
 |---|---|---|---|---|
 | P08-01 | Limiter Redis'e bağımlı: Redis yokken fail-open mı fail-closed mı? | Redis'i sil | 429 oranı 0 ya da %100 | karar + README (fail-open + alarm) · 10 |
 | P08-02 | Her isteğe +1 Redis RTT | 04 vs 08 p50 | latency | seviye içi (yerel token cache / pipeline) |
+| P08-03 | X-Forwarded-For: yok saymak limiti ADALETSİZ, körü körüne güvenmek ETKİSİZ yapar | iki tuzak + abuser senaryosu | 429 dağılımı, key_type | seviye içi (güven sınırı) |
 | P08-03a | **TRAP_IGNORE_XFF**: tüm client'lar ingress IP'sinde tek kova → herkes birlikte limitlenir | 2 client, biri abuser → ikisi de 429 | per-key paneli tek anahtar | seviye içi |
 | P08-03b | **TRAP_TRUST_ANY_XFF**: header spoof ile limit atlatılır | k6 rastgele XFF | reject 0 | seviye içi (sadece ingress hop'u) |
 | P08-04 | Sabit pencere: sınırda 2× burst geçer | `make load S=burst` (pencere sınırına hizalı) | kabul edilen/s tepe | seviye içi (sliding window) |
@@ -502,7 +505,7 @@ okuma/yazma ayrımı, `clicks` partition'ları, MinIO'ya yedek/PITR.
 | P09-04 | Uzun okuma replikada iptal: `canceling statement due to conflict with recovery` | uzun list + yoğun yazma | hata logu | tartışma (`hot_standby_feedback`) |
 | P09-05 | Partition key olmadan sorgu tüm partition'ları tarar | `EXPLAIN` | plan | seviye içi |
 | P09-06 | Sıcak sayaç satırı → dead tuple, bloat | hot-key + `n_dead_tup` | `pg_stat_user_tables_n_dead_tup` | tartışma (`fillfactor`, HOT) |
-| P09-07 | "Yanlışlıkla tüm linkleri sildim" → PITR | `DELETE FROM links` → `CONFIRM=1` ile geri yükle | recovery süresi | seviye içi (barman PITR) |
+| ~~P09-07~~ | **P09-06 ile birleştirildi.** "Replikasyon yedek değildir" ile "PITR" aynı dersin iki yarısıydı; ikisini ayrı script yapmak aynı deneyi iki kez koşturmak olurdu. PITR yapılandırması (barmanObjectStore + ScheduledBackup) ve geri yükleme tatbikatı P09-06'nın README bölümünde anlatılıyor. | — | — | — |
 
 ---
 
@@ -524,7 +527,7 @@ deney önce "koruma kapalı" ile kaskadı gösterir, sonra "açık" ile kıyasla
 | P10-04 | Breaker half-open flapping, eşik ayarı | `C=pg-loss-50` | breaker state timeline | ayar + README |
 | P10-05 | Yavaş bağımlılık, ölü bağımlılıktan beterdir: timeout yok → goroutine/bellek şişer → OOM | `TRAP_NO_DEP_TIMEOUT` + `C=redis-delay-3s` | goroutine sayısı, working set | dependency timeout |
 | P10-06 | Load shedding yok → herkes yavaş; var → bazıları hızlı 503, kabul edilenlerin p99 sabit | shedding aç/kapa, 3× kapasite yük | p99 (kabul) vs 503 oranı | shedding |
-| P10-07 | Liveness saldırgan → yükte restart fırtınası | (P01-07 tekrar, artık gerçek yükte) | restarts | liveness = deadlock tespiti, o kadar |
+| ~~P10-07~~ | **Uygulanmadı: P01-07'nin tekrarıydı.** Planın kendisi "(P01-07 tekrar)" diyordu; aynı tuzağı ikinci kez koşturmak yeni bir şey ölçmez. Liveness'ın yük altındaki davranışı 01'de ölçülüyor, readiness'ın bağımlılığa bağlanması P10-02'de. | — | — | — |
 
 ---
 
@@ -605,6 +608,17 @@ broker, KEDA her yerde, (opsiyonel) Linkerd mTLS/golden metrics, VPA önerileri.
   (hepsi NOT-REPRODUCED olmalı; olmayanlar "bilerek bırakılan").
 - **Yolun devamı** (dürüst liste): tek cluster/tek bölge, gerçek CDN/edge, gerçek IdP, maliyet,
   multi-region aktif-aktif (iki kind cluster + DNS failover — stretch).
+
+**Uygulanan sorunlar** (plan yazıldığında 14 yalnızca "game day" olarak tasarlanmıştı; uygulama
+sırasında L1'in geri dönüşü ve partition tavanı kendi başlarına ölçülmeyi hak etti):
+
+| ID | Sorun | Reproduce | Ölçü | Çözüm |
+|----|-------|-----------|------|-------|
+| P14-01 | L1'in geri dönüşü: ağ adımını ödemeden isabet | L1 açık/kapalı p50 + Redis ops | p50, L1 hit oranı | seviye içi (L1+L2) |
+| P14-02 | Her kopya bir geçersiz kılma kanalı borçlanır | sil → diğer pod'dan oku, pub/sub açık/kapalı | bayat yanıt sayısı | seviye içi (pub/sub invalidation) |
+| P14-03 | Partition sayısı arttı: tüketici paralelliği ARTIK gerçek | hot-key yükü + KEDA ölçeklemesi | aktif tüketici, kayıt/s, lag | seviye içi (3 partition) |
+| P14-04 | Kapasite modeli: zarf arkası hesabı ÖLÇÜLMÜŞ sayılarla | stairs ile tek pod kapasitesi | rps/pod, p99 | — (model) |
+| P14-05 | GAME DAY: üç arıza aynı anda | chaos + pod kill + dağıtım | erişilebilirlik %, breaker/shed/retry | — (doğrulama) |
 
 ---
 
