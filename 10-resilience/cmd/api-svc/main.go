@@ -89,8 +89,21 @@ func main() {
 	}, cache.NewMetrics(met.Registry(), "l2"), "linkly:link:")
 	cached := store.NewCached(db, l2)
 
+	// TRAP_UNBOUNDED_QUEUE: tampon SINIRINI kaldır. 05'te bu bir slice'tı ve tuzak kodda
+	// okunuyordu; 06'da kuyruk Kafka üreticisine taşınınca tuzak MAIN'DE YALNIZCA BASTIRILAN bir
+	// bayrağa dönüştü — deney açıyor, hiçbir şey değişmiyordu. Sınır burada: tampon dolunca
+	// üretici kaydı DÜŞÜRÜR (ve sayar). Sınırsızda düşürme yerine bellek büyür ve pod OOM olur:
+	// yani "veri kaybetme" kararını almayı reddettiğinde, karar senin yerine kernel tarafından
+	// ve en kötü anda alınır (P05-02).
+	// EN: when the queue moved from a slice to the Kafka producer the trap became a flag that is
+	// only PRINTED. Bounded → the producer drops and counts; unbounded → memory grows and the pod
+	// is OOM-killed, i.e. refusing to decide "lose data" hands the decision to the kernel.
+	maxBuf := cfg.ProducerMaxBuffered
+	if cfg.TrapUnboundedQueue {
+		maxBuf = 1 << 30
+	}
 	clicks, err := stream.NewProducer(strings.Split(cfg.KafkaBrokers, ","), cfg.KafkaTopic,
-		cfg.ProducerMaxBuffered, stream.NewProducerMetrics(met.Registry()), log)
+		maxBuf, stream.NewProducerMetrics(met.Registry()), log)
 	if err != nil {
 		log.Error("kafka producer kurulamadı", "err", err)
 		os.Exit(1)
