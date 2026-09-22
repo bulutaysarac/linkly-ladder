@@ -223,7 +223,11 @@ ama p99 iki katına çıkmışsa sürüm yine kötüdür — bu yüzden `Analysi
    Deployment'ın yerini aldı ama **Service değişmedi** — trafik yönlendirmesi controller'ın işi.
 3. **`internal/store/migrations/006_expand.sql`**: kodun kendisi 2 satır, yorumu 20 satır.
    *Expand/contract bir SQL tekniği değil, bir dağıtım disiplinidir* — bu yüzden gerekçe kodda.
-4. **`007_breaking_rename.sql`**: bilerek yanlış bir migration, yalnızca deney için.
-   **Yanlışı da sürüm kontrolünde tutmak**, onu yeniden üretilebilir kılar.
+4. **Kırıcı rename artık migration DEĞİL, deneyin kendisi** (`problems/P12-02.sh` onu `psql` ile
+   uygular ve geri alır). Bir süre `007_breaking_rename.sql` olarak migration sırasındaydı ve
+   13/14 — RLS adımına kadar koştukları için — yolda onu da uygulayıp `links.url` sütununu
+   yeniden adlandırdılar: uygulama ayakta, her yazma `column url does not exist`, seviye hiç
+   açılamıyor. **Sıraya konmuş bir deney, deney olmaktan çıkıp herkesin ödediği bir bedele
+   dönüşür.** Yanlışı sürüm kontrolünde tutmak doğru; onu herkesin koştuğu yola koymak değil.
 5. **`internal/httpapi/handlers.go`**: `BAD_VERSION_ERROR_PCT`. Dağıtım güvenliğini test etmek
    için gerçekten bozuk bir sürüme ihtiyacın var.
