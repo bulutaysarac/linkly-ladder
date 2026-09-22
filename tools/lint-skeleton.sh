@@ -187,5 +187,21 @@ for f in "$D"/problems/P*.sh; do
   fi
 done
 
+# 14. `${var:-varsayılan}` İÇİNDEKİ KESME İŞARETİ TIRNAK AÇAR.
+# EN: bash processes quotes inside the `word` of `${var:-word}` even within double quotes, so an
+#     apostrophe ("Endpoint'e", "ingress'in") opens a single-quoted section that swallows the
+#     closing brace: `bad substitution: no closing '}'`. It fires ONLY when the variable is empty
+#     — i.e. only on the path the fallback exists for — so it survives every run where the value
+#     is present. Turkish prose is full of apostrophes; this had to become a rule.
+# TR: bash `${var:-kelime}` içindeki kelimede tırnakları çift tırnak içinde bile işler; bir kesme
+#     işareti tek tırnak açıp kapanış süslü parantezini yutar. Yalnızca değişken BOŞKEN patlar,
+#     yani yalnızca varsayılanın var olma sebebi olan yolda — değer doluyken hiç görünmez.
+for f in "$D"/problems/P*.sh; do
+  [[ -e "$f" ]] || continue
+  if grep -qE '\$\{[A-Za-z_][A-Za-z0-9_]*:-[^}]*'"'"'[^}]*\}' "$f"; then
+    err "$(basename "$f"): \${var:-...} varsayılanında kesme işareti — değişken boşken tırnak açar ve script ölür"
+  fi
+done
+
 [[ $fail == 0 ]] && echo "  ✔ $name iskelet OK"
 exit $fail
