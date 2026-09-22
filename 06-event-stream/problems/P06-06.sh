@@ -54,6 +54,13 @@ note "duplicate sayacı: ${dup%%.*} — idempotency'nin emdiği tekrar sayısı"
 note "Tabloyu oku: varsayılan mod sayıyı KORUR (tekrarları yutar); TRAP modu KAYBEDER."
 note "Ne pahasına: processed_events tablosunda tıklama başına bir satır (saklama penceresi kadar)."
 note "'Tam bir kez' pazarlama terimidir; gerçekte en-az-bir-kez + idempotent yazma vardır."
-awk -v d="$def" -v t="$trap_res" -v n="${N:-2000}" 'BEGIN{exit !(d >= t)}' \
+# KARAR TUZAĞI: ">=" / "<=" iki taraf da 0 iken GEÇER.
+# EN: "b >= a" is true when nothing was measured at all (0 >= 0). That turns a failed measurement
+#     into a passing experiment — the loudest possible false positive, because it looks like proof.
+#     Guard the comparison with "we actually measured something".
+# TR: "b >= a", hiçbir şey ölçülmediğinde de doğrudur (0 >= 0). Yani başarısız bir ölçüm, GEÇEN
+#     bir deneye dönüşür — mümkün olan en gürültülü yanlış pozitif, çünkü kanıt gibi görünür.
+#     Karşılaştırmayı "gerçekten bir şey ölçtük mü?" koşuluyla koru.
+awk -v d="$def" -v t="$trap_res" 'BEGIN{exit !(d > 0 && d >= t)}' \
   && reproduced "yaz→commit $def, commit→yaz $trap_res (üretilen ${N:-2000}) — commit noktası teslimat garantisini belirliyor"
 not_reproduced "iki mod arasında fark ölçülemedi (N'i artırıp tekrar dene)"

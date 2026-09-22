@@ -35,6 +35,13 @@ note "Not: Redis burada fail-open ile atlanabilir olduğu için hizmet sürüyor
 note "GOROUTINE ve BELLEK eğrisi. Timeout'suz her bekleyen çağrı bir goroutine tutar."
 note "Kural: bir bağımlılığa yapılan HER çağrının bir süre sınırı olmalı; 'genelde hızlıdır'"
 note "bir gerekçe değildir, çünkü sorun tam da 'genelde' olmadığı anda başlar."
-awk -v a="${g_on%%.*}" -v b="${g_off%%.*}" 'BEGIN{exit !(b >= a)}' \
+# KARAR TUZAĞI: ">=" / "<=" iki taraf da 0 iken GEÇER.
+# EN: "b >= a" is true when nothing was measured at all (0 >= 0). That turns a failed measurement
+#     into a passing experiment — the loudest possible false positive, because it looks like proof.
+#     Guard the comparison with "we actually measured something".
+# TR: "b >= a", hiçbir şey ölçülmediğinde de doğrudur (0 >= 0). Yani başarısız bir ölçüm, GEÇEN
+#     bir deneye dönüşür — mümkün olan en gürültülü yanlış pozitif, çünkü kanıt gibi görünür.
+#     Karşılaştırmayı "gerçekten bir şey ölçtük mü?" koşuluyla koru.
+awk -v a="${g_on%%.*}" -v b="${g_off%%.*}" 'BEGIN{exit !(a > 0 && b > 0 && b >= a)}' \
   && reproduced "timeout'suz yavaş bağımlılık goroutine'leri ${g_on%%.*} → ${g_off%%.*} ve belleği ${m_on} → ${m_off}MB büyüttü"
 not_reproduced "fark ölçülemedi (redis-delay-3s uygulandı mı?)"

@@ -33,6 +33,13 @@ note "hangi cevabı alacağını belirler."
 note "Yük atma bir KAPASİTE aracı değil, bir KALİTE aracıdır: kapasiteyi artırmaz, mevcut"
 note "kapasitenin işe yarar kalmasını sağlar. Kapasite için ölçekleme (07) gerekir."
 note "Sağlık uçları asla atılmaz (kodda ayrık): yük altında probe düşerse pod öldürülür (P01-07)."
-awk -v a="$p_on" -v b="$p_off" 'BEGIN{exit !(a <= b)}' \
+# KARAR TUZAĞI: ">=" / "<=" iki taraf da 0 iken GEÇER.
+# EN: "b >= a" is true when nothing was measured at all (0 >= 0). That turns a failed measurement
+#     into a passing experiment — the loudest possible false positive, because it looks like proof.
+#     Guard the comparison with "we actually measured something".
+# TR: "b >= a", hiçbir şey ölçülmediğinde de doğrudur (0 >= 0). Yani başarısız bir ölçüm, GEÇEN
+#     bir deneye dönüşür — mümkün olan en gürültülü yanlış pozitif, çünkü kanıt gibi görünür.
+#     Karşılaştırmayı "gerçekten bir şey ölçtük mü?" koşuluyla koru.
+awk -v a="$p_on" -v b="$p_off" -v s="${s_on%%.*}" 'BEGIN{exit !(a > 0 && b > 0 && s > 0 && a <= b)}' \
   && reproduced "yük atma, kabul edilen isteklerin p99'unu korudu ($(awk -v v="$p_on" 'BEGIN{printf "%.0f", v*1000}') ms vs $(awk -v v="$p_off" 'BEGIN{printf "%.0f", v*1000}') ms; $s_on istek atıldı)"
 not_reproduced "fark ölçülemedi (yük yeterince yüksek değil — stairs PEAK'ini artır)"

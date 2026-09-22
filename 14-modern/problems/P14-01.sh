@@ -34,6 +34,13 @@ note "L1 hit oranı: $(awk -v v="$l1hit" 'BEGIN{printf "%.0f%%", v*100}') · Red
 note "Kazanç iki yönlü: sıcak anahtar için gecikme (ağ adımı yok) VE Redis'in yükü (P04-03'teki"
 note "tek çekirdek tavanına daha geç ulaşılır)."
 note "Bedeli bir sonraki script'te: L1 = gerçeğin N kopyası = geçersiz kılma sorunu (P14-02)."
-awk -v a="$p50a" -v b="$p50b" 'BEGIN{exit !(b <= a)}' \
+# KARAR TUZAĞI: ">=" / "<=" iki taraf da 0 iken GEÇER.
+# EN: "b >= a" is true when nothing was measured at all (0 >= 0). That turns a failed measurement
+#     into a passing experiment — the loudest possible false positive, because it looks like proof.
+#     Guard the comparison with "we actually measured something".
+# TR: "b >= a", hiçbir şey ölçülmediğinde de doğrudur (0 >= 0). Yani başarısız bir ölçüm, GEÇEN
+#     bir deneye dönüşür — mümkün olan en gürültülü yanlış pozitif, çünkü kanıt gibi görünür.
+#     Karşılaştırmayı "gerçekten bir şey ölçtük mü?" koşuluyla koru.
+awk -v a="$p50a" -v b="$p50b" 'BEGIN{exit !(a > 0 && b > 0 && b <= a)}' \
   && reproduced "L1 p50'yi $(awk -v v="$p50a" 'BEGIN{printf "%.2f", v*1000}') → $(awk -v v="$p50b" 'BEGIN{printf "%.2f", v*1000}') ms'e indirdi, Redis ops/s $(awk -v v="$opsa" 'BEGIN{printf "%.0f", v}') → $(awk -v v="$opsb" 'BEGIN{printf "%.0f", v}') (L1 hit %$(awk -v v="$l1hit" 'BEGIN{printf "%.0f", v*100}'))"
 not_reproduced "L1 kazancı ölçülemedi (hot-key yükü ve L1_CAPACITY'yi kontrol et)"

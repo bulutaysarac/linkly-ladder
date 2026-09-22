@@ -30,6 +30,13 @@ note "Burn-rate alarmının iki penceresi de aynı anda aşılmalı: uzun pencer
 note "kısa pencere 'HÂLÂ oluyor mu?' diye sorar. Biri olmadan diğeri ya geç çalar ya geç susar."
 note "Kural: alarm, EYLEM gerektirmiyorsa alarm değildir. Eylem gerektiren şey bütçenin tükenme"
 note "HIZIDIR, anlık hata oranı değil."
-{ awk -v n="${naive%%.*}" -v f="${fast%%.*}" 'BEGIN{exit !(n >= f)}'; } \
+# KARAR TUZAĞI: ">=" / "<=" iki taraf da 0 iken GEÇER.
+# EN: "b >= a" is true when nothing was measured at all (0 >= 0). That turns a failed measurement
+#     into a passing experiment — the loudest possible false positive, because it looks like proof.
+#     Guard the comparison with "we actually measured something".
+# TR: "b >= a", hiçbir şey ölçülmediğinde de doğrudur (0 >= 0). Yani başarısız bir ölçüm, GEÇEN
+#     bir deneye dönüşür — mümkün olan en gürültülü yanlış pozitif, çünkü kanıt gibi görünür.
+#     Karşılaştırmayı "gerçekten bir şey ölçtük mü?" koşuluyla koru.
+{ awk -v n="${naive%%.*}" -v f="${fast%%.*}" 'BEGIN{exit !(n > 0 && n >= f)}'; } \
   && reproduced "kısa sıçramada naive eşik (${naive%%.*}) burn-rate'ten (${fast%%.*}) daha gürültülü — alarm yorgunluğunun kaynağı"
 not_reproduced "alarm farkı ölçülemedi (kurallar yüklendi mi? kubectl -n $NS get prometheusrule)"
