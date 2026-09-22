@@ -30,7 +30,21 @@ note "$N tıklama üretildi, hepsi topic'te bekliyor (tüketici kapalı)"
 # P03-05 ile aynı ders bir adım ileri: bir yarışın penceresi onu besleyen işlemin süresidir ve
 # hangi işlemin beslediğini yanlış bilirsen, kusursuz koşan ama etkiyi GÖSTEREMEYEN bir deney
 # elde edersin.
-chaos_apply redpanda-delay
+# BROKER'I YAVAŞLATMAK PENCEREYİ AÇMIYOR, TÜKETİCİYİ DURDURUYOR.
+# Ölçüldü: 2 sn gecikmede 2000 kayıttan 0'ı işlendi; 800 ms'de de aynı (ok=0). Kafka istemcisinin
+# fetch/heartbeat zamanlayıcıları gecikmeyle birlikte kayıyor ve tüketici sürekli yeniden
+# dengeleniyor — yani ölçmek istediğimiz "yazdım / henüz commit etmedim" anına hiç varmıyoruz.
+# Üstelik o pencereyi açmak için ARIZAYA GEREK YOK: commit devre dışı (DisableAutoCommit) ve
+# commit her poll'ün SONUNDA yapılıyor; büyük bir birikimi işlerken tüketiciyi öldürmek, yazılmış
+# ama commit edilmemiş bir partiyi zaten bırakır. Deneyin doğru aracı arıza değil, TEKRARLI
+# ÖLDÜRMEdir. Arıza enjekte etmek bir deneyi daha gerçekçi yapmaz; ölçtüğün şeyi ölçülemez hâle
+# getirebilir.
+# EN: slowing the broker did not widen the window, it stopped the consumer (0 of 2000 records at
+# both 2s and 800ms): the client's fetch/heartbeat timers slide with the delay and it rebalances
+# forever, so we never reach the "written / not yet committed" moment we want to observe. And we
+# do not need a fault to open that window — auto-commit is disabled and the commit happens at the
+# END of each poll, so killing the consumer while it chews through a large backlog already leaves
+# a written-but-uncommitted batch. The right tool here is repeated killing, not chaos.
 # ÖLÇÜM PENCERESİ DENEYİN KENDİSİ KADAR OLMALI.
 # EN: the first version queried `increase(...[10m])`. verify-prev had just replayed level 05's
 #     scripts into this very namespace, so the 10-minute window contained ~50k records that had
@@ -48,8 +62,9 @@ kubectl -n "$NS" scale "$(wl $CONSUMER)" --replicas=1 >/dev/null
 # Öldürmeden ÖNCE işlemeye zaman ver: sert öldürülen tüketicinin grubu yeniden dengelemesi
 # saniyeler sürüyor; hemen öldürürsen ortada commit edilmemiş parti değil, hiç başlamamış bir
 # tüketici olur ve tekrar teslim GÖZLENMEZ. Ölçmek istediğin durumu deneyin kendisi üretmeli.
-for i in 1 2 3; do
-  sleep 10
+# Daha çok ve daha sık öldür: her öldürme, commit edilmemiş bir partiyi yakalama şansıdır.
+for i in 1 2 3 4 5; do
+  sleep 6
   kubectl -n "$NS" delete pod -l app.kubernetes.io/name=$CONSUMER --force --grace-period=0 >/dev/null 2>&1 || true
 done
 kubectl -n "$NS" rollout status "$(wl $CONSUMER)" --timeout=120s >/dev/null 2>&1 || true
