@@ -37,13 +37,41 @@ wait_ns_ready() {
   echo "  uyarı: $ns 3 dk içinde hazır olmadı"
   return 0
 }
+# DAEMONSET'LER DE KAPANIR — ve bu fonksiyonlar uzun süre onları GÖRMÜYORDU.
+# EN: a DaemonSet has no replica count, so the only way to park it is an impossible nodeSelector.
+#     `off` never did that and `on` never undid it — but something had parked `chaos-daemon` with
+#     `kapali=true` at some point, and nothing could ever bring it back. Result: chaos-mesh looked
+#     healthy (controller-manager + dns-server Running) while NO chaos could be injected on any
+#     node, for hours. Every chaos experiment in that window measured a system nobody had broken.
+#     `chaos_apply` catches this (AllInjected=False → exit 2) so the scripts reported SKIPPED
+#     instead of a fake green — but the hole was in the profile script, not the experiments.
+#     If you can turn a component off, you must be able to turn it back on WITH THE SAME TOOL.
+# TR: bir DaemonSet'in replika sayısı yoktur; onu park etmenin tek yolu imkânsız bir nodeSelector.
+#     `off` bunu hiç yapmıyordu, `on` da hiç geri almıyordu — ama bir noktada `chaos-daemon`
+#     `kapali=true` ile park edilmişti ve onu geri getirecek hiçbir şey yoktu. Sonuç: chaos-mesh
+#     SAĞLIKLI görünüyordu (controller-manager + dns-server Running) ama hiçbir node'a chaos
+#     ENJEKTE EDİLEMİYORDU. O pencerede koşan her chaos deneyi, kimsenin bozmadığı bir sistemi
+#     ölçtü. `chaos_apply` bunu yakalıyor (AllInjected=False → exit 2), yani scriptler sahte
+#     yeşil yerine SKIPPED bastı — ama delik deneylerde değil, profil scriptindeydi.
+#     Bir bileşeni kapatabiliyorsan, AYNI ARAÇLA geri açabilmek zorundasın.
 on()  {
   kubectl -n "$1" scale deploy --all --replicas="${3:-1}" >/dev/null 2>&1
   [[ -n "${2:-}" ]] && kubectl -n "$1" scale statefulset --all --replicas=1 >/dev/null 2>&1
+  for d in $(kubectl -n "$1" get daemonset -o name 2>/dev/null); do
+    kubectl -n "$1" patch "$d" --type=json \
+      -p '[{"op":"remove","path":"/spec/template/spec/nodeSelector/kapali"}]' >/dev/null 2>&1 || true
+  done
   wait_ns_ready "$1"
   return 0
 }
-off() { kubectl -n "$1" scale deploy --all --replicas=0 >/dev/null 2>&1; kubectl -n "$1" scale statefulset --all --replicas=0 >/dev/null 2>&1; return 0; }
+off() {
+  kubectl -n "$1" scale deploy --all --replicas=0 >/dev/null 2>&1
+  kubectl -n "$1" scale statefulset --all --replicas=0 >/dev/null 2>&1
+  for d in $(kubectl -n "$1" get daemonset -o name 2>/dev/null); do
+    kubectl -n "$1" patch "$d" -p '{"spec":{"template":{"spec":{"nodeSelector":{"kapali":"true"}}}}}' >/dev/null 2>&1 || true
+  done
+  return 0
+}
 
 # Chaos Mesh: 02'den itibaren (pg-delay, pg-loss, redis-delay...)
 if (( n >= 2 )); then on chaos-mesh; else off chaos-mesh; fi
