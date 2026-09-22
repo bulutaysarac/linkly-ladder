@@ -5,7 +5,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # tüketici okuyabilir. 3 replika açarsan 2'si boşta oturur — ölçekleme yanılsaması.
 ensure_healthy
 CONSUMER=analytics
-on_cleanup "kubectl -n \"$NS\" scale deploy/$CONSUMER --replicas=1"
+on_cleanup "kubectl -n \"$NS\" scale "$(wl $CONSUMER)" --replicas=1"
 rp=$(dep_pod app.kubernetes.io/name=redpanda) || exit 2   # bağımlılık hazır değilse ölçüm anlamsız
 rpk() { kubectl -n "$NS" exec "$rp" -- rpk "$@" 2>/dev/null; }
 step "Topic'in partition sayısı"
@@ -14,8 +14,8 @@ parts=$(rpk topic describe clicks -p 2>/dev/null | grep -c '^[0-9]' || echo 1)
 note "partition sayısı: ${parts:-1}"
 measure() {
   local reps=$1
-  kubectl -n "$NS" scale deploy/$CONSUMER --replicas="$reps" >/dev/null
-  kubectl -n "$NS" rollout status deploy/$CONSUMER --timeout=120s >/dev/null 2>&1 || true
+  kubectl -n "$NS" scale "$(wl $CONSUMER)" --replicas="$reps" >/dev/null
+  kubectl -n "$NS" rollout status "$(wl $CONSUMER)" --timeout=120s >/dev/null 2>&1 || true
   sleep 8
   local code b t0 t1
   code=$(create_link "https://example.com/part/$reps")

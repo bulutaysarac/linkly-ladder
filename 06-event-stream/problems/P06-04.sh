@@ -6,7 +6,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # kayıt, tüm boru hattını rehin alır. DLQ bunu sınırlı ve incelenebilir bir olaya çevirir.
 ensure_healthy
 CONSUMER=analytics
-on_cleanup "setenv deploy/$CONSUMER TRAP_NO_DLQ-"
+on_cleanup "setenv "$(wl $CONSUMER)" TRAP_NO_DLQ-"
 rp=$(dep_pod app.kubernetes.io/name=redpanda) || exit 2   # bağımlılık hazır değilse ölçüm anlamsız
 code=$(create_link "https://example.com/poison")
 before=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0')
@@ -27,7 +27,7 @@ grafana_hint "08 · Stream → 'consumer records by result' (dlq) + 'consumer la
 note "bozuk mesaj sonrası geçerli tıklamalar: $(( after - before )) / $N (ARKASINDAKİLER İŞLENDİ Mİ?)"
 note "DLQ'ya taşınan: ${dlq%%.*} · hata: ${errs%%.*} · tüketici restart: ${restarts:-0}"
 note "DLQ olmasaydı: offset ilerlemez, lag sonsuza büyür, arkadaki $N tıklama HİÇ işlenmezdi."
-note "Deneyin ters ucu: setenv deploy/$CONSUMER TRAP_NO_DLQ=true"
+note "Deneyin ters ucu: setenv "$(wl $CONSUMER)" TRAP_NO_DLQ=true"
 note "Kural: bir tüketici, işleyemediği mesaj için bir ÇIKIŞ YOLU tanımlamak zorundadır —"
 note "atla+say, DLQ'ya taşı ya da durdur. 'Tanımlamamak' da bir seçimdir: sonsuza kadar dene."
 { awk -v d="${dlq%%.*}" 'BEGIN{exit !(d>0)}' && (( after - before > 0 )); } \
