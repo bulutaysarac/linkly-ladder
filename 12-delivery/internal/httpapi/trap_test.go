@@ -17,7 +17,7 @@ func handlerWith(t *testing.T, mut func(*config.Config), rate float64, burst int
 	t.Helper()
 	cfg := config.Load()
 	mut(&cfg)
-	api := New(cfg, slog.New(slog.NewJSONHandler(io.Discard, nil)), metrics.New(cfg.TrapMetricLabelCode), store.NewFake(), "test")
+	api := New(cfg, slog.New(slog.NewJSONHandler(io.Discard, nil)), metrics.New(cfg.TrapMetricLabelCode, cfg.TrapTenantLabel), store.NewFake(), "test")
 	api.SetReady(true)
 	return api.Handler(ratelimit.New(rate, burst))
 }

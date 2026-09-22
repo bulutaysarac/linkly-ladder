@@ -51,7 +51,7 @@ func logLevel() slog.Level {
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel()}))
 	cfg := config.Load()
-	met := metrics.New(false)
+	met := metrics.New(false, false)
 
 	// Tüketici de trace üretir: üreticinin header'a koyduğu bağlamı alır ve span'leri ona bağlar.
 	// Asenkron sınırın iki yakası ancak böyle tek bir trace'te görünür (P11-02).

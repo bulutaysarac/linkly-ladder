@@ -32,7 +32,7 @@ func newTestAPIWithStore(t *testing.T, st *store.Fake) (http.Handler, *store.Fak
 	cfg.RateLimitPerSec = 100000
 	cfg.RateLimitBurst = 100000
 	log := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	api := New(cfg, log, metrics.New(false), st, "test")
+	api := New(cfg, log, metrics.New(false, false), st, "test")
 	api.SetReady(true)
 	return api.Handler(ratelimit.New(cfg.RateLimitPerSec, cfg.RateLimitBurst)), st
 }
@@ -48,7 +48,7 @@ func newAuthedAPI(t *testing.T, st *store.Fake) (http.Handler, map[string]string
 	cfg.AuthRequired = true
 	cfg.ResolveDNS = false // birim testte DNS'e çıkma
 	log := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	api := New(cfg, log, metrics.New(false), st, "test")
+	api := New(cfg, log, metrics.New(false, false), st, "test")
 	api.SetReady(true)
 	keys := auth.NewStore(auth.NewMetrics(prometheus.NewRegistry()))
 	tokens := map[string]string{"tenant-a": "key-a", "tenant-b": "key-b"}
@@ -261,7 +261,7 @@ func TestCountersPreRegisteredAtZero(t *testing.T) {
 func TestRateLimitReturns429(t *testing.T) {
 	cfg := config.Load()
 	log := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	api := New(cfg, log, metrics.New(false), store.NewFake(), "test")
+	api := New(cfg, log, metrics.New(false, false), store.NewFake(), "test")
 	api.SetReady(true)
 	h := api.Handler(ratelimit.New(1, 1)) // 1 rps, 1 burst
 
@@ -318,7 +318,7 @@ func TestRedirectRecordsClickWithoutWritingStore(t *testing.T) {
 	st := store.NewFake()
 	cfg := config.Load()
 	cfg.RateLimitPerSec, cfg.RateLimitBurst = 100000, 100000
-	api := New(cfg, slog.New(slog.NewJSONHandler(io.Discard, nil)), metrics.New(false), st, "test")
+	api := New(cfg, slog.New(slog.NewJSONHandler(io.Discard, nil)), metrics.New(false, false), st, "test")
 	api.SetReady(true)
 	rec := &countingRecorder{}
 	api.SetClicks(rec)

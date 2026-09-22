@@ -36,17 +36,30 @@ type Metrics struct {
 	Unsafe     *prometheus.CounterVec
 	RateLimit  *prometheus.CounterVec // decision, key_type // reason
 	trapByCode bool
+	// TRAP_TENANT_LABEL: kiracıyı metrik label'ı yapmak (P11-06). Config'de VARDI ama hiçbir
+	// yerde OKUNMUYORDU — yani deney tuzağı açıyor, hiçbir şey değişmiyor ve script yine
+	// "REPRODUCED" diyordu (kararı Prometheus'un toplam seri sayısına bakarak veriyordu; o sayı
+	// yoğun bir kümede zaten sürekli oynar). Ölçülen şey tuzak değil, gürültüydü.
+	// EN: the trap existed in config and was read NOWHERE. The experiment flipped a flag that did
+	// nothing, and the script still said REPRODUCED because it judged by Prometheus's TOTAL head
+	// series — a number that drifts on its own in a busy cluster. It measured noise, not the trap.
+	trapByTenant bool
 }
 
-func New(trapByCode bool) *Metrics {
+func New(trapByCode, trapByTenant bool) *Metrics {
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 
-	m := &Metrics{reg: reg, trapByCode: trapByCode}
+	m := &Metrics{reg: reg, trapByCode: trapByCode, trapByTenant: trapByTenant}
 	labels := []string{"route", "method", "code"}
 	if trapByCode {
 		// TRAP: kısa kodu label yapmak → her link yeni seri. README §7.
 		labels = append(labels, "short_code")
+	}
+	if trapByTenant {
+		// TRAP: kiracıyı label yapmak → her kiracı yeni seri. 10 kiracıda zararsız,
+		// 10 bin kiracıda Prometheus'u dizlerinin üstüne çöktürür (P11-06).
+		labels = append(labels, "tenant")
 	}
 	m.Requests = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "http_requests_total", Help: "Toplam HTTP isteği",
@@ -118,12 +131,17 @@ func (m *Metrics) ObserveDurationWithExemplar(route string, seconds float64, tra
 	obs.Observe(seconds)
 }
 
-func (m *Metrics) ObserveRequest(route, method, code, shortCode string) {
+func (m *Metrics) ObserveRequest(route, method, code, shortCode, tenant string) {
+	// Değerler label sırasıyla AYNI mantıkla üretilir: iki yerde iki ayrı koşul yazmak,
+	// er geç "inconsistent label cardinality" panic'i demektir.
+	v := []string{route, method, code}
 	if m.trapByCode {
-		m.Requests.WithLabelValues(route, method, code, shortCode).Inc()
-		return
+		v = append(v, shortCode)
 	}
-	m.Requests.WithLabelValues(route, method, code).Inc()
+	if m.trapByTenant {
+		v = append(v, tenant)
+	}
+	m.Requests.WithLabelValues(v...).Inc()
 }
 
 // Registry — başka paketlerin (store gibi) kendi metriklerini kaydedebilmesi için.

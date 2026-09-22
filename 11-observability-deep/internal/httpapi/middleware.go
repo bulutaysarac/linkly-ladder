@@ -105,7 +105,7 @@ func accessLog(next http.Handler, log *slog.Logger, m *metrics.Metrics) http.Han
 		route := routeOf(r)
 		// Exemplar: metrikten trace'e köprü. Kardinalite ödemeden tekil isteğe ulaşmanın yolu.
 		m.ObserveDurationWithExemplar(route, d.Seconds(), traceID)
-		m.ObserveRequest(route, r.Method, strconv.Itoa(rec.status), shortCodeOf(r))
+		m.ObserveRequest(route, r.Method, strconv.Itoa(rec.status), shortCodeOf(r), tenantOf(r))
 		// trace_id ve span_id HER log satırında. Grafana'nın Loki datasource'unda tanımlı
 		// derived field bunu yakalayıp Tempo'ya link veriyor — log'dan trace'e tek tıkla geçiş.
 		log.Info("http",

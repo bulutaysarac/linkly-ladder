@@ -56,7 +56,7 @@ func logLevel() slog.Level {
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel()}))
 	cfg := config.Load()
-	met := metrics.New(cfg.TrapMetricLabelCode)
+	met := metrics.New(cfg.TrapMetricLabelCode, cfg.TrapTenantLabel)
 
 	// Tracing: metrikten trace'e, log'dan trace'e köprüler burada kuruluyor.
 	shutdownTracing, terr := tracing.Setup(context.Background(), tracing.Config{

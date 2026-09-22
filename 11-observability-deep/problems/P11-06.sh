@@ -34,6 +34,10 @@ note "  · en çok trafik üreten 10 tenant → log toplama (Loki) ya da ayrı b
 note "  · tek bir tenant'ın tek bir yavaş isteği → EXEMPLAR + trace (kardinalite ödemeden)"
 note "  · faturalama → veritabanı, metrik değil"
 note "Metrikler ZAMAN SERİSİDİR; her yeni label değeri kalıcı bir bellek maliyetidir."
-awk -v a="${before%%.*}" -v b="${after%%.*}" 'BEGIN{exit !(b > a)}' \
-  && reproduced "tenant label'ı ${tenants%%.*} farklı değerle $(( ${after%%.*} - ${before%%.*} )) yeni seri üretti"
-not_reproduced "seri artışı ölçülemedi (N'i artır ya da scrape aralığını bekle)"
+# ÖLÇÜ SEÇİMİ: karar, Prometheus'un TOPLAM seri sayısına bakıyordu. O sayı yoğun bir kümede
+# kendi başına oynar (yeni pod, yeni chaos kaynağı, yeni scrape hedefi) — yani tuzak KODDA HİÇ
+# OKUNMAZKEN bile "REPRODUCED" çıkıyordu. Ölçü, tuzağın ÜRETTİĞİ ŞEY olmalı: tenant label'ının
+# kaç farklı değer aldığı. Toplam seri artışı bunun sonucudur, kanıtı değil.
+awk -v t="${tenants%%.*}" 'BEGIN{exit !(t > 1)}' \
+  && reproduced "tenant label'ı ${tenants%%.*} farklı değer aldı → toplam seri ${before%%.*} → ${after%%.*} (+$(( ${after%%.*} - ${before%%.*} )))"
+not_reproduced "tenant label'ı üretilmedi (${tenants%%.*} değer) — TRAP_TENANT_LABEL kodda okunuyor mu?"
