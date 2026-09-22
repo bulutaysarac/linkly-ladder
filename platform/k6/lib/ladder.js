@@ -23,8 +23,13 @@ export const LEVEL = __ENV.LEVEL || 'unknown';
 export const TENANT = __ENV.TENANT || 't1';
 const URL_SIZE = parseInt(__ENV.URL_SIZE || '0', 10);
 
+// 13'ten itibaren yazma ucu Bearer anahtar istiyor; anahtar boşsa başlık hiç gönderilmez.
+// Kiracıyı artık ANAHTAR belirler — X-Tenant-ID yalnızca 13 öncesinde (ve P13-01'in tuzağında)
+// dikkate alınır. İkisini de göndermek bilinçli: merdiven aynı senaryoyu 00'dan 14'e koşturuyor.
+export const API_KEY = __ENV.API_KEY || '';
 export function headers(extra = {}) {
-  return { 'Content-Type': 'application/json', 'X-Tenant-ID': TENANT, ...extra };
+  const auth = API_KEY ? { Authorization: `Bearer ${API_KEY}` } : {};
+  return { 'Content-Type': 'application/json', 'X-Tenant-ID': TENANT, ...auth, ...extra };
 }
 
 let seq = 0;

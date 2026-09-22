@@ -54,8 +54,16 @@ func main() {
 	defer primary.Close()
 	met.BindPoolStats(primary.PoolStats)
 
+	rdb := redis.NewClient(&redis.Options{
+		Addr: cfg.RedisAddr, DialTimeout: cfg.RedisTimeout,
+		ReadTimeout: cfg.RedisTimeout, WriteTimeout: cfg.RedisTimeout, PoolSize: 20,
+	})
+	defer rdb.Close()
+
 	// Okuma/yazma ayrımı: DATABASE_URL_RO verilmişse okumalar replikalara gider.
 	// Sticky pencere, yazma sonrası okumaları primary'ye yapıştırarak read-your-writes'ı korur.
+	// İşaret PAYLAŞILAN (Redis): oluşturma api-svc'de, yönlendirme redirect-svc'de olduğu için
+	// süreç içi bir işaret iki servis arasında hiçbir zaman görünmezdi (bkz. store/recent.go).
 	var db store.Store = primary
 	if cfg.DatabaseURLRO != "" {
 		replica, rerr := store.OpenWithMode(ctx, cfg.DatabaseURLRO, cfg.DBMaxConns, dbMet, cfg.TrapPreparedStatements)
@@ -68,16 +76,11 @@ func main() {
 			if cfg.TrapNoSticky {
 				sticky = 0
 			}
-			db = store.NewReadWrite(primary, replica, sticky, store.NewRWMetrics(met.Registry()))
-			log.Info("okuma/yazma ayrımı açık", "sticky_window", sticky)
+			recent := store.NewSharedRecent(rdb, "linkly:ryw:", 2*time.Minute)
+			db = store.NewReadWrite(primary, replica, sticky, store.NewRWMetrics(met.Registry()), recent)
+			log.Info("okuma/yazma ayrımı açık", "sticky_window", sticky, "isaret", "redis")
 		}
 	}
-
-	rdb := redis.NewClient(&redis.Options{
-		Addr: cfg.RedisAddr, DialTimeout: cfg.RedisTimeout,
-		ReadTimeout: cfg.RedisTimeout, WriteTimeout: cfg.RedisTimeout, PoolSize: 20,
-	})
-	defer rdb.Close()
 	l2 := cache.NewRedis[store.Link](rdb, cache.Config{
 		TTL: cfg.CacheTTL, NegativeTTL: cfg.CacheNegativeTTL, Layer: "l2",
 		NoNegative: cfg.TrapNoNegative, NoJitter: cfg.TrapNoJitter,

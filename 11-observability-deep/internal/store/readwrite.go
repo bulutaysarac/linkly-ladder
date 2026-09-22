@@ -31,8 +31,13 @@ type ReadWrite struct {
 	// stickyWindow: bir kiracı yazdıktan sonra bu süre boyunca okumaları da primary'den yap.
 	// read-your-writes garantisinin en ucuz gerçekleştirimi (P09-01'in çözümü).
 	stickyWindow time.Duration
-	recent       *recentWrites
+	recent       RecentWrites
 }
+
+// rywDetectWindow — İHLAL TESPİTİ penceresi, yapışkan pencereden BAĞIMSIZ.
+// Yapışkan okuma kapalıyken (TRAP_NO_STICKY) stickyWindow 0'dır; ihlali yine de saymak
+// istiyoruz, yoksa "yapışkan kapalı" durumunda sayaç da susar ve deney KENDİ ÖLÇÜSÜNÜ siler.
+const rywDetectWindow = 5 * time.Second
 
 type RWMetrics struct {
 	Routed        *prometheus.CounterVec // target
@@ -56,9 +61,12 @@ func NewRWMetrics(reg prometheus.Registerer) *RWMetrics {
 	return m
 }
 
-func NewReadWrite(primary, replica Store, stickyWindow time.Duration, m *RWMetrics) *ReadWrite {
+func NewReadWrite(primary, replica Store, stickyWindow time.Duration, m *RWMetrics, recent RecentWrites) *ReadWrite {
+	if recent == nil {
+		recent = NewLocalRecent()
+	}
 	return &ReadWrite{primary: primary, replica: replica, m: m,
-		stickyWindow: stickyWindow, recent: newRecentWrites()}
+		stickyWindow: stickyWindow, recent: recent}
 }
 
 // reader — bu okuma nereden yapılmalı?
@@ -66,7 +74,7 @@ func (rw *ReadWrite) reader(code string) Store {
 	if rw.replica == nil {
 		return rw.primary
 	}
-	if rw.stickyWindow > 0 && rw.recent.wroteRecently(code, rw.stickyWindow) {
+	if rw.stickyWindow > 0 && rw.recent.WroteRecently(code, rw.stickyWindow) {
 		rw.m.StickyReads.Inc()
 		rw.m.Routed.WithLabelValues("primary").Inc()
 		return rw.primary
@@ -78,13 +86,23 @@ func (rw *ReadWrite) reader(code string) Store {
 func (rw *ReadWrite) CreateUnique(ctx context.Context, l *Link) error {
 	err := rw.primary.CreateUnique(ctx, l)
 	if err == nil {
-		rw.recent.mark(l.Code)
+		rw.recent.Mark(l.Code)
 	}
 	return err
 }
 
 func (rw *ReadWrite) Get(ctx context.Context, code string) (*Link, error) {
-	return rw.reader(code).Get(ctx, code)
+	src := rw.reader(code)
+	l, err := src.Get(ctx, code)
+	// KENDİ YAZDIĞINI OKUYAMAMA, tam burada ölçülür: okuma REPLİKAYA gitti, satır YOK ve o kodu
+	// az önce biz yazdık. Bu üçü aynı anda doğruysa kullanıcı 404 aldı — sistem "çalışıyor"du.
+	// Sayacı burada artırmak, ihlali sunucu tarafında GÖRÜNÜR kılar; daha önce yalnızca k6
+	// tarafında sayılıyordu ve `ryw_violations_total` hiçbir zaman artmadığı için ölçüm
+	// scriptleri 0'ı "sorun yok" diye okuyordu.
+	if err != nil && src != rw.primary && rw.recent.WroteRecently(code, rywDetectWindow) {
+		rw.m.RYWViolations.Inc()
+	}
+	return l, err
 }
 
 func (rw *ReadWrite) IncrementClicks(ctx context.Context, code string) error {
@@ -94,7 +112,7 @@ func (rw *ReadWrite) IncrementClicks(ctx context.Context, code string) error {
 func (rw *ReadWrite) Delete(ctx context.Context, tenant, code string) error {
 	err := rw.primary.Delete(ctx, tenant, code)
 	if err == nil {
-		rw.recent.mark(code)
+		rw.recent.Mark(code)
 	}
 	return err
 }

@@ -2,8 +2,12 @@
 # POST /api/links → GET /{code} 30x. Ingress'in host'u çözmesi birkaç saniye alabilir → retry.
 set -euo pipefail
 : "${BASE_URL:?}"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/apikey.sh"
+# 13'ten itibaren yazma ucu kimlik istiyor. Anahtar yoksa AUTH kapalıdır ve başlık boş kalır.
+AUTH=(); key=$(ladder_api_key || true)
+[[ -n "${key:-}" ]] && AUTH=(-H "Authorization: Bearer $key")
 for i in $(seq 1 30); do
-  code=$(curl -sf -XPOST "$BASE_URL/api/links" -H 'Content-Type: application/json' -d '{"url":"https://example.com/smoke"}' 2>/dev/null | jq -r .code 2>/dev/null || true)
+  code=$(curl -sf -XPOST "$BASE_URL/api/links" -H 'Content-Type: application/json' "${AUTH[@]}" -d '{"url":"https://example.com/smoke"}' 2>/dev/null | jq -r .code 2>/dev/null || true)
   [[ -n "$code" && "$code" != "null" ]] && break
   sleep 2
 done

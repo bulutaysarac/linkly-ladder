@@ -70,11 +70,11 @@ deploy: ## kubectl apply -k deploy/ (IMAGE_TAG yerine gerçek tag)
 	@for i in 1 2 3; do 	  if kubectl kustomize deploy/ | sed 's|:IMAGE_TAG|:$(TAG)|g' | kubectl apply -f -; then exit 0; fi; 	  echo "  apply başarısız (deneme $$i/3), 20 sn sonra tekrar"; sleep 20; 	done; exit 1
 
 wait: ## Deployment/StatefulSet + (varsa) Argo Rollout hazır olana kadar bekle
-	@for d in $$(kubectl -n $(NS) get deploy,statefulset -o name 2>/dev/null); do kubectl -n $(NS) rollout status $$d --timeout=240s || exit 1; done
-	@# `kubectl rollout status` Argo Rollout'u tanımaz (yalnızca yerleşik türler). 12+ seviyelerde
-	@# beklemezsek smoke, henüz hazır olmayan bir uygulamaya çarpar.
-	@# CNPG Cluster'ı da bekle: operatör pod'ları doğrudan yaratır, ortada Deployment/StatefulSet
-	@# YOKTUR — yani yukarıdaki döngü onu hiç görmez ve smoke, veritabanı gelmeden koşar.
+	@# SIRA ÖNEMLİ: önce VERİTABANI, sonra uygulama. Uygulamanın readiness'i DB ping'ine bağlı,
+	@# yani DB'den önce beklenen bir Deployment kaçınılmaz olarak zaman aşımına uğrar. Bu tam
+	@# olarak 14'ün kurulamama sebebiydi: `deploy/api` 240 sn bekledi, CNPG ondan sonra gelecekti.
+	@# Bir bekleme sırası, bağımlılık sırasının TERSİ olamaz.
+	@# CNPG Cluster'ı Deployment/StatefulSet döngüsü GÖRMEZ: operatör pod'ları doğrudan yaratır.
 	@for c in $$(kubectl -n $(NS) get cluster.postgresql.cnpg.io -o name 2>/dev/null); do \
 	  want=$$(kubectl -n $(NS) get $$c -o jsonpath='{.spec.instances}'); \
 	  for i in $$(seq 1 150); do \
@@ -83,6 +83,9 @@ wait: ## Deployment/StatefulSet + (varsa) Argo Rollout hazır olana kadar bekle
 	  done; \
 	  echo "  $$c hazır: $${got:-0}/$${want:-1}"; \
 	done
+	@for d in $$(kubectl -n $(NS) get deploy,statefulset -o name 2>/dev/null); do kubectl -n $(NS) rollout status $$d --timeout=300s || exit 1; done
+	@# `kubectl rollout status` Argo Rollout'u tanımaz (yalnızca yerleşik türler). 12+ seviyelerde
+	@# beklemezsek smoke, henüz hazır olmayan bir uygulamaya çarpar.
 	@for r in $$(kubectl -n $(NS) get rollout -o name 2>/dev/null); do \
 	  want=$$(kubectl -n $(NS) get $$r -o jsonpath='{.spec.replicas}'); \
 	  for i in $$(seq 1 120); do \
