@@ -14,21 +14,35 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # KESİNTİYE çevirirsin. Bu script ikisini de ölçüyor: neyi koruduğunu VE neye mal olduğunu.
 ensure_healthy
 prim=$(dep_pod 'cnpg.io/cluster=pg,cnpg.io/instanceRole=primary') || exit 2
-psql() { kubectl -n "$NS" exec "$prim" -c postgres -- psql -U postgres -d linkly -tAc "$1" 2>&1; }
+# -q ŞART: -tA komut etiketlerini (SET, INSERT 0 1) SUSTURMAZ. Çok ifadeli bir sorguda ilk
+# etiket çıktının başına yapışır ve "tenant=acme → SET" gibi bir satır elde edersin — sayı
+# sandığın şey aslında bir komut adıdır.
+psql()  { kubectl -n "$NS" exec "$prim" -c postgres -- psql -U postgres -d linkly -qtAc "$1" 2>&1; }
+# SÜPER KULLANICI RLS'İ ATLAR — FORCE bile onu bağlamaz (FORCE yalnızca tablo SAHİBİNİ bağlar).
+# Bu scriptin ilk hâli `postgres` ile sorguluyordu ve RLS açıkken bile 568 satır görüyordu:
+# politika çalışıyordu, biz onu göremiyorduk. Uygulamanın gördüğünü görmek için uygulamanın
+# ROLÜYLE sor. "Ben veritabanında kontrol ettim, veri görünüyor" cümlesi, hangi rolle baktığını
+# söylemiyorsa bir bilgi taşımaz.
+# EN: a superuser bypasses RLS entirely; FORCE only binds the table OWNER. Querying as `postgres`
+# showed all rows with the policy active — the policy worked, we just could not see it.
+appq() { psql "SET ROLE linkly; $1"; }
+BKEY=${BKEY:-globex-key-3a71}
 on_cleanup "kubectl -n \"$NS\" exec $prim -c postgres -- psql -U postgres -d linkly -tAc \"ALTER TABLE links NO FORCE ROW LEVEL SECURITY; DROP POLICY IF EXISTS links_tenant_isolation ON links; ALTER TABLE links DISABLE ROW LEVEL SECURITY\" >/dev/null 2>&1 || true"
 
-step "Başlangıç: iki kiracı için veri üret"
-for t in acme globex; do
-  for _ in 1 2 3; do
-    curl -s -o /dev/null -XPOST "$BASE_URL/api/links" -H 'Content-Type: application/json' \
-      "${AUTH_HDR[@]}" -H "X-Tenant-ID: $t" -d '{"url":"https://example.com/rls"}'
-  done
-done
+step "Başlangıç: İKİ kiracı için veri üret (kiracıyı ANAHTAR belirler, header değil)"
+# X-Tenant-ID ile kiracı seçmek 13'te ARTIK ÇALIŞMIYOR (P13-01'in çözümü). Bu yüzden globex
+# satırlarını globex'in kendi anahtarıyla yaratmak zorundayız — yoksa tablodaki her satır
+# acme'nin olur ve "farklı kiracı farklı satır görür" iddiası ölçülemez hâle gelir.
+mk() { curl -s -o /dev/null -XPOST "$BASE_URL/api/links" -H 'Content-Type: application/json' \
+         -H "Authorization: Bearer $1" -d '{"url":"https://example.com/rls"}'; }
+for _ in 1 2 3; do mk "$(ladder_api_key)"; done
+for _ in 1 2 3; do mk "${BKEY:-globex-key-3a71}"; done
 total=$(psql "SELECT count(*) FROM links")
-note "links tablosunda toplam ${total:-?} satır"
+per_tenant=$(psql "SELECT string_agg(tenant||'='||n, ' · ') FROM (SELECT tenant, count(*) n FROM links GROUP BY tenant ORDER BY tenant) t")
+note "links tablosunda toplam ${total:-?} satır · kiracı dağılımı: ${per_tenant:-?}"
 
 step "UYGULAMA FİLTRESİ: 'WHERE tenant = ...' unutulursa ne olur?"
-leak=$(psql "SELECT count(*) FROM links")           # filtresiz sorgu = unutulmuş WHERE
+leak=$(appq "SELECT count(*) FROM links")          # filtresiz sorgu = unutulmuş WHERE
 note "filtresiz sorgu → ${leak:-?} satır döndü. HATA YOK, LOG YOK, ALARM YOK."
 note "Sızıntının tanımı bu: yanlış cevap, DOĞRU cevap gibi görünür."
 
@@ -43,12 +57,15 @@ note "FORCE olmadan tablo SAHİBİ politikayı ATLAR — politika yazılmış am
 note "(En sık atlanan detay: CNPG'de uygulama kullanıcısı çoğu tabloya sahiptir.)"
 
 step "Aynı unutulmuş sorgu, bu kez RLS altında"
-no_setting=$(psql "SELECT count(*) FROM links")
-as_acme=$(psql "SET app.tenant_id = 'acme'; SELECT count(*) FROM links")
-as_globex=$(psql "SET app.tenant_id = 'globex'; SELECT count(*) FROM links")
+no_setting=$(appq "SELECT count(*) FROM links")
+as_acme=$(appq "SET app.tenant_id = 'acme'; SELECT count(*) FROM links")
+as_globex=$(appq "SET app.tenant_id = 'globex'; SELECT count(*) FROM links")
+su_sees=$(psql "SELECT count(*) FROM links")
 note "app.tenant_id ayarsız → ${no_setting:-?} satır (önce ${leak:-?} idi)"
 note "tenant=acme → ${as_acme:-?} · tenant=globex → ${as_globex:-?}"
 note "Aynı SQL, farklı sonuç: filtreyi uygulama unutsa bile veritabanı hatırlıyor."
+note "Ama SÜPER KULLANICI (postgres) aynı sorguda ${su_sees:-?} satır görüyor — RLS onu bağlamaz."
+note "Yani 'veritabanından kontrol ettim' demek, HANGİ ROLLE baktığını söylemiyorsa bilgi taşımaz."
 
 step "BEDELİ ÖLÇ: uygulama kiracıyı bildirmiyorsa ne oluyor?"
 codes=0; errs=0
@@ -68,7 +85,7 @@ step "RLS'i kapat (temizlik zaten kayıtlı, ama ölçümü burada bitir)"
 psql "ALTER TABLE links NO FORCE ROW LEVEL SECURITY" >/dev/null
 psql "DROP POLICY IF EXISTS links_tenant_isolation ON links" >/dev/null
 psql "ALTER TABLE links DISABLE ROW LEVEL SECURITY" >/dev/null
-back=$(psql "SELECT count(*) FROM links")
+back=$(appq "SELECT count(*) FROM links")
 note "kapatıldıktan sonra filtresiz sorgu → ${back:-?} satır (sızıntı geri döndü)"
 
 grafana_hint "14 · Security → '401/403' · 05 · Postgres"
