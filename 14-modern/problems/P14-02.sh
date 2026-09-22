@@ -6,8 +6,19 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # EN-İYİ-ÇABA olduğunu, yani kaçan bir mesajın L1 TTL'i kadar bayatlık bıraktığını gösteriyor.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
-on_cleanup "setenv rollout/redirect TRAP_NO_INVALIDATION_PUBSUB- 2>/dev/null || setenv "$(wl redirect)" TRAP_NO_INVALIDATION_PUBSUB-"
-setenv() { setenv rollout/redirect "$@" >/dev/null 2>&1 || setenv "$(wl redirect)" "$@" >/dev/null; }
+on_cleanup "setenv \"$(wl redirect)\" TRAP_NO_INVALIDATION_PUBSUB-"
+# YEREL SARMALAYICI KENDİ ADINI KULLANAMAZ.
+# EN: this line used to read `setenv() { setenv rollout/redirect "$@" ... }` — the inner call is
+#     the function itself, so it recursed until the stack blew up (`Segmentation fault: 11`) and
+#     the script hung instead of measuring. The bulk rename that introduced `setenv` rewrote both
+#     the CALL SITE and this WRAPPER, and the wrapper's whole job was to call the thing it was
+#     renamed to. Rename the wrapper, not the callee.
+# TR: bu satır `setenv() { setenv rollout/redirect "$@" ... }` idi — içteki çağrı fonksiyonun
+#     KENDİSİ, yani yığın taşana kadar özyineledi (`Segmentation fault: 11`) ve script ölçüm
+#     yapmak yerine asıldı. `setenv`i getiren toplu değiştirme hem ÇAĞRI YERİNİ hem bu
+#     SARMALAYICIYI değiştirdi; sarmalayıcının bütün işi ise yeni adı çağırmaktı.
+#     Sarmalayıcıyı yeniden adlandır, çağrılanı değil.
+redirect_env() { setenv "$(wl redirect)" "$@" >/dev/null; }
 waitrollout() { kubectl -n "$NS" rollout status rollout/redirect --timeout=240s >/dev/null 2>&1 || kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=240s >/dev/null 2>&1 || true; }
 # Anahtar KÜMEDEN okunur (platform/lib/apikey.sh): manifest tek kaynak kalsın. Sabit yazarsak
 # Secret değiştiği gün script sessizce 401 alır ve "koruma çalışıyor" diye yanlış okunur.
@@ -26,13 +37,13 @@ stale_after_delete() {
   echo "$alive"
 }
 step "(1) Pub/sub yayını AÇIK (varsayılan)"
-setenv TRAP_NO_INVALIDATION_PUBSUB-
+redirect_env TRAP_NO_INVALIDATION_PUBSUB-
 on_ok=$(stale_after_delete)
 sent=$(promq "sum(increase(cache_invalidation_messages_total{namespace=\"$NS\",direction=\"sent\"}[5m]))")
 recv=$(promq "sum(increase(cache_invalidation_messages_total{namespace=\"$NS\",direction=\"received\"}[5m]))")
 note "yayın açık: silmeden sonra 40 okumadan $on_ok tanesi hâlâ yönlendiriyor · yayın gönderildi=${sent%%.*} alındı=${recv%%.*}"
 step "(2) TRAP_NO_INVALIDATION_PUBSUB: L1 var, yayın YOK (03'ün hâli)"
-setenv TRAP_NO_INVALIDATION_PUBSUB=true
+redirect_env TRAP_NO_INVALIDATION_PUBSUB=true
 off_bad=$(stale_after_delete)
 note "yayın kapalı: 40 okumadan $off_bad tanesi hâlâ yönlendiriyor"
 l1ttl=$(kubectl -n "$NS" get rollout redirect -o jsonpath='{range .spec.template.spec.containers[0].env[?(@.name=="L1_TTL")]}{.value}{end}' 2>/dev/null) || true

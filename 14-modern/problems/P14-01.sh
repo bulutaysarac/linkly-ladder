@@ -7,8 +7,19 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
 need_metric redis_commands_processed_total "redis ServiceMonitor deploy/servicemonitor.yaml'da mı?"
-on_cleanup "setenv rollout/redirect L1_ENABLED=true 2>/dev/null || setenv "$(wl redirect)" L1_ENABLED=true"
-setenv() { setenv rollout/redirect "$@" >/dev/null 2>&1 || setenv "$(wl redirect)" "$@" >/dev/null; }
+on_cleanup "setenv \"$(wl redirect)\" L1_ENABLED=true"
+# YEREL SARMALAYICI KENDİ ADINI KULLANAMAZ.
+# EN: this line used to read `setenv() { setenv rollout/redirect "$@" ... }` — the inner call is
+#     the function itself, so it recursed until the stack blew up (`Segmentation fault: 11`) and
+#     the script hung instead of measuring. The bulk rename that introduced `setenv` rewrote both
+#     the CALL SITE and this WRAPPER, and the wrapper's whole job was to call the thing it was
+#     renamed to. Rename the wrapper, not the callee.
+# TR: bu satır `setenv() { setenv rollout/redirect "$@" ... }` idi — içteki çağrı fonksiyonun
+#     KENDİSİ, yani yığın taşana kadar özyineledi (`Segmentation fault: 11`) ve script ölçüm
+#     yapmak yerine asıldı. `setenv`i getiren toplu değiştirme hem ÇAĞRI YERİNİ hem bu
+#     SARMALAYICIYI değiştirdi; sarmalayıcının bütün işi ise yeni adı çağırmaktı.
+#     Sarmalayıcıyı yeniden adlandır, çağrılanı değil.
+redirect_env() { setenv "$(wl redirect)" "$@" >/dev/null; }
 waitrollout() { kubectl -n "$NS" rollout status rollout/redirect --timeout=240s >/dev/null 2>&1 || kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=240s >/dev/null 2>&1 || true; }
 measure() {
   waitrollout; for _ in $(seq 1 25); do serving && break; sleep 2; done
@@ -21,11 +32,11 @@ measure() {
   echo "$p50 $p99 $redisops"
 }
 step "(1) Yalnızca L2 (04 davranışı)"
-setenv L1_ENABLED=false
+redirect_env L1_ENABLED=false
 read -r p50a p99a opsa <<< "$(measure)"
 note "L2-only: p50=$(awk -v v="$p50a" 'BEGIN{printf "%.2f", v*1000}') ms · p99=$(awk -v v="$p99a" 'BEGIN{printf "%.1f", v*1000}') ms · Redis ops/s=$(awk -v v="$opsa" 'BEGIN{printf "%.0f", v}')"
 step "(2) L1+L2 (14 davranışı)"
-setenv L1_ENABLED=true
+redirect_env L1_ENABLED=true
 read -r p50b p99b opsb <<< "$(measure)"
 note "L1+L2:  p50=$(awk -v v="$p50b" 'BEGIN{printf "%.2f", v*1000}') ms · p99=$(awk -v v="$p99b" 'BEGIN{printf "%.1f", v*1000}') ms · Redis ops/s=$(awk -v v="$opsb" 'BEGIN{printf "%.0f", v}')"
 l1hit=$(promq "sum(rate(cache_ops_total{namespace=\"$NS\",layer=\"l1\",result=\"hit\"}[2m])) / clamp_min(sum(rate(cache_ops_total{namespace=\"$NS\",layer=\"l1\"}[2m])),0.001)")

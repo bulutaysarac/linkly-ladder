@@ -123,5 +123,26 @@ if [[ -f "$cfg" && -f "$D/README.md" ]]; then
   done < <(grep -oE '^\| `(TRAP_[A-Z0-9_]+)`' "$D/README.md" | grep -oE 'TRAP_[A-Z0-9_]+' | sort -u)
 fi
 
+# 11. YEREL SARMALAYICI KENDİ ADINI ÇAĞIRMASIN.
+# EN: `setenv() { setenv ...; }` recurses until the stack blows up and the script hangs instead of
+#     measuring. It happened twice tonight, both times because a bulk rename rewrote the wrapper's
+#     body along with the call sites. Only single-line wrappers whose body starts with a SHELL
+#     word equal to the function name are flagged, so `psql() { kubectl exec ... psql ...; }` —
+#     where the inner `psql` is a binary inside the container — stays legal.
+# TR: `setenv() { setenv ...; }` yığın taşana kadar özyineler ve script ölçüm yapmak yerine asılır.
+#     Bu gece iki kez oldu; ikisinde de toplu bir yeniden adlandırma, çağrı yerleriyle birlikte
+#     sarmalayıcının GÖVDESİNİ de değiştirdi. Yalnızca gövdesi fonksiyon adıyla BAŞLAYAN tek
+#     satırlık sarmalayıcılar işaretlenir; `psql() { kubectl exec ... psql ...; }` gibi içteki ad
+#     konteyner içindeki bir ikili olduğunda serbest kalır.
+for f in "$D"/problems/P*.sh; do
+  [[ -e "$f" ]] || continue
+  while IFS= read -r line; do
+    fn=${line%%(*}
+    body=${line#*\{}
+    body=$(printf '%s' "$body" | sed 's/^[[:space:]]*//')
+    [[ "${body%% *}" == "$fn" ]] && err "$(basename "$f"): $fn() kendini çağırıyor (özyineleme)"
+  done < <(grep -E '^[a-z_][a-z0-9_]*\(\)[[:space:]]*\{.*\}[[:space:]]*$' "$f" || true)
+done
+
 [[ $fail == 0 ]] && echo "  ✔ $name iskelet OK"
 exit $fail
