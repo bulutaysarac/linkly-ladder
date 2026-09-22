@@ -33,16 +33,28 @@ hard_timeout() {
 #     "bozuk" kaydetmeye devam etti. "Seviye bozuk" ile "küme bozuk" ayrımını yapamayan bir tur,
 #     kimsenin bir şey yapamayacağı bir rapor üretir. Her seviyeden önce platformu bekle.
 wait_platform() {
-  local budget=${PLATFORM_TIMEOUT:-900} waited=0 bad
+  local budget=${PLATFORM_TIMEOUT:-900} waited=0 bad prom_ok
   while (( waited < budget )); do
     if kubectl get --raw=/readyz >/dev/null 2>&1; then
       bad=$(kubectl get pods -A --no-headers 2>/dev/null \
             | awk '$4!="Running" && $4!="Completed"' | wc -l | tr -d ' ')
-      [[ "${bad:-1}" == "0" ]] && { (( waited > 0 )) && echo "  (platform ${waited} sn'de hazır oldu)"; return 0; }
+      # POD'UN "Running" OLMASI, SERVİSİN CEVAP VERMESİ DEMEK DEĞİLDİR.
+      # EN: Prometheus was OOMKilled mid-WAL-replay and crash-looped; every query returned 503
+      #     while the sweep kept going and `promq` returned 0 for everything — verdicts with no
+      #     measurement behind them. What the experiments depend on is the QUERY endpoint, so
+      #     check that, not the pod phase.
+      # TR: Prometheus WAL oynatırken OOMKilled olup döngüye girdi; her sorgu 503 dönerken tur
+      #     devam etti ve `promq` her şeye 0 dedi — ardında ölçüm olmayan hükümler. Deneylerin
+      #     bağlı olduğu şey SORGU UCUdur; pod fazına değil ona bak.
+      prom_ok=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+                  -XPOST "${PROM_URL:-http://prometheus.localtest.me}/api/v1/query" \
+                  --data-urlencode 'query=sum(up)' 2>/dev/null)
+      [[ "${bad:-1}" == "0" && "${prom_ok:-}" == "200" ]] \
+        && { (( waited > 0 )) && echo "  (platform ${waited} sn'de hazır oldu)"; return 0; }
     fi
     sleep 15; waited=$(( waited + 15 ))
   done
-  echo "✘ PLATFORM HAZIR DEĞİL (${budget} sn) — seviye değil KÜME bozuk; tur durduruluyor"
+  echo "✘ PLATFORM HAZIR DEĞİL (${budget} sn) — seviye değil KÜME bozuk (hazır olmayan pod=${bad:-?}, Prometheus HTTP=${prom_ok:-?}); tur durduruluyor"
   return 1
 }
 
