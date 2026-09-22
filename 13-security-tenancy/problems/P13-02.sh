@@ -71,7 +71,7 @@ step "BEDELİ ÖLÇ: uygulama kiracıyı bildirmiyorsa ne oluyor?"
 codes=0; errs=0
 for _ in 1 2 3; do
   st=$(curl -s -o /dev/null -w '%{http_code}' -XPOST "$BASE_URL/api/links" \
-        -H 'Content-Type: application/json' "${AUTH_HDR[@]}" -d '{"url":"https://example.com/cost"}')
+        -H 'Content-Type: application/json' ${AUTH_HDR[@]+"${AUTH_HDR[@]}"} -d '{"url":"https://example.com/cost"}')
   [[ "$st" == 2* ]] && codes=$(( codes + 1 )) || errs=$(( errs + 1 ))
 done
 note "RLS açıkken uygulama yazması: $codes başarılı · $errs başarısız"

@@ -79,14 +79,14 @@ unset _k
 # o zaman script "NOT-REPRODUCED" diyemiyor, ERROR veriyordu. Artık kod yoksa BOŞ döner.
 create_link() {
   local body
-  body=$(curl -s -XPOST "$BASE_URL/api/links" -H 'Content-Type: application/json' "${AUTH_HDR[@]}" \
+  body=$(curl -s -XPOST "$BASE_URL/api/links" -H 'Content-Type: application/json' ${AUTH_HDR[@]+"${AUTH_HDR[@]}"} \
            -d "{\"url\":\"$1\"}" 2>/dev/null) || true
   printf '%s' "$body" | jq -r '.code // empty' 2>/dev/null || true
 }
 # Oluşturma denemesinin HTTP durumu (reddedildi mi, neden?) — doğrulama testleri bunu okur.
 create_status() {
   curl -s -o /dev/null -w '%{http_code}' -XPOST "$BASE_URL/api/links" \
-    -H 'Content-Type: application/json' "${AUTH_HDR[@]}" -d "{\"url\":\"$1\"}" 2>/dev/null || echo 000
+    -H 'Content-Type: application/json' ${AUTH_HDR[@]+"${AUTH_HDR[@]}"} -d "{\"url\":\"$1\"}" 2>/dev/null || echo 000
 }
 status_of()   { curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$BASE_URL/$1"; }
 header_of()   { curl -sI --max-time 5 "$BASE_URL/$1" | tr -d '\r' | awk -v h="$2" 'tolower($1)==tolower(h)":"{ $1=""; sub(/^ /,""); print }'; }
@@ -292,7 +292,7 @@ trap run_cleanup EXIT INT TERM
 # Gerçekten hizmet veriyor mu? (Running olmak yetmez: crashloop'taki pod da anlık Running görünür.)
 serving() {
   local c
-  c=$(curl -sf --max-time 4 -XPOST "$BASE_URL/api/links" -H 'Content-Type: application/json' "${AUTH_HDR[@]}" \
+  c=$(curl -sf --max-time 4 -XPOST "$BASE_URL/api/links" -H 'Content-Type: application/json' ${AUTH_HDR[@]+"${AUTH_HDR[@]}"} \
         -d '{"url":"https://example.com/healthprobe"}' 2>/dev/null | sed -n 's/.*"code":"\([^"]*\)".*/\1/p')
   [[ -n "$c" ]]
 }

@@ -4,10 +4,23 @@ set -euo pipefail
 : "${BASE_URL:?}"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/apikey.sh"
 # 13'ten itibaren yazma ucu kimlik istiyor. Anahtar yoksa AUTH kapalıdır ve başlık boş kalır.
+# BOŞ DİZİ + set -u = bash 3.2'de "unbound variable".
+# EN: macOS ships bash 3.2, where `"${AUTH[@]}"` on an EMPTY array is an unbound-variable error
+#     under `set -u` (bash 4.4+ made it legal). Levels 13 and 14 define API keys, so the array is
+#     non-empty and everything worked; level 06 has no keys, the array is empty, and smoke died
+#     ten times in a row with a message that says nothing about authentication.
+#     The safe idiom is `${AUTH[@]+"${AUTH[@]}"}`: expand only if the array is set.
+#     A feature that only breaks in the EMPTY case is the kind you ship after testing the full one.
+# TR: macOS bash 3.2 ile gelir; orada BOŞ bir dizinin `"${AUTH[@]}"` açılımı `set -u` altında
+#     "unbound variable" hatasıdır (bash 4.4+ bunu serbest bıraktı). 13 ve 14 API anahtarı
+#     tanımlıyor, dizi dolu, her şey çalıştı; 06'da anahtar yok, dizi boş ve smoke on kez üst üste
+#     kimlik doğrulamadan HİÇ BAHSETMEYEN bir mesajla öldü.
+#     Güvenli deyim `${AUTH[@]+"${AUTH[@]}"}`: yalnızca dizi tanımlıysa aç.
+#     Yalnızca BOŞ durumda kırılan bir özellik, dolu durumu test edip gönderdiğin özelliktir.
 AUTH=(); key=$(ladder_api_key || true)
 [[ -n "${key:-}" ]] && AUTH=(-H "Authorization: Bearer $key")
 for i in $(seq 1 30); do
-  code=$(curl -sf -XPOST "$BASE_URL/api/links" -H 'Content-Type: application/json' "${AUTH[@]}" -d '{"url":"https://example.com/smoke"}' 2>/dev/null | jq -r .code 2>/dev/null || true)
+  code=$(curl -sf -XPOST "$BASE_URL/api/links" -H 'Content-Type: application/json' ${AUTH[@]+"${AUTH[@]}"} -d '{"url":"https://example.com/smoke"}' 2>/dev/null | jq -r .code 2>/dev/null || true)
   [[ -n "$code" && "$code" != "null" ]] && break
   sleep 2
 done
