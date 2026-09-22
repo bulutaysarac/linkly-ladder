@@ -132,6 +132,18 @@ listeye bak.
 | Deney **kendisi müdahale ederse** iki seviye aynı çıkar | P06-02 tüketiciyi kendi açıyordu; "07 bunu çözdü" iddiası doğrulanamıyordu |
 | Arızanın işareti her zaman **hata kodu değildir** | Donmuş node'da 5xx yok, sadece iş bitmiyordu (120 sn'de 13 istek) |
 | Bir korumanın değerini ölçerken **diğer korumayı kaldır** | 5 sn'lik preStop, readiness'ın "HAYIR" diyebilmesini gizliyordu |
+| **Düşemeyen** bir deney, deney değildir | P08-04 tuzağı hiç açmıyordu; P11-08 "metriklerde görünmez" tezini metrik farkıyla sınıyordu. Karar yazınca sor: *iddiam yanlış olsaydı bu ölçü ne gösterirdi?* |
+| Tuzağın **koda bağlı** olduğunu doğrula | Dört `TRAP_*` config'de vardı, kodda hiç okunmuyordu — deney bayrağı açıyor, sistem değişmiyor, script yine karar basıyordu (lint kuralı 9 artık yakalıyor) |
+| `>=` / `<=` kararları **0 vs 0'da geçer** | Başarısız bir ölçüm, geçen bir deneye dönüşüyordu — kanıt gibi görünen bir yanlış pozitif |
+| **Boş** ölçüm, olumsuz ölçüm değildir | Pod çıktı üretmeden log okununca "yetkisiz pod DB'ye ulaştı" sanıldı; gerçekte engellenmişti (P13-03) |
+| Koruma devreye girdiğinde **neyi değerlendirdiğini** sor | Canary, analiz Prometheus'a ULAŞAMADIĞI için durdu; script bunu "kötü sürüm yakalandı" diye okudu (P12-01) |
+| Cevabı **kendi yapılandırmanla sabitlenmiş** soruyu sorma | `hot_standby_feedback=on` iken "çakışma oldu mu?" sorusunun cevabı zaten hayırdır (P09-04) |
+| **Hangi rolle** baktığını söyle | RLS açıkken `postgres` süper kullanıcısı tüm satırları görüyordu: politika çalışıyordu, biz göremiyorduk (P13-02) |
+| Yavaşlatacağın **süreci doğru seç** | Yarışın penceresi offset commit'indeydi; script veritabanını geciktiriyordu (P06-01) |
+| Aracın **kendi hatasını susturma** | `curl -f` gövdeyi atıyor, geriye "curl 22" kalıyor ve Prometheus'un gerçek mesajı kayboluyor |
+| Yük üretecinin **gerçekten koştuğunu** doğrula | `--duration`, senaryo tanımlı k6 dosyalarında koşuyu hiç başlatmıyor; `\|\| true` bunu yutuyor ve 0 istek "fark yok" diye okunuyordu |
+| **Belgelediğin aracı bağla** | README pprof komutu öneriyordu, `net/http/pprof` hiç kaydedilmemişti; okuyucu tekniğin çalışmadığı sonucuna varır |
+| **Her zaman boş** bir panel, olmayan panelden kötüdür | Kyverno metrikleri hiç kazınmıyordu: "ihlal yok" gibi okunuyordu, "veri yok" değil |
 
 ## Sayılarla
 
