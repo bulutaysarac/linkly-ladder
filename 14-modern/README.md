@@ -29,12 +29,22 @@ flowchart LR
 
 ## 3. Önceki seviyeden çözülenler
 
-| ID | Sorun | Nasıl çözüldü |
-|---|---|---|
-| P13-06 | Enumeration maliyeti / 404 taraması | L1 sayesinde negatif kayıtlar da pod belleğinde: tarama artık Redis'e bile büyük ölçüde ulaşmıyor. *Tam çözüm değil (404 oranına özel limit hâlâ yok) ve README bunu söylüyor.* |
+**Hiçbiri — ve bu tabloyu boş bırakmak bilinçli bir karar.**
 
-Bunun dışında **kapatılan borçlar** (yeni sorun açmadıkları için tabloya değil buraya yazılı):
+Burada bir zamanlar P13-06 (enumeration) yazıyordu ve hemen yanında "*tam çözüm değil*" notu
+vardı. İkisi aynı anda doğru olamaz: bir sorun ya çözülmüştür ya da çözülmemiştir, ve
+`problems/SOLVES` kontratı bunu `verify-prev` ile ÖLÇER. P13-06'nın ölçüsü "tarama 404 üretti
+mi?"dir; tarama her zaman 404 üretir. L1'in negatif kayıtları bu 404'lerin **maliyetini**
+düşürür, **varlığını** değil. Dolayısıyla P13-06'yı SOLVES'a yazmak iki kötü seçenekten birine
+zorlardı: ya `verify-prev` kalıcı olarak kırık kalırdı, ya da ölçüyü iddiaya uyacak şekilde
+gevşetirdik — ki bu, merdivenin bütün amacının tersidir.
+
+14 bir "düzeltme" seviyesi değil, bir **sentez** seviyesidir: katkısı önceki bir sorunu silmek
+değil, sistemin tamamının aynı anda ayakta kalıp kalmadığını ölçmek (P14-05 game day).
+
+**Kapatılan borçlar** (yeni sorun açmadıkları ve `SOLVES` kontratına girmedikleri için burada):
 P04-02/P04-03 (L1 ile ağ adımı ve hot key), P06-03 (3 partition), P04-06 (`allkeys-lru`).
+P13-06'nın maliyeti de düştü — ama düşmek ile bitmek farklı şeylerdir.
 
 ## 4. Ayağa kaldırma
 

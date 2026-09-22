@@ -1,1 +1,16 @@
-P13-06
+# 14, 13'ün sorunlarından hiçbirini TAM olarak çözmüyor — ve bunu yazmak, yanlış bir iddiadan iyidir.
+#
+# Burada bir zamanlar P13-06 (enumeration) yazıyordu. 14'ün KENDİ README'si ise aynı satır için
+# "Tam çözüm değil (404 oranına özel limit hâlâ yok)" diyor. İkisi aynı anda doğru olamaz.
+# P13-06'nın ölçüsü "tarama 404 üretti mi?"dir ve tarama her zaman 404 üretir; L1'in negatif
+# kayıtları bu 404'lerin MALİYETİNİ düşürür, VARLIĞINI değil. Yani SOLVES'a yazmak, verify-prev'i
+# kalıcı olarak kırmaktan (ya da daha kötüsü: ölçüyü iddiaya uyacak şekilde gevşetmekten) başka
+# bir şey yapmazdı.
+#
+# 14 bir "düzeltme" seviyesi değil, bir SENTEZ seviyesi: L1+L2 (P14-01), geçersiz kılma kanalı
+# (P14-02), gerçek partition paralelliği (P14-03), ölçülmüş kapasite modeli (P14-04) ve hepsini
+# aynı anda sınayan game day (P14-05). Katkısı önceki bir sorunu silmek değil, sistemin
+# tamamının aynı anda ayakta kalıp kalmadığını ÖLÇMEK.
+#
+# Merdivenin kontratı bu yüzden "her seviye bir öncekini çözer" değil: "her seviye ne çözdüğünü
+# ve neyi ÇÖZMEDİĞİNİ ölçerek söyler".
