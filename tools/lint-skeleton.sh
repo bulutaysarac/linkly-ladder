@@ -179,8 +179,11 @@ done
 #     `x=$(promq "...")` — promq zaten NaN/Inf normalleştiriyor, `num` sarmalayıcısı gereksiz.
 for f in "$D"/problems/P*.sh; do
   [[ -e "$f" ]] || continue
-  if grep -Fq '"$(promq "' "$f"; then
-    err "$(basename "$f"): iç içe tırnaklı \$(promq ...) — süslü parantezler genişler, sorgu bozulur"
+  # Genel biçim: `"$( ... \" ... )"` — yani çift tırnak içindeki bir komut ikamesinin İÇİNDE
+  # kaçışlı tırnak. Zararsız olanlar (`"$(dirname "$0")"`, `"$(status_of "$code")"`) kaçış
+  # içermediği için elenmez.
+  if grep -Eq '"\$\([^)]*\\"' "$f"; then
+    err "$(basename "$f"): iç içe tırnaklı komut ikamesi (\"\$( ... \\\" ... )\") — süslü parantezler genişler, sorgu/argüman bozulur"
   fi
 done
 
