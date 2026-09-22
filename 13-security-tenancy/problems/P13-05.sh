@@ -7,7 +7,9 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 APP_SELECTOR="app.kubernetes.io/name=api"
 ensure_healthy
 on_cleanup "setenv "$(wl api)" TRAP_NO_DNS_CHECK-"
-AKEY=${AKEY:-acme-key-9f2c}
+# Anahtar KÜMEDEN okunur (platform/lib/apikey.sh): manifest tek kaynak kalsın. Sabit yazarsak
+# Secret değiştiği gün script sessizce 401 alır ve "koruma çalışıyor" diye yanlış okunur.
+AKEY=${AKEY:-$(ladder_api_key)}
 try() {
   curl -s -o /dev/null -w '%{http_code}' -XPOST "$BASE_URL/api/links" \
     -H 'Content-Type: application/json' -H "Authorization: Bearer $AKEY" -d "{\"url\":\"$1\"}"

@@ -9,7 +9,9 @@ ensure_healthy
 on_cleanup "setenv rollout/redirect TRAP_NO_INVALIDATION_PUBSUB- 2>/dev/null || setenv "$(wl redirect)" TRAP_NO_INVALIDATION_PUBSUB-"
 setenv() { setenv rollout/redirect "$@" >/dev/null 2>&1 || setenv "$(wl redirect)" "$@" >/dev/null; }
 waitrollout() { kubectl -n "$NS" rollout status rollout/redirect --timeout=240s >/dev/null 2>&1 || kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=240s >/dev/null 2>&1 || true; }
-AKEY=${AKEY:-acme-key-9f2c}
+# Anahtar KÜMEDEN okunur (platform/lib/apikey.sh): manifest tek kaynak kalsın. Sabit yazarsak
+# Secret değiştiği gün script sessizce 401 alır ve "koruma çalışıyor" diye yanlış okunur.
+AKEY=${AKEY:-$(ladder_api_key)}
 stale_after_delete() {
   waitrollout; for _ in $(seq 1 25); do serving && break; sleep 2; done
   local code alive=0

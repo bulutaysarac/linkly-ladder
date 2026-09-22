@@ -7,7 +7,9 @@ API_BASE="$BASE_URL"
 APP_SELECTOR="app.kubernetes.io/name=api"
 ensure_healthy
 on_cleanup "setenv "$(wl api)" TRAP_HEADER_TENANT-"
-AKEY=${AKEY:-acme-key-9f2c}
+# Anahtar KÜMEDEN okunur (platform/lib/apikey.sh): manifest tek kaynak kalsın. Sabit yazarsak
+# Secret değiştiği gün script sessizce 401 alır ve "koruma çalışıyor" diye yanlış okunur.
+AKEY=${AKEY:-$(ladder_api_key)}
 BKEY=${BKEY:-globex-key-3a71}
 step "acme kiracısı bir link oluşturuyor (kendi anahtarıyla)"
 code=$(curl -s -XPOST "$API_BASE/api/links" -H 'Content-Type: application/json' \
