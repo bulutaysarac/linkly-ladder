@@ -15,7 +15,15 @@ has_throttle=$(curl -s "$PROM_URL/api/v1/label/__name__/values" | jq -r '.data[]
 note "throttling metriği mevcut mu: $([[ ${has_throttle:-0} -gt 0 ]] && echo evet || echo HAYIR — ortam sınırı)"
 lim=$(kubectl -n "$NS" get "$(wl redirect)" -o jsonpath='{.spec.template.spec.containers[0].resources.limits.cpu}') || true
 req=$(kubectl -n "$NS" get "$(wl redirect)" -o jsonpath='{.spec.template.spec.containers[0].resources.requests.cpu}') || true
-on_cleanup "setres "$(wl redirect)" --limits=cpu=$lim"
+# İKİSİNİ TEK ÇAĞRIDA GERİ AL. requests ≤ limits bir DEĞİŞMEZdir ve ara durumda da geçerlidir:
+# önce requests'i 150m'ye geri alıp sonra limit'i yükseltirsen, aradaki an 150m > 50m olduğu için
+# API isteği REDDEDER ve temizlik sessizce yarım kalır — deney sonrası seviye dar kotada asılı
+# kalır. Birlikte bozulan iki alan birlikte düzeltilir.
+# EN: requests ≤ limits is an INVARIANT that also holds for intermediate states: restoring
+# requests to 150m before raising the limit back makes 150m > 50m and the API rejects it, so the
+# cleanup half-finishes and leaves the level pinned at the tight quota. Two fields that break
+# together must be fixed together.
+on_cleanup "setres "$(wl redirect)" --requests=cpu=${req:-150m} --limits=cpu=${lim:-500m}"
 on_cleanup "kubectl -n \"$NS\" scale "$(wl redirect)" --replicas=2"
 # ÖLÇÜM NOTU: throttling ancak kotaya ÇARPARSAN görünür. İlk hâl 2 replika × 300m limit ile
 # 40 VU koşuyordu; uygulama toplam 0.13 çekirdek kullandı, yani kotanın yakınına bile gitmedi
@@ -23,10 +31,15 @@ on_cleanup "kubectl -n \"$NS\" scale "$(wl redirect)" --replicas=2"
 # bu kümede zaten oynuyor, yani ölçüm gürültüyü okuyordu.
 # Doğrusu: TEK pod + dar kota + kotayı aşacak yük. Ölçü de p99 değil, throttling'in kendisi.
 TIGHT=${TIGHT:-50m}   # ÖLÇÜLDÜ: 200m kotada bile kısıtlama 0 çıktı; uygulama o kadar CPU istemiyor
-on_cleanup "setres "$(wl redirect)" --requests=cpu=${req:-150m}"
 step "TEK pod, dar kota ($TIGHT) ve kotayı aşacak yük"
 kubectl -n "$NS" scale "$(wl redirect)" --replicas=1 >/dev/null; wait_endpoints 1
-setres "$(wl redirect)" --requests=cpu=100m --limits=cpu=$TIGHT >/dev/null
+# requests AYNI ZAMANDA daraltılmalı: 100m istek, 50m limitle bir arada GEÇERSİZdir ve API
+# "must be less than or equal to cpu limit" ile reddeder — script tam burada, hiçbir şey ölçmeden
+# öldü. Kotayı daraltan her deney, isteği de daraltmak zorundadır.
+# EN: requests must shrink too: 100m request with a 50m limit is INVALID and the API rejects it
+# with "must be less than or equal to cpu limit" — the script died right here without measuring
+# anything. Any experiment that tightens the quota must tighten the request with it.
+setres "$(wl redirect)" --requests=cpu=$TIGHT --limits=cpu=$TIGHT >/dev/null
 kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=180s >/dev/null 2>&1 || true
 wait_endpoints 1; sleep 5
 k6run redirect --vus 120 --duration 60s >/dev/null 2>&1 || true

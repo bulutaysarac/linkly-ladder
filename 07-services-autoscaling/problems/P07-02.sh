@@ -14,7 +14,20 @@ hpamax=$(kubectl -n "$NS" get hpa redirect -o jsonpath='{.spec.maxReplicas}') ||
 note "max_connections=${maxconn%%.*} · redirect havuzu=$rpool × HPA max $hpamax = $(( ${rpool:-6} * ${hpamax:-12} ))"
 note "+ api ($apool × 2 = $(( ${apool:-15} * 2 ))) + tüketici (10) = $(( ${rpool:-6} * ${hpamax:-12} + ${apool:-15} * 2 + 10 )) > ${maxconn%%.*}"
 step "Merdiven yükü: rps kademeli artıyor, HPA ölçekliyor"
+# YÜK DB'YE ULAŞMALI, yoksa "darboğaz DB'ye taşındı" iddiası ÖLÇÜLEMEZ.
+# `stairs` 200 tohumlanmış kodu döndürür ve 04'ten beri önbellek PAYLAŞIMLI: isabet oranı ~%100,
+# yani Postgres neredeyse hiç sorgulanmaz. Ölçüldü: havuz beklemesi 0 ms, 0 DB hatası,
+# 38/100 bağlantı — ve script "DB baskısı yok" dedi. Oysa DB'ye hiç gitmemiştik.
+# Rastgele kodlar (scan) her istekte bir DB okuması üretir: deneyin ölçmek istediği durumu
+# deneyin KENDİSİ yaratmalıdır. (Aynı ders P06-01'de: pencereyi yanlış süreç besliyordu.)
+# EN: the load has to REACH the database or the claim cannot be measured. `stairs` replays 200
+# seeded codes and the cache has been SHARED since level 04, so the hit ratio is ~100% and
+# Postgres is barely queried — measured: 0 ms pool wait, 0 DB errors, 38/100 connections, and the
+# script concluded "no DB pressure" when we had simply never gone to the DB. Random codes (scan)
+# force one DB read per request. An experiment must produce the state it wants to measure.
+( k6run scan --vus 30 --duration 150s >/dev/null 2>&1 || true ) & scanpid=$!
 k6run stairs >/dev/null 2>&1 || true
+wait_pid_quiet "$scanpid"
 sleep 12
 pods=$(promq "max_over_time(kube_deployment_status_replicas_available{namespace=\"$NS\",deployment=\"redirect\"}[6m:15s])")
 conns=$(promq "max_over_time(sum(pg_stat_activity_count{namespace=\"$NS\"})[6m:15s])")

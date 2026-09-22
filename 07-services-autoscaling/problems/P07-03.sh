@@ -32,6 +32,15 @@ note "03'te (pod içi önbellek) aynı deney çok daha sert olurdu: her yeni pod
 note "Kalan soğukluk: DB bağlantı havuzu (MinConns), Go heap/JIT ve ingress'in upstream keşfi."
 note "Araçlar: startupProbe ile 'hazır' tanımını sıkılaştır, MinConns ile havuzu önden aç,"
 note "preStop+readiness ile trafiği kademeli al (slow start — ingress-nginx'te annotasyon)."
-awk -v w="$warm" -v p="$peak" 'BEGIN{exit !(p > w)}' \
+# SIFIR BİR TABAN HER ŞEYİ ARTIŞ GİBİ GÖSTERİR.
+# EN: `warm` comes from a Prometheus query; when that query fails `promq` returns 0 — and then
+#     "p > w" is true for ANY peak, so a broken measurement reports REPRODUCED and looks like
+#     proof of a cold-start effect. It happened: the query failed, warm printed as 0.0 ms and the
+#     verdict passed on a number that was never measured. A baseline of zero is not a baseline.
+# TR: `warm` bir Prometheus sorgusundan gelir; sorgu başarısız olduğunda `promq` 0 döndürür ve
+#     "p > w" HERHANGİ bir tepe için doğru olur — yani bozuk bir ölçüm REPRODUCED basar ve soğuk
+#     başlangıç kanıtı gibi görünür. Gerçekte oldu: sorgu patladı, ısınmış p99 "0.0 ms" yazıldı
+#     ve hüküm hiç ölçülmemiş bir sayının üstüne kuruldu. Sıfır bir taban, taban değildir.
+awk -v w="$warm" -v p="$peak" 'BEGIN{exit !(w > 0 && p > w)}' \
   && reproduced "ölçekleme anında p99 $(awk -v v="$warm" 'BEGIN{printf "%.1f", v*1000}') → $(awk -v v="$peak" 'BEGIN{printf "%.1f", v*1000}') ms'e çıktı — soğuk pod'lar trafiğe girdi"
 not_reproduced "soğuk başlangıç etkisi ölçülemedi (paylaşılan önbellek sayesinde küçük olabilir)"

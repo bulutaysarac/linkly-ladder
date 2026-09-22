@@ -53,7 +53,13 @@ promq() {
     rc=0; out=$(_promq_raw "$1" 2>"$err") || rc=$?
   fi
   if (( rc != 0 )); then
-    printf '  \033[33mPrometheus sorgusu başarısız, 0 sayıldı: %.70s\033[0m\n' "$1" >&2
+    # SORGUNUN TAMAMINI BAS. `%.70s` ilk 70 karakteri gösteriyordu; iki FARKLI bozuk sorgu
+    # ekranda birebir aynı görünüyor ve hatanın nerede olduğu — Prometheus sütun numarasını
+    # verdiği hâlde — okunamıyordu. Bir hata mesajı, neyin başarısız olduğunu göstermelidir.
+    # EN: `%.70s` printed only the first 70 characters, so two DIFFERENT malformed queries looked
+    # identical on screen and the column number Prometheus helpfully returns pointed into text
+    # nobody could see. An error message must show what actually failed.
+    printf '  \033[33mPrometheus sorgusu başarısız, 0 sayıldı: %s\033[0m\n' "$1" >&2
     printf '  \033[33m  → %s\033[0m\n' "$(jq -r '.error // .' "$err" 2>/dev/null | head -c 200)" >&2
     rm -f "$err"; echo 0; return 0
   fi
