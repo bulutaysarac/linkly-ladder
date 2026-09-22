@@ -582,7 +582,7 @@ k6run() {
   # --duration yoksa senaryo kendi aşamalarını (stages) tanımlıyordur: stairs ~200 sn,
   # burst ~70 sn. 300 sn taban + 240 sn pay, hepsini rahatça kapsar.
   [[ "$secs" =~ ^[0-9]+$ ]] || secs=300
-  with_timeout $(( secs + 240 )) "$LADDER_ROOT/platform/lib/k6run.sh" "$s" --summary-export "$K6_SUMMARY" "${args[@]}"
+  with_timeout $(( secs + 240 )) "$LADDER_ROOT/platform/lib/k6run.sh" "$s" --summary-export "$K6_SUMMARY" ${args[@]+"${args[@]}"}
 }
 # k6 özeti YOKSA (koşu hiç başlamadıysa) jq dosya bulamayıp hata veriyor ve `set -e` scripti
 # öldürüyor. Yokluk bir ölçüm sonucudur: 0 döndür ama STDERR'e söyle.

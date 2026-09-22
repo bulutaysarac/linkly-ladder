@@ -34,6 +34,11 @@ if grep -q 'scenarios:' "$SCEN_FILE" 2>/dev/null; then
       *)          conv+=("${argv[i]}");               i=$(( i + 1 )) ;;
     esac
   done
-  set -- "${conv[@]}"
+  # BOŞ DİZİ TUZAĞI (bash 3.2): `k6run burst` gibi EK ARGÜMANSIZ bir çağrıda conv boştur ve
+  # "${conv[@]}" set -u altında "unbound variable" verir — yani senaryo dosyası `scenarios:`
+  # içerdiği anda argümansız her k6 koşusu HİÇ BAŞLAMAZ. P07-02 ve P08-04'ün HATA sebebi buydu.
+  # EN: with no extra args `conv` is empty and "${conv[@]}" is an unbound-variable error on
+  # bash 3.2 — so every argument-less k6 run against a scenarios file failed to start at all.
+  set -- ${conv[@]+"${conv[@]}"}
 fi
 exec k6 run --tag "level=$NS" -e "BASE_URL=$BASE_URL" -e "LEVEL=$NS" -e "API_KEY=${API_KEY:-}" -o experimental-prometheus-rw "$@" "$LADDER_ROOT/platform/k6/scenarios/$S.js"
