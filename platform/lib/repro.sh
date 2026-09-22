@@ -433,6 +433,21 @@ run_cleanup() {
     eval "$c" >/dev/null 2>&1 || true
   done
   CLEANUP_CMDS=()
+  # ORTAMI BULDUĞUN GİBİ BIRAK — ve bıraktığından EMİN OL.
+  # Temizlik komutlarını çalıştırmak, sistemin geri geldiği anlamına gelmez: 09'da P09-02 bir
+  # failover koşuyor, temizliği dönüyor ve script bitiyor; ama uygulama henüz hizmet vermiyor.
+  # Sıradaki script `ensure_healthy`de "uygulama hizmet vermiyor" deyip ÇIKIYOR — kendi ölçümüyle
+  # ilgisi olmayan bir sebepten. Bekleyecek yer, bozan scriptin kendisidir; bu yüzden bekleme
+  # TEMİZLİĞİN SONUNA konuldu ve her script için geçerli.
+  # EN: running the cleanup commands is not the same as the system being back. The next script
+  # exits at `ensure_healthy` for a reason that has nothing to do with what it measures. The place
+  # to wait is the script that broke it, so the wait lives at the END of cleanup, for every script.
+  if [[ "${CLEANUP_WAIT:-1}" == "1" ]]; then
+    wait_pods_ready_quiet "${CLEANUP_RECOVER_TIMEOUT:-150}" \
+      || warn_hard "temizlik bitti ama ortam ${CLEANUP_RECOVER_TIMEOUT:-150} sn'de toparlanmadı: $(not_ready_pods)"
+    local i
+    for i in $(seq 1 30); do serving && break; sleep 2; done
+  fi
 }
 trap run_cleanup EXIT INT TERM
 
