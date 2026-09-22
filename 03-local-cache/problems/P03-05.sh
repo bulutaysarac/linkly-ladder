@@ -21,6 +21,10 @@ run_hot() {
   local g0 g1
   kubectl -n "$NS" rollout status "$(app_workload)" --timeout=180s >/dev/null || true
   for _ in $(seq 1 30); do serving && break; sleep 2; done
+  # Üstte bir rollout var (TRAP env'i): ölen pod'un serisi toplamdan düşene kadar g0 şişkin
+  # okunur ve "yük boyunca DB get sorgusu" olduğundan küçük çıkar. İki faz aynı bozulmayı
+  # yaşamadığı için karşılaştırma da bozulur. (bkz. repro.sh → settle_scrape)
+  settle_scrape
   g0=$(gets)
   # SEED küçük + HOT_SHARE yüksek: soğuk anahtarların ıskaları sinyali boğmasın.
   SEED=20 HOT_SHARE=0.99 k6run hot-key --vus "$VUS" --duration 60s >/dev/null 2>&1 || true

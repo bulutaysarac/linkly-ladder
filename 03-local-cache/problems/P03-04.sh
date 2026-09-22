@@ -29,7 +29,11 @@ measure() {
   scale "$reps"; wait_endpoints "$reps"
   kubectl -n "$NS" rollout restart "$(app_workload)" >/dev/null
   kubectl -n "$NS" rollout status "$(app_workload)" --timeout=180s >/dev/null 2>&1 || true
-  wait_endpoints "$reps"; sleep 5
+  # Hemen üstte bir rollout restart var: ölen pod'ların serisi `sum()`dan düşene ve yenileri
+  # kazınana kadar h0/a0/m0 ŞİŞKİN okunur, yani delta olduğundan küçük çıkar. Üstelik şişkinlik
+  # kaç pod'un öldüğüne bağlı olduğu için 1-pod ve çok-pod fazlarını FARKLI oranda bozar —
+  # tam da karşılaştırmanın anlamını yok eden yerden. (bkz. repro.sh → settle_scrape)
+  wait_endpoints "$reps"; settle_scrape
   h0=$(hits); a0=$(allops); m0=$(misses)
   # SEED_BUDGET_MS yüksek: iki koşu AYNI sayıda kod görmeli, yoksa karşılaştırma anlamsız.
   SEED=$SEEDN SEED_BUDGET_MS=240000 k6run redirect --vus 20 --duration 60s >/dev/null 2>&1 || true

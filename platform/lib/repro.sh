@@ -185,6 +185,21 @@ with_timeout() {
 # "tepe p99=nan ms" basıp "burst latency'yi bozmadı" dedi). Sayı bekleyen yere sayı ver.
 num() { local v=${1:-}; case "$v" in ""|NaN|nan|+Inf|-Inf|null) printf '0' ;; *) printf '%s' "$v" ;; esac; }
 
+# BİR SAYAÇ DELTASI, KAZIMA ARALIĞINDAN HIZLI OKUNAMAZ.
+# Prometheus bu kurulumda 15 sn'de bir kazır. Bir sayacı bir işlemin hemen ÖNCESİNDE okursan
+# elindeki değer o işlemden önceki kazımadır; hemen SONRASINDA okursan işlem henüz kazınmamıştır.
+# İki uç da aynı anda yanlış olabilir ve fark gürültü çıkar. Daha kötüsü: araya bir rollout
+# girdiyse ölen pod'un serisi `sum()`dan düşer, fark NEGATİF olur ve "0'a kırp" satırı bunu
+# sessizce gizler — ölçüm "hiç olmadı" gibi görünür. (P07-06 tam olarak böyle "61 → 0" yazdı.)
+# Kural: sayaç deltası ölçen her ölçüm, iki ucunda da en az iki kazıma aralığı beklemelidir.
+# EN: a counter delta cannot be read faster than the scrape interval (15s here). Read the counter
+# immediately before an operation and you get the scrape from before it; read it immediately
+# after and the operation has not been scraped yet. Worse, if a rollout happened in between, the
+# dying pod's series drops out of `sum()`, the delta goes negative and a "clip to 0" line hides
+# it — the measurement looks like it never happened. Wait two scrape intervals at BOTH ends.
+SCRAPE_SETTLE=${SCRAPE_SETTLE:-40}
+settle_scrape() { sleep "$SCRAPE_SETTLE"; }
+
 # Bir arka plan işini sessizce bekle (ölmüşse hemen dön). `wait` doğrudan çağrıldığında
 # with_timeout içinde farklı bir kabukta olduğu için işe yaramaz.
 wait_pid_quiet() { local p=$1; while kill -0 "$p" 2>/dev/null; do sleep 2; done; return 0; }
