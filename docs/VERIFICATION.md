@@ -58,6 +58,7 @@ Aşağıdaki liste ikinci türden bulunan hataları içeriyor. Hepsi "çalışı
 | 38 | `ensure_deps_ready` | Bekleme bütçesi sabit 2 dakikaydı. | Stateless bir rollout için bol, bir CNPG replikası için az. Bütçe, beklediğin şeyin doğal toparlanma süresinden kısa olmamalı; yoksa komşu scriptleri zincirleme düşürürsün. |
 | 39 | `run_cleanup` | Her temizlik kancasını `>/dev/null 2>&1` ile koşuyordu. | Gürültüyü bastırırken temizlik sırasında ORTAYA ÇIKAN gerçek sorunu da yutuyordu; bedelini sonraki script ödüyordu. `warn_hard` gerçek stderr'e (fd 9) yazıyor. |
 | 40 | P12-06 | Hüküm `[[ -n "$dbver" ]] && [[ -n "$appimg" ]]` idi: iki metin okunabildiğinde geçiyordu, yani sağlıklı her kümede. | Düşemeyen bir deney, deney değildir — hüküm kılığına girmiş bir totoloji. Falsifiye edilebilir ölçü: Down bloğu **ne yapıyor**? `DROP TABLE`/`DROP COLUMN` içeren bir geri alma, Up'tan bu yana yazılan her şeyi siler (6 migration'ın 5'i). Hepsi zararsız olsaydı script haklı olarak NOT-REPRODUCED derdi. |
+| 41 | P04-07 | Hüküm `maxp99 > 0` idi: tamamlanan herhangi bir istek için doğru. | "KEYS * gecikmeyi tepe yaptırdı" diyordu ama gecikmenin KEYS çağrısı OLMADAN ne olduğunu hiç ölçmüyordu — tabansız bir tepe, tepe değildir. Artık aynı yük iki kez koşuyor (temiz / KEYS'li) ve her faz kendi penceresini okuyor. |
 
 ## Bulunan altyapı/kurulum hataları (13 ve 14 hiç ayağa kalkamıyordu)
 
