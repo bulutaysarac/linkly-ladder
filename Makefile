@@ -1,7 +1,7 @@
 # Kök Makefile — bütün seviyelerde toplu iş. Tek bir seviyeyle çalışmak için o klasöre gir: cd 03-local-cache && make up
 LEVELS := $(sort $(wildcard [0-9][0-9]-*))
 
-.PHONY: help list test lint lint-skeleton build matrix
+.PHONY: help list test lint lint-skeleton fmt verify sweep build matrix
 
 help: ## Bu yardım
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -20,6 +20,19 @@ lint-skeleton: ## Her seviyenin iskeleti şablonla aynı mı
 
 build: ## Tüm seviyelerin image'larını derle (push yok)
 	@for l in $(LEVELS); do echo "== $$l"; (cd $$l && $(MAKE) --no-print-directory build) || exit 1; done
+
+fmt: ## gofmt farkı var mı? (yalnızca rapor, yazmaz)
+	@out=$$(gofmt -l . 2>/dev/null); \
+	 if [ -n "$$out" ]; then echo "gofmt gerekiyor:"; echo "$$out"; exit 1; fi; \
+	 echo "gofmt temiz"
+
+verify: fmt lint test ## Kümesiz doğrulama: gofmt + vet + iskelet lint + go test
+	@echo; echo "✔ kümesiz doğrulama tamam (gofmt · go vet · iskelet lint · go test -race)"
+	@echo "  Küme gerektiren doğrulama: tools/verify-sweep.sh <seviye> [<seviye> ...]"
+
+sweep: ## Küme üzerinde uçtan uca doğrula: make sweep L="06-event-stream 07-services-autoscaling"
+	@test -n "$(L)" || { echo "kullanım: make sweep L=\"06-event-stream 07-...\""; exit 1; }
+	tools/verify-sweep.sh $(L)
 
 matrix: ## Tüm problems/*.sh'yi tüm seviyelere koş, README matrisini üret (uzun sürer, seviyeleri sırayla ayağa kaldırır)
 	tools/ladder-matrix/run.sh
