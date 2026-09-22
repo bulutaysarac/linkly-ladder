@@ -22,7 +22,15 @@ step "Sorgu planı: index mi, seq scan mi?"
 # ölçtüğün kanıtı, okunabilirlik uğruna kırpma.
 plan=$(psql "EXPLAIN (ANALYZE, BUFFERS) SELECT code FROM links WHERE tenant='acme' ORDER BY created_at DESC LIMIT 100")
 { echo "$plan" | head -8 | sed 's/^/    /'; } || true
-scan_line=$(echo "$plan" | grep -i "Seq Scan" | head -1)
+# BULAMAMAK HATA DEĞİLDİR — ve burada bulamamak ASIL BEKLENEN SONUÇTUR.
+# EN: when the index is in place there is no "Seq Scan" line, `grep` exits 1, `pipefail` fails the
+#     pipeline and `set -e` kills the script on a failing assignment — so the script dies exactly
+#     on the path where it should print NOT-REPRODUCED ("the index is being used"). A guard that
+#     only breaks on success is the worst kind.
+# TR: indeks yerindeyken "Seq Scan" satırı yoktur; `grep` 1 döner, `pipefail` boru hattını
+#     düşürür ve `set -e` başarısız atamada scripti öldürür — yani script tam olarak
+#     NOT-REPRODUCED basması gereken yolda ölür. Yalnızca başarıda bozulan bir koruma, en kötüsü.
+scan_line=$(echo "$plan" | grep -i "Seq Scan" | head -1 || true)
 seq_before=$(promq "sum(pg_stat_user_tables_seq_scan{namespace=\"$NS\",relname=\"links\"})")
 step "API üzerinden list — kullanıcının hissettiği süre"
 t=$(curl -s -o /dev/null -w '%{time_total}' -H 'X-Tenant-ID: acme' "$BASE_URL/api/links")

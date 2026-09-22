@@ -36,7 +36,8 @@ fill_one() {
 export -f fill_one; export BASE_URL PAD
 seq 1 "$N" | xargs -P 20 -I{} bash -c 'fill_one {}' >/dev/null 2>&1 || true
 sleep 15
-used=$(rcli INFO memory | grep -m1 '^used_memory:' | cut -d: -f2 | tr -d '\r')
+# `grep` bulamazsa pipefail atamayı düşürür ve set -e scripti öldürür (bkz. P02-05, P00-01).
+used=$(rcli INFO memory | grep -m1 '^used_memory:' | cut -d: -f2 | tr -d '\r' || true)
 maxm=$(rcli CONFIG GET maxmemory | tail -1 | tr -d '\r')
 keys=$(rcli DBSIZE | tr -d '\r')
 seterr=$(promq "sum(increase(cache_errors_total{namespace=\"$NS\",op=\"set\"}[10m]))")

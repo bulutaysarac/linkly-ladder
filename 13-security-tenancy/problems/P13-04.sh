@@ -8,7 +8,9 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # etmekten kötüdür.
 ensure_healthy
 step "Git'te düz metin sır var mı?"
-hits=$(grep -rn 'API_KEYS:\|POSTGRES_PASSWORD:\|linkly:linkly@' "$(dirname "$0")/../deploy/" 2>/dev/null | grep -v 'secretKeyRef' | head -4)
+# Düz metin sır BULUNAMAMASI bu scriptin NOT-REPRODUCED yoludur; grep'in 1 dönmesi pipefail ile
+# atamayı düşürüp set -e'yi tetikliyordu — yani iyi haber scripti öldürüyordu.
+hits=$(grep -rn 'API_KEYS:\|POSTGRES_PASSWORD:\|linkly:linkly@' "$(dirname "$0")/../deploy/" 2>/dev/null | grep -v 'secretKeyRef' | head -4 || true)
 echo "${hits:-    (bulunamadı)}" | sed 's/^/    /'
 step "sealed-secrets controller kurulu mu?"
 sc=$(kubectl -n kube-system get pods -l app.kubernetes.io/name=sealed-secrets --no-headers 2>/dev/null | awk '{print $1, $3}') || true

@@ -203,5 +203,24 @@ for f in "$D"/problems/P*.sh; do
   fi
 done
 
+# 15. `x=$(... | grep ...)` KORUMASIZ: BULAMAMAK HATA DEĞİLDİR.
+# EN: `grep` exits 1 when it matches nothing; with `set -o pipefail` the pipeline fails, and a
+#     failing command substitution in an ASSIGNMENT trips `set -e` and kills the script — with no
+#     verdict printed. It bites only when there is nothing to find, which is usually the HEALTHY
+#     path: `last_reason` killed P00-01 at level 01 (nothing crashed), P02-05 would die once the
+#     index was in place (no "Seq Scan"), P13-04 would die when no plaintext secret was found.
+#     The good news killed the script. Add `|| true` and let an empty result be a result.
+# TR: `grep` hiçbir şey bulamazsa 1 döner; `pipefail` ile boru hattı düşer ve ATAMADA başarısız
+#     bir komut ikamesi `set -e`yi tetikleyip scripti hüküm basmadan öldürür. Yalnızca bulunacak
+#     bir şey yokken ısırır — ki bu genelde SAĞLIKLI yoldur: P00-01 seviye 01'de (hiçbir şey
+#     çökmedi), P02-05 indeks yerindeyken, P13-04 düz metin sır yokken. İyi haber scripti
+#     öldürüyordu. `|| true` ekle; boş bir sonuç da bir sonuçtur.
+for f in "$D"/problems/P*.sh; do
+  [[ -e "$f" ]] || continue
+  while IFS= read -r line; do
+    err "$(basename "$f"): korumasız \$(... | grep ...) ataması — bulamazsa pipefail scripti öldürür: ${line:0:60}"
+  done < <(grep -nE '^[a-z_]+=\$\(.*\| *grep' "$f" | grep -vE '\|\| *true|\|\| *echo|grep -c' || true)
+done
+
 [[ $fail == 0 ]] && echo "  ✔ $name iskelet OK"
 exit $fail
