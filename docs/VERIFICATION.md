@@ -67,3 +67,37 @@ Aşağıdaki liste ikinci türden bulunan hataları içeriyor. Hepsi "çalışı
 - `platform/lib/apikey.sh`: anahtar **kümeden** okunur, koda gömülmez.
 - `promq` POST kullanır ve Prometheus'un gerçek hata mesajını basar.
 - `k6run`, `scenarios:` tanımlı dosyalarda CLI bayraklarını env'e çevirir.
+
+---
+
+## Tur sonuçları (22 Eylül 2026 gecesi)
+
+**Seviye 13 — ilk kez uçtan uca çalıştı.** Beş ayrı engel vardı (Kyverno desen hatası, operatör
+pod'larının reddi, üç ayrı NetworkPolicy boşluğu, API anahtarı, migration sırasındaki kırıcı
+rename); hepsi düzeltildi.
+
+| Aşama | Sonuç |
+|---|---|
+| `make up` | ✔ (migrate + topics + CNPG 2/2 + rollout 3/3 + smoke) |
+| `verify-prev` (12'nin 6 scripti) | ✔ hepsi hatasız koştu, ✘ yok |
+| Kendi sorunları | P13-04 ✔ · P13-05 ✔ · P13-06 ✔ · P13-02 NOT-REPRODUCED · P13-01/03/07 HATA |
+
+HATA veren üçü ve P13-02, **script hatasıydı ve düzeltildi**:
+
+- **P13-01** — `setenv` özyinelemesi (segfault). Bu, Deployment hedefleyen HER deneyi etkiliyordu.
+- **P13-02** — sorgular `postgres` süper kullanıcısıyla koşuyordu; RLS onu bağlamaz.
+- **P13-03** — test pod'unu seviyenin kendi Kyverno politikası reddediyordu.
+- **P13-07** — reddedilme beklenen sonuç ama `kubectl` bunu sıfırdan farklı çıkış koduyla söylüyor
+  ve `set -e` scripti ilk başarıda öldürüyordu.
+- **P13-08** NOT-REPRODUCED **haklıydı**: seviye "konteyner sertleştirme" diyordu ve hiç
+  `securityContext` göndermiyordu. Eklendi (runAsNonRoot, readOnlyRootFilesystem, drop ALL,
+  seccomp RuntimeDefault).
+
+**Seviye 14 — hiç çalışmamış olduğu ortaya çıktı.** L1 ve L2 önbellek metrikleri aynı adları
+`MustRegister` ile iki kez kaydediyor ve `api-svc` açılışta panikliyordu
+(`duplicate metrics collector registration attempted`). 12 seviyede birden düzeltildi.
+
+### Kümesiz doğrulama durumu
+
+`make verify` → gofmt temiz · `go vet` temiz · 15/15 iskelet lint temiz · `go test -race` tüm
+seviyelerde geçiyor.
