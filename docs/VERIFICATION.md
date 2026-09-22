@@ -96,6 +96,21 @@ HATA veren üçü ve P13-02, **script hatasıydı ve düzeltildi**:
 **Seviye 14 — hiç çalışmamış olduğu ortaya çıktı.** L1 ve L2 önbellek metrikleri aynı adları
 `MustRegister` ile iki kez kaydediyor ve `api-svc` açılışta panikliyordu
 (`duplicate metrics collector registration attempted`). 12 seviyede birden düzeltildi.
+Düzeltmeden sonra 14 ilk kez ayağa kalktı: CNPG 2/2, rollout 3/3, smoke ✔, L1+L2 pub/sub açık,
+3 partition, KEDA `Ready=True`.
+
+| 14'ün `verify-prev`i (13'ün 8 scripti) | Sonuç |
+|---|---|
+| P13-01 kiracı taklidi | REPRODUCED — `setenv` özyineleme düzeltmesi burada doğrulandı |
+| P13-02 RLS | REPRODUCED — süper kullanıcı/`psql -q` düzeltmeleri doğrulandı |
+| P13-03 varsayılan-reddet ağ | NOT-REPRODUCED → **script hatasıydı**: sabit 12 sn bekleyip boş log okuyordu. NetworkPolicy elle doğrulandı, Postgres'i de Redis'i de gerçekten engelliyor. Düzeltildi. |
+| P13-04 sırlar | REPRODUCED |
+| P13-05 SSRF/DNS | REPRODUCED |
+| P13-06 enumeration | REPRODUCED — 14'ün SOLVES'ından çıkarılması doğruydu |
+| P13-07 Kyverno | NOT-REPRODUCED → **script hatasıydı**: `tail -2` tam da kararın aradığı "denied" satırını kesiyordu. Düzeltildi. |
+| P13-08 sertleştirme | REPRODUCED — `securityContext` eklendikten sonra |
+
+✘ yok: sekiz scriptin sekizi de hatasız koştu.
 
 ### Kümesiz doğrulama durumu
 
