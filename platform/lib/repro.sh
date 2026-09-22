@@ -684,7 +684,25 @@ k6run() {
   # --duration yoksa senaryo kendi aşamalarını (stages) tanımlıyordur: stairs ~200 sn,
   # burst ~70 sn. 300 sn taban + 240 sn pay, hepsini rahatça kapsar.
   [[ "$secs" =~ ^[0-9]+$ ]] || secs=300
-  with_timeout $(( secs + 240 )) "$LADDER_ROOT/platform/lib/k6run.sh" "$s" --summary-export "$K6_SUMMARY" ${args[@]+"${args[@]}"}
+  # ESKİ ÖZET, BU KOŞUNUN ÖZETİNDEN AYIRT EDİLEMEZ.
+  # `$K6_SUMMARY` problem başına sabit bir dosyadır ve koşular arasında DİSKTE KALIR. k6 bu kez
+  # hiç başlamadıysa ya da özet yazmadan düştüyse, `_k6q` yalnızca "dosya var mı?" diye bakar ve
+  # ÖNCEKİ TURDAN kalma sayıları bu turun sonucu sanır — P10-02'de bir faz 897 istekte 73710 adet
+  # 5xx raporladı, ki bu fiziksel olarak imkânsızdı. Önce sil: dosyanın yokluğu "ölçemedik"
+  # demektir ve bu, yanlış bir sayıdan iyidir.
+  # EN: `$K6_SUMMARY` is a fixed per-problem path that SURVIVES between runs. If k6 never started
+  # or died before exporting, `_k6q` only checks that the file exists and reads LAST ROUND's
+  # numbers as this round's result — P10-02 reported 73710 5xx out of 897 requests, physically
+  # impossible. Delete first: an absent file means "we could not measure", which beats a number
+  # that is quietly wrong.
+  rm -f "$K6_SUMMARY"
+  # Her fazın kanıtı SAKLANSIN: iki fazlı bir deneyde ikinci koşu birincinin özetini eziyor ve
+  # sonradan "o sayı nereden geldi?" diye bakacak hiçbir şey kalmıyordu.
+  K6_RUN_SEQ=$(( ${K6_RUN_SEQ:-0} + 1 ))
+  local rc=0
+  with_timeout $(( secs + 240 )) "$LADDER_ROOT/platform/lib/k6run.sh" "$s" --summary-export "$K6_SUMMARY" ${args[@]+"${args[@]}"} || rc=$?
+  if [[ -s "$K6_SUMMARY" ]]; then cp "$K6_SUMMARY" "${K6_SUMMARY%.json}.$K6_RUN_SEQ.json" 2>/dev/null || true; fi
+  return $rc
 }
 # k6 özeti YOKSA (koşu hiç başlamadıysa) jq dosya bulamayıp hata veriyor ve `set -e` scripti
 # öldürüyor. Yokluk bir ölçüm sonucudur: 0 döndür ama STDERR'e söyle.
