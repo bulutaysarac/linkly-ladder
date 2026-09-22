@@ -95,10 +95,19 @@ wait: ## Deployment/StatefulSet + (varsa) Argo Rollout hazır olana kadar bekle
 	@# olmadığı için düşer. İkisi aynı görünür, sebepleri farklıdır.
 	@# EN: wait for the one-shot Jobs too — without the schema the app is UP but every write
 	@# returns store_error, and smoke fails for a reason that looks exactly like "DB not ready".
-	@for j in $$(kubectl -n $(NS) get job -o name 2>/dev/null); do \
-	  kubectl -n $(NS) wait --for=condition=complete $$j --timeout=300s >/dev/null 2>&1 \
-	    || { echo "  ✘ $$j tamamlanmadı"; kubectl -n $(NS) logs $$j --tail=15 2>/dev/null; exit 1; }; \
-	  echo "  $$j tamamlandı"; \
+	@# YALNIZCA BİZİM Job'larımız. İlk hâl namespace'teki HER Job'ı bekliyordu ve CNPG'nin
+	@# bootstrap Job'ı (pg-1-initdb) başarıyla bitince operatör tarafından SİLİNİYOR — yani
+	@# bekleme, "tamamlanmadı" diyerek kurulumu düşürdü. Bir kaynağı beklemek, onun yaşam
+	@# döngüsünün SAHİBİ kim olduğunu bilmeyi gerektirir: senin yaratmadığın bir nesnenin ne
+	@# zaman kaybolacağına dair varsayım yapma.
+	@# EN: only OUR Jobs. Waiting for every Job in the namespace broke the install: CNPG deletes
+	@# its own bootstrap Job (pg-1-initdb) once it succeeds, so the wait reported "not complete".
+	@# Waiting on a resource means knowing who owns its lifecycle.
+	@for j in migrate topics; do \
+	  kubectl -n $(NS) get job $$j >/dev/null 2>&1 || continue; \
+	  kubectl -n $(NS) wait --for=condition=complete job/$$j --timeout=300s >/dev/null 2>&1 \
+	    || { echo "  ✘ job/$$j tamamlanmadı"; kubectl -n $(NS) logs job/$$j --tail=15 2>/dev/null; exit 1; }; \
+	  echo "  job/$$j tamamlandı"; \
 	done
 	@for d in $$(kubectl -n $(NS) get deploy,statefulset -o name 2>/dev/null); do kubectl -n $(NS) rollout status $$d --timeout=300s || exit 1; done
 	@# `kubectl rollout status` Argo Rollout'u tanımaz (yalnızca yerleşik türler). 12+ seviyelerde
