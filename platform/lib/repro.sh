@@ -19,6 +19,16 @@ fi
 step()  { printf '\n\033[1;34m▶ %s\033[0m\n' "$*"; }
 note()  { printf '  \033[2m%s\033[0m\n' "$*"; }
 warn()  { printf '  \033[33m%s\033[0m\n' "$*"; }
+# TEMİZLİKTEN DE DUYULAN UYARI. `run_cleanup` her komutu `>/dev/null 2>&1` ile çalıştırır (kubectl
+# gürültüsü kararın altını doldurmasın diye) — ama bu, temizlik sırasında ORTAYA ÇIKAN gerçek bir
+# sorunu da yutar: "chaos kaldırıldı, ortam toparlanmadı" satırı hiç görünmez ve bedelini bir
+# sonraki script öder. Kütüphane yüklenirken gerçek stderr'i 9. tanımlayıcıya kopyalıyoruz;
+# warn_hard oraya yazar. (bash 3.2'de `{fd}>&2` yok, sabit numara kullanmak zorundayız.)
+# EN: run_cleanup silences every hook so kubectl noise cannot bury the verdict — but that also
+# swallows real problems discovered DURING cleanup, and the next script pays for them. We dup the
+# real stderr onto fd 9 at load time; warn_hard writes there.
+exec 9>&2
+warn_hard() { printf '  \033[33m%s\033[0m\n' "$*" >&9; }
 reproduced()     { printf '\n\033[1;31mREPRODUCED\033[0m %s — %s\n' "$PROBLEM_ID" "$*"; exit 0; }
 not_reproduced() { printf '\n\033[1;32mNOT-REPRODUCED\033[0m %s — %s\n' "$PROBLEM_ID" "$*"; exit 1; }
 need_confirm()   { [[ "${CONFIRM:-}" == 1 ]] || { warn "yıkıcı adım ($*): CONFIRM=1 ile çalıştır"; exit 2; }; }
@@ -225,11 +235,25 @@ need_metric() {
 # ölçüm yapar ve "sorun yok" der. Gerçekte oldu: 09-14'te Postgres CNPG'ye geçti, pod'lar
 # `app.kubernetes.io/name=postgres` etiketini taşımıyordu ve pg-loss/pg-delay deneylerinin
 # hepsi sessizce arızasız koştu. Ölçemediğin şeyi "yok" sanma; enjekte edemediğin arızayı da.
+chaos_cleanup() {
+  "$LADDER_ROOT/platform/lib/chaos.sh" delete "$1" >/dev/null 2>&1 || true
+  wait_pods_ready_quiet "${CHAOS_RECOVER_TIMEOUT:-300}" \
+    || warn_hard "chaos kaldırıldı ama ortam ${CHAOS_RECOVER_TIMEOUT:-300} sn'de toparlanmadı: $(not_ready_pods)"
+}
+
 chaos_apply() {
   local c=$1 out rc=0
   out=$("$LADDER_ROOT/platform/lib/chaos.sh" apply "$c" 2>&1) || rc=$?
   case $rc in
-    0) on_cleanup "$LADDER_ROOT/platform/lib/chaos.sh delete $c"
+    0) # ARIZAYI KALDIRMAK, ETKİSİNİN GEÇMESİ DEMEK DEĞİLDİR.
+       # NetworkChaos silindiğinde nesne gider ama durumlu bileşen hâlâ toparlanıyor olabilir:
+       # 09'da replikaya gecikme enjekte edildi, chaos temizlendi, CNPG pg-2'yi yeniden başlattı
+       # ve BİR SONRAKİ script "ortam bozuk" deyip çıktı. Bir deney, ortamı bulduğu hâlde
+       # bırakmakla yükümlüdür; toparlanmayı bekleyecek yer, bozan scriptin kendisidir.
+       # EN: deleting the chaos object does not mean its effect is gone — the stateful component
+       # may still be recovering, and the NEXT script pays for it. The experiment that broke the
+       # environment is the one that should wait for it to come back.
+       on_cleanup "chaos_cleanup $c"
        # "Nesne oluştu" ile "arıza ENJEKTE EDİLDİ" aynı şey değil: chaos-daemon sağlıksızsa nesne
        # Run fazında kalır ve hiçbir şey olmaz. AllInjected koşulunu bekle, olmazsa yüksek sesle söyle.
        local kind name injected=""
@@ -365,22 +389,56 @@ ensure_baseline_scale() {
 # Neden: Redpanda 06'dan beri CrashLoopBackOff'taydı ve hiçbir script bunu sormadığı için
 # bütün stream deneyleri ÖLÜ bir broker'ı ölçtü — üstelik "75 bin üretici hatası" gibi
 # sonuçları bulgu sanarak rapor ettik. Bir deneyin ön koşulu da ölçülmesi gereken bir şeydir.
+# Hazır olmayan pod'ların adı (tek yerde: ensure_deps_ready ve chaos temizliği aynı tanımı kullansın)
+not_ready_pods() {
+  kubectl -n "$NS" get pods -o json 2>/dev/null | jq -r '
+    [ .items[]
+      | select(.status.phase != "Succeeded")
+      | select(.metadata.deletionTimestamp == null)
+      | select(any(.status.containerStatuses[]?; .ready | not))
+      | .metadata.name ] | join(", ")'
+}
+
+# ÖLÜMCÜL OLMAYAN bekleyici: temizlik yolunda kullanılır. `ensure_deps_ready` başarısızlıkta
+# exit 2 verir; bunu bir temizlik kancasından çağırmak, deneyin HÜKMÜNÜ ezip scripti 2 ile
+# bitirir — yani ölçüm doğru yapılmışken sonuç "hata" görünür. Temizlik, sonucu değiştirmemeli.
+# EN: the fatal variant would override the experiment's verdict from a cleanup hook and report an
+# error for a measurement that actually succeeded. Cleanup must not change the result.
+wait_pods_ready_quiet() {
+  local budget=${1:-300} waited=0
+  while (( waited < budget )); do
+    [[ -z "$(not_ready_pods)" ]] && return 0
+    sleep 3; waited=$(( waited + 3 ))
+  done
+  return 1
+}
+
 ensure_deps_ready() {
   local bad
   # BEKLE, hemen patlama: bir önceki deneyin rollout'u hâlâ sürüyor olabilir ve "şu an hazır
   # değil" ile "hiç hazır olmayacak" farklı şeylerdir. İlk sürüm hemen exit 2 veriyordu ve
   # normal bir rollout penceresi, sonraki TÜM scriptleri zincirleme SKIPPED yapıyordu.
-  for _ in $(seq 1 60); do
-    bad=$(kubectl -n "$NS" get pods -o json 2>/dev/null | jq -r '
-      [ .items[]
-        | select(.status.phase != "Succeeded")
-        | select(.metadata.deletionTimestamp == null)
-        | select(any(.status.containerStatuses[]?; .ready | not))
-        | .metadata.name ] | join(", ")')
-    [[ -z "${bad:-}" ]] && return 0
-    sleep 2
+  # BÜTÇE DURUMLU BİLEŞENE GÖRE SEÇİLİR. 2 dakika stateless bir rollout için bol, bir CNPG
+  # replikası için AZDIR: 09'da P09-01 replikaya gecikme enjekte ettikten sonra CNPG pg-2'yi
+  # yeniden başlattı ve toparlanma 2 dakikayı aştı; P09-02 "ortam bozuk" deyip çıktı ve bu,
+  # ortamın değil ÖNCEKİ DENEYİN etkisiydi. Bekleme bütçesi, beklediğin şeyin doğal
+  # toparlanma süresinden kısa olmamalı — yoksa komşu scriptleri zincirleme düşürürsün.
+  # EN: two minutes is plenty for a stateless rollout and too little for a CNPG replica: after
+  # P09-01 injected replication delay, CNPG restarted pg-2 and recovery took longer than the
+  # budget, so P09-02 exited with "environment is broken" — which described the PREVIOUS
+  # EXPERIMENT, not the environment. A wait budget must not be shorter than the natural recovery
+  # time of the thing you are waiting for.
+  local waited=0 budget=${DEPS_TIMEOUT:-300} told=0
+  while (( waited < budget )); do
+    bad=$(not_ready_pods)
+    [[ -z "${bad:-}" ]] && { (( told )) && note "ortam toparlandı (${waited} sn beklendi)"; return 0; }
+    if (( waited >= 30 && told == 0 )); then
+      note "hazır olmayan pod(lar) bekleniyor: $bad (bütçe ${budget} sn — DEPS_TIMEOUT ile değiştir)"
+      told=1
+    fi
+    sleep 3; waited=$(( waited + 3 ))
   done
-  warn "2 dk sonra hâlâ hazır olmayan pod(lar): $bad — ortam bozukken ölçüm yapılmaz (kubectl describe)"
+  warn "${budget} sn sonra hâlâ hazır olmayan pod(lar): $bad — ortam bozukken ölçüm yapılmaz (kubectl describe)"
   exit 2
 }
 
