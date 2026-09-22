@@ -42,6 +42,9 @@ note "bir gerekçe değildir, çünkü sorun tam da 'genelde' olmadığı anda b
 # TR: "b >= a", hiçbir şey ölçülmediğinde de doğrudur (0 >= 0). Yani başarısız bir ölçüm, GEÇEN
 #     bir deneye dönüşür — mümkün olan en gürültülü yanlış pozitif, çünkü kanıt gibi görünür.
 #     Karşılaştırmayı "gerçekten bir şey ölçtük mü?" koşuluyla koru.
-awk -v a="${g_on%%.*}" -v b="${g_off%%.*}" 'BEGIN{exit !(a > 0 && b > 0 && b >= a)}' \
+#     Aynı sebeple ">=" de yetmez: eşitlikte HİÇ BÜYÜME YOKTUR, oysa hüküm "büyüttü" diyor.
+# EN: ">=" is not enough either — at equality nothing grew, yet the verdict says it did.
+#     Assert growth only if you measured growth.
+awk -v a="${g_on%%.*}" -v b="${g_off%%.*}" 'BEGIN{exit !(a > 0 && b > 0 && b > a)}' \
   && reproduced "timeout'suz yavaş bağımlılık goroutine'leri ${g_on%%.*} → ${g_off%%.*} ve belleği ${m_on} → ${m_off}MB büyüttü"
 not_reproduced "fark ölçülemedi (redis-delay-3s uygulandı mı?)"

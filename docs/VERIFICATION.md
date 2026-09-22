@@ -44,6 +44,7 @@ Aşağıdaki liste ikinci türden bulunan hataları içeriyor. Hepsi "çalışı
 | 24 | P06-01 | Ölçüm penceresi `increase(...[10m])` idi; hemen öncesinde `verify-prev` 05'in scriptlerini **aynı namespace'e** koşmuştu. | Pencerede deneyle ilgisiz ~50 bin kayıt vardı: `ok=50460` sağlıklı bir tüketici gibi görünürken tüketici bizim birikimimizden **sıfır** kayıt işlemişti. Deneyden geniş bir pencere, deneyi değil komşularını ölçer. |
 | 25 | P06-01 | Tüketici hiç kayıt işlemediğinde script yine de `NOT-REPRODUCED` basıyordu. | "Sistem sağlam" diye okunuyordu; gerçek ise "deneyi hiç koşmadık". 2 sn'lik broker gecikmesi tam olarak böyle saklandı: tüketiciyi durdurdu, script buna temiz koşu dedi. Eksik ölçüm artık `HATA`. |
 | 26 | P06-06 | Karar `def >= trap` idi; `def == trap`, yani **iki mod arasında fark yokken** geçiyordu. | Hüküm "commit noktası teslimat garantisini belirliyor" diyor ama eşitlikte gösterilen bir fark yok. Farkı iddia ediyorsan farkı ölç. |
+| 27 | P10-05, P11-04, P14-01 | Kararlar `b >= a` / `b <= a` idi: **eşitlikte**, yani hiç fark yokken de geçiyordu. | Hükümler "goroutine'leri büyüttü", "daha gürültülü", "p50'yi indirdi" diyor. Farkı iddia eden hüküm farkı ölçmeli. P14-01'de ek olarak p50 histogram **kovalarından** gelir; aynı kovaya düşen iki ölçüm eşit çıkar — hüküm artık mekanizmaya bağlı: L1 isabeti > 0 **ve** Redis komut hızının düşmesi. |
 
 ## Bulunan altyapı/kurulum hataları (13 ve 14 hiç ayağa kalkamıyordu)
 

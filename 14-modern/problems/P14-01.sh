@@ -52,6 +52,15 @@ note "Bedeli bir sonraki script'te: L1 = gerçeğin N kopyası = geçersiz kılm
 # TR: "b >= a", hiçbir şey ölçülmediğinde de doğrudur (0 >= 0). Yani başarısız bir ölçüm, GEÇEN
 #     bir deneye dönüşür — mümkün olan en gürültülü yanlış pozitif, çünkü kanıt gibi görünür.
 #     Karşılaştırmayı "gerçekten bir şey ölçtük mü?" koşuluyla koru.
-awk -v a="$p50a" -v b="$p50b" 'BEGIN{exit !(a > 0 && b > 0 && b <= a)}' \
-  && reproduced "L1 p50'yi $(awk -v v="$p50a" 'BEGIN{printf "%.2f", v*1000}') → $(awk -v v="$p50b" 'BEGIN{printf "%.2f", v*1000}') ms'e indirdi, Redis ops/s $(awk -v v="$opsa" 'BEGIN{printf "%.0f", v}') → $(awk -v v="$opsb" 'BEGIN{printf "%.0f", v}') (L1 hit %$(awk -v v="$l1hit" 'BEGIN{printf "%.0f", v*100}'))"
-not_reproduced "L1 kazancı ölçülemedi (hot-key yükü ve L1_CAPACITY'yi kontrol et)"
+# HANGİ KANIT SAĞLAM? p50 histogram KOVALARINDAN gelir; iki ölçüm aynı kovaya düşerse eşit
+# çıkar ve "indirdi" iddiası gösterilemez — ölçüm çözünürlüğünün altındaki bir farka hüküm
+# bağlanmaz. L1'in çalıştığının sağlam kanıtı MEKANİZMANIN kendisidir: L1 isabet oranı > 0 VE
+# Redis komut hızının düşmesi. Gecikme yine ölçülür ve raporlanır, ama tek dayanak o değildir.
+# EN: p50 comes from histogram BUCKETS; two measurements landing in the same bucket compare
+# equal, so "it lowered p50" cannot be shown — never hang a verdict on a difference below your
+# measurement resolution. The solid evidence is the MECHANISM: L1 hit ratio > 0 and a drop in
+# Redis command rate. Latency is still measured and reported, just not the sole basis.
+awk -v a="$p50a" -v b="$p50b" -v oa="$opsa" -v ob="$opsb" -v h="$l1hit" \
+  'BEGIN{exit !(a > 0 && b > 0 && oa > 0 && ob < oa && h > 0 && b <= a)}' \
+  && reproduced "L1 açıkken Redis ops/s $(awk -v v="$opsa" 'BEGIN{printf "%.0f", v}') → $(awk -v v="$opsb" 'BEGIN{printf "%.0f", v}') düştü (L1 hit %$(awk -v v="$l1hit" 'BEGIN{printf "%.0f", v*100}')); p50 $(awk -v v="$p50a" 'BEGIN{printf "%.2f", v*1000}') → $(awk -v v="$p50b" 'BEGIN{printf "%.2f", v*1000}') ms — sıcak anahtar artık ağ adımı yapmıyor"
+not_reproduced "L1 kazancı ölçülemedi: Redis ops/s düşmedi ya da L1 hiç isabet vermedi (hot-key yükü, L1_ENABLED ve L1_CAPACITY)"

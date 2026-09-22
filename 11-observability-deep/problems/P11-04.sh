@@ -37,6 +37,10 @@ note "HIZIDIR, anlık hata oranı değil."
 # TR: "b >= a", hiçbir şey ölçülmediğinde de doğrudur (0 >= 0). Yani başarısız bir ölçüm, GEÇEN
 #     bir deneye dönüşür — mümkün olan en gürültülü yanlış pozitif, çünkü kanıt gibi görünür.
 #     Karşılaştırmayı "gerçekten bir şey ölçtük mü?" koşuluyla koru.
-{ awk -v n="${naive%%.*}" -v f="${fast%%.*}" 'BEGIN{exit !(n > 0 && n >= f)}'; } \
+#     Aynı sebeple ">=" de yetmez: naive == burn-rate iken İKİSİ DE AYNI KADAR gürültülüdür,
+#     oysa hüküm "naive daha gürültülü" diyor. Farkı iddia ediyorsan farkı ölç.
+# EN: ">=" is not enough either: when naive == burn-rate the two are equally noisy, yet the
+#     verdict claims naive is noisier. If you assert a difference, measure one.
+{ awk -v n="${naive%%.*}" -v f="${fast%%.*}" 'BEGIN{exit !(n > 0 && n > f)}'; } \
   && reproduced "kısa sıçramada naive eşik (${naive%%.*}) burn-rate'ten (${fast%%.*}) daha gürültülü — alarm yorgunluğunun kaynağı"
 not_reproduced "alarm farkı ölçülemedi (kurallar yüklendi mi? kubectl -n $NS get prometheusrule)"
