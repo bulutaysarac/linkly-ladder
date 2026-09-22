@@ -77,6 +77,7 @@ func NewDBMetrics(reg prometheus.Registerer) *DBMetrics {
 //     durum yok. Genel ders: bağlantıları çoğullayan bir proxy, "bağlantı"nın ne demek olduğunu
 //     değiştirir ve bağlantı kimliğine dayanan her özelliğin yeniden gözden geçirilmesi gerekir.
 // [Topic · Konu: Bağlantı havuzlama, prepared statement]
+
 func OpenWithMode(ctx context.Context, dsn string, maxConns int32, m *DBMetrics, usePrepared bool) (*Postgres, error) {
 	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {

@@ -8,6 +8,20 @@ import (
 	"time"
 )
 
+// KALDIRILAN TUZAKLAR (ve neden buraya yazıldığı):
+// EN: TRAP_MIGRATE_IN_MAIN, TRAP_BREAKING_MIGRATION and TRAP_DROP_TENANT_FILTER used to be
+//     declared here at this level and were read NOWHERE — the mechanism they toggle stopped
+//     existing when the ladder moved migrations into a one-shot Job (07) and the breaking
+//     rename into the P12-02 experiment. A config field with no reader is worse than a
+//     missing feature: the experiment flips it, nothing changes, and the script still prints
+//     a verdict. They are removed rather than kept "for documentation".
+// TR: TRAP_MIGRATE_IN_MAIN, TRAP_BREAKING_MIGRATION ve TRAP_DROP_TENANT_FILTER bu seviyede
+//     tanımlıydı ve HİÇBİR YERDE okunmuyordu — açtıkları mekanizma, merdiven migration'ları
+//     tek seferlik bir Job'a (07) ve kırıcı rename'i P12-02 deneyine taşıdığında ortadan
+//     kalkmıştı. Okuyucusu olmayan bir config alanı, eksik bir özellikten daha kötüdür:
+//     deney onu açar, hiçbir şey değişmez ve script yine bir karar basar.
+//     "Belgeleme olsun diye" tutulmadılar, silindiler.
+
 type Config struct {
 	Addr               string
 	ReadHeaderTimeout  time.Duration // EN: slowloris guard  TR: yarım bağlantı koruması [Topic · Konu: Timeout]
@@ -48,11 +62,11 @@ type Config struct {
 	// Canary analizinin bunu YAKALAMASI gerekiyor (P12-01). Gerçek hayatta bu bir bug'dır;
 	// burada bir bayrak, çünkü kasıtlı bir bug yazmak onu yeniden üretilebilir kılar.
 	BadVersionErrorPct int
-	DBMaxConns       int32
-	DBQueryTimeout   time.Duration
-	StatementTimeout string // sunucu tarafı ifade timeout'u; boş = KAPALI (bkz. P02-06)
-	MigrateTarget    int64  // hangi migration sürümüne kadar koşulsun (P02-05 alıştırması)
-	ListLimit        int
+	DBMaxConns         int32
+	DBQueryTimeout     time.Duration
+	StatementTimeout   string // sunucu tarafı ifade timeout'u; boş = KAPALI (bkz. P02-06)
+	MigrateTarget      int64  // hangi migration sürümüne kadar koşulsun (P02-05 alıştırması)
+	ListLimit          int
 
 	RedisAddr            string
 	RedisTimeout         time.Duration
@@ -77,7 +91,6 @@ type Config struct {
 	TrapMetricLabelCode    bool // kısa kodu metrik label'ı yap → kardinalite patlaması
 	TrapLivenessStrict     bool // sağlık uçlarını iş zincirine sok (hız sınırı + timeout) → yük altında restart fırtınası
 	TrapReadyzChecksDB     bool // readiness'a DB kontrolü koy → DB kesintisinde TÜM pod'lar trafikten düşer (P02-10)
-	TrapMigrateInMain      bool // migration'ı her pod kendi main'inde koşsun → N replikada yarış (P02-07)
 	TrapNoSingleflight     bool // stampede koruması kapalı → TTL dolan sıcak anahtar DB'yi döver (P03-05)
 	TrapNoNegative         bool // negatif önbellek kapalı → var olmayan kod taraması hep DB'ye iner (P03-06)
 	TrapNoJitter           bool // TTL jitter kapalı → tüm anahtarlar aynı anda dolar (P04-04)
@@ -102,7 +115,6 @@ type Config struct {
 	TrapNoTracePropagation bool // trace bağlamını Kafka header'ına koyma → tüketici span'ları yetim (P11-02)
 	TrapRegexPerRequest    bool // istek başına regex derle → CPU hot spot, profille bulunur (P11-08)
 	TrapTenantLabel        bool // tenant'ı metrik label'ı yap → kardinalite patlaması (P11-06)
-	TrapBreakingMigration  bool // kolonu doğrudan yeniden adlandır → eski pod'lar rollout sırasında patlar (P12-02)
 }
 
 func Load() Config {
@@ -145,15 +157,15 @@ func Load() Config {
 		OTLPEndpoint: env("OTLP_ENDPOINT", "alloy.monitoring.svc:4317"),
 		// %5 head sampling: 20 istekten biri. Düşük tutmanın sebebi P11-03 — %100 sampling
 		// collector'ı ve Tempo'yu boğar, üstelik faydası doğrusal DEĞİLDİR.
-		TraceSampleRatio: float64(envInt("TRACE_SAMPLE_PCT", 5)) / 100,
-		TracingEnabled:   envBool("TRACING_ENABLED", true),
-		LogLevel:         env("LOG_LEVEL", "info"),
+		TraceSampleRatio:   float64(envInt("TRACE_SAMPLE_PCT", 5)) / 100,
+		TracingEnabled:     envBool("TRACING_ENABLED", true),
+		LogLevel:           env("LOG_LEVEL", "info"),
 		BadVersionErrorPct: envInt("BAD_VERSION_ERROR_PCT", 0),
-		DBMaxConns:       int32(envInt("DB_MAX_CONNS", 25)),
-		DBQueryTimeout:   envDur("DB_QUERY_TIMEOUT", 3*time.Second),
-		StatementTimeout: env("STATEMENT_TIMEOUT", ""),       // BİLEREK boş: P02-06 bunun yokluğunu ölçüyor
-		MigrateTarget:    int64(envInt("MIGRATE_TARGET", 1)), // 2 = tenant index'i (P02-05 çözümü)
-		ListLimit:        envInt("LIST_LIMIT", 100),
+		DBMaxConns:         int32(envInt("DB_MAX_CONNS", 25)),
+		DBQueryTimeout:     envDur("DB_QUERY_TIMEOUT", 3*time.Second),
+		StatementTimeout:   env("STATEMENT_TIMEOUT", ""),       // BİLEREK boş: P02-06 bunun yokluğunu ölçüyor
+		MigrateTarget:      int64(envInt("MIGRATE_TARGET", 1)), // 2 = tenant index'i (P02-05 çözümü)
+		ListLimit:          envInt("LIST_LIMIT", 100),
 
 		RedisAddr:            env("REDIS_ADDR", "redis:6379"),
 		RedisTimeout:         envDur("REDIS_TIMEOUT", 500*time.Millisecond),
@@ -177,7 +189,6 @@ func Load() Config {
 		TrapMetricLabelCode:    envBool("TRAP_METRIC_LABEL_CODE", false),
 		TrapLivenessStrict:     envBool("TRAP_LIVENESS_STRICT", false),
 		TrapReadyzChecksDB:     envBool("TRAP_READYZ_CHECKS_DB", false),
-		TrapMigrateInMain:      envBool("TRAP_MIGRATE_IN_MAIN", false),
 		TrapNoSingleflight:     envBool("TRAP_NO_SINGLEFLIGHT", false),
 		TrapNoNegative:         envBool("TRAP_NO_NEGATIVE_CACHE", false),
 		TrapNoJitter:           envBool("TRAP_NO_TTL_JITTER", false),
@@ -202,7 +213,6 @@ func Load() Config {
 		TrapNoTracePropagation: envBool("TRAP_NO_KAFKA_PROPAGATION", false),
 		TrapRegexPerRequest:    envBool("TRAP_REGEX_PER_REQUEST", false),
 		TrapTenantLabel:        envBool("TRAP_TENANT_LABEL", false),
-		TrapBreakingMigration:  envBool("TRAP_BREAKING_MIGRATION", false),
 	}
 }
 

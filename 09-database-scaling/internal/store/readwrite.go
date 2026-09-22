@@ -20,6 +20,7 @@ import (
 //     her okuma geçmişten bir okumadır ve bunun bu istek için kabul edilebilir olup olmadığını
 //     bilen tek katman uygulamadır.
 // [Topic · Konu: Okuma/yazma ayrımı, replikasyon gecikmesi]
+
 type ReadWrite struct {
 	primary Store
 	replica Store

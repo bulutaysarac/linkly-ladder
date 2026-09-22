@@ -80,5 +80,28 @@ fi
 # 8. Sorun ID'leri bu seviyenin numarasını taşımalı
 for f in "$D"/problems/P*.sh; do id=$(basename "${f%.sh}"); [[ "$id" == P$lvl-* ]] || err "yabancı sorun ID'si: $id (P$lvl-XX olmalı)"; done
 
+# 9. ÖLÜ TUZAK: config'de tanımlı ama kodda hiç OKUNMAYAN TRAP_*
+# EN: this is the most expensive silent failure the ladder produced. A trap declared in config and
+#     read nowhere means the experiment flips a flag, nothing changes, and the script still prints
+#     a verdict — usually "REPRODUCED", judged by some other number that drifts on its own.
+#     TRAP_TENANT_LABEL, TRAP_FIXED_WINDOW, TRAP_NO_SINGLEFLIGHT and TRAP_UNBOUNDED_QUEUE were all
+#     in this state at once. A lint is cheaper than finding it again.
+#     A field that is only PRINTED (main's trap-status map) does not count as read — that line
+#     contains the literal "TRAP_", so it is excluded.
+# TR: merdivenin ürettiği en pahalı sessiz arıza sınıfı bu. Config'de tanımlı, kodda okunmayan bir
+#     tuzak: deney bayrağı açar, hiçbir şey değişmez ve script yine karar basar — genelde kendi
+#     başına oynayan başka bir sayıya bakarak "REPRODUCED". Dört tuzak aynı anda bu hâldeydi.
+#     Yalnızca BASTIRILAN bir alan (main'in tuzak durumu haritası) okunmuş SAYILMAZ: o satır
+#     "TRAP_" dizgesini içerdiği için dışarıda bırakılıyor.
+cfg="$D/internal/config/config.go"
+if [[ -f "$cfg" ]]; then
+  live=$(find "$D" -name '*.go' ! -name config.go -exec grep -h . {} + 2>/dev/null | grep -v '"TRAP_' || true)
+  while read -r field env; do
+    [[ -z "$field" ]] && continue
+    grep -q "\.$field\b" <<< "$live" || err "ölü tuzak: $env (cfg.$field) config'de var, kodda okunmuyor"
+  done < <(grep -oE '[A-Za-z]+:[[:space:]]*env[A-Za-z]*\("TRAP_[A-Z0-9_]+"' "$cfg" \
+             | sed -E 's/([A-Za-z]+):[[:space:]]*env[A-Za-z]*\("(TRAP_[A-Z0-9_]+)"/\1 \2/')
+fi
+
 [[ $fail == 0 ]] && echo "  ✔ $name iskelet OK"
 exit $fail
