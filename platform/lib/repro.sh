@@ -459,7 +459,16 @@ app_workload() { printf '%s/%s' "$(workload_kind)" "$(app_name)"; }
 # Kullanım: setenv "$(wl redirect)" KEY=VAL OTHER-     (sonuna `-` → değişkeni SİL)
 setenv() {
   local w=$1; shift
-  [[ "${w%%/*}" != "rollout" ]] && { setenv "$w" "$@" >/dev/null; return; }
+  # DİKKAT: burada `kubectl set env` yazmak ZORUNLU — `setenv` yazmak fonksiyonun KENDİSİNİ
+  # çağırır. Tam olarak bu oldu: 102 çağrı yerini toplu değiştiren sed, bu satırı da değiştirdi
+  # ve yardımcı sonsuz özyinelemeye girip "Segmentation fault: 11" ile çöktü. Deployment hedefleyen
+  # HER deney (yani merdivenin çoğu) bu yüzden HATA verdi; Rollout hedefleyenler diğer daldan
+  # geçtiği için çalışmaya devam etti ve hata bir süre gizlendi.
+  # EN: this must say `kubectl set env`, not `setenv` — the bulk sed that rewrote 102 call sites
+  # rewrote this line too, so the helper called itself until the stack blew up.
+  # Ders: toplu değiştirme, değiştirdiği şeyin TANIMINI de kapsar. Yeniden yazdığın fonksiyonun
+  # kendi gövdesini her zaman gözle kontrol et.
+  [[ "${w%%/*}" != "rollout" ]] && { kubectl -n "$NS" set env "$w" "$@" >/dev/null; return; }
   local cur a k v
   cur=$(kubectl -n "$NS" get "$w" -o json 2>/dev/null | jq -c '.spec.template.spec.containers[0].env // []') || return 1
   for a in "$@"; do
@@ -477,7 +486,7 @@ setenv() {
 # Kullanım: setres "$(wl redirect)" --requests=cpu=100m --limits=cpu=50m
 setres() {
   local w=$1; shift
-  [[ "${w%%/*}" != "rollout" ]] && { setres "$w" "$@" >/dev/null; return; }
+  [[ "${w%%/*}" != "rollout" ]] && { kubectl -n "$NS" set resources "$w" "$@" >/dev/null; return; }
   local cur a kind spec key val
   cur=$(kubectl -n "$NS" get "$w" -o json 2>/dev/null | jq -c '.spec.template.spec.containers[0].resources // {}') || return 1
   for a in "$@"; do
