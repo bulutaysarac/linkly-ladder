@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"net/http/pprof"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -100,6 +101,26 @@ func (a *API) Handler(rl *ratelimit.Limiter) http.Handler {
 	root.HandleFunc("GET /healthz", a.handleHealthz)
 	root.HandleFunc("GET /readyz", a.handleReadyz)
 	root.Handle("GET /metrics", a.met.Handler())
+	// PROFİL UCU — gözlemlenebilirliğin dördüncü ayağı (P11-08).
+	// EN: P11-08's whole thesis is that some CPU costs are invisible to metrics and logs and show
+	//     up only in a profile. The script even printed the `go tool pprof` command to run — and
+	//     net/http/pprof was never registered, so that command could not work. Telling the reader
+	//     to use a tool you did not wire is worse than not mentioning it: they will conclude the
+	//     technique does not work rather than that the endpoint is missing.
+	//     It lives on the internal port (8080) next to /metrics, never on the ingress: a profile
+	//     endpoint is a CPU-costly, information-rich surface and does not belong on the internet.
+	// TR: P11-08'in bütün tezi, bazı CPU maliyetlerinin metriklerde ve log'larda GÖRÜNMEYİP
+	//     yalnızca profilde göründüğüdür. Script koşulacak `go tool pprof` komutunu bile
+	//     basıyordu — ve net/http/pprof hiç kaydedilmemişti, yani o komut çalışamazdı.
+	//     Bağlamadığın bir aracı okuyucuya önermek, hiç bahsetmemekten kötüdür: tekniğin
+	//     çalışmadığı sonucuna varır, ucun eksik olduğu sonucuna değil.
+	//     İç portta (8080), /metrics'in yanında duruyor; ingress'te ASLA: profil ucu CPU maliyetli
+	//     ve bilgi yoğun bir yüzeydir, internete açılmaz.
+	root.HandleFunc("GET /debug/pprof/", pprof.Index)
+	root.HandleFunc("GET /debug/pprof/cmdline", pprof.Cmdline)
+	root.HandleFunc("GET /debug/pprof/profile", pprof.Profile)
+	root.HandleFunc("GET /debug/pprof/symbol", pprof.Symbol)
+	root.HandleFunc("GET /debug/pprof/trace", pprof.Trace)
 	return root
 }
 
