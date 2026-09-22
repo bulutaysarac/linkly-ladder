@@ -30,18 +30,34 @@ grafana_hint()   { note "Grafana → $GRAFANA_URL/dashboards?query=Ladder → $1
 # sonuç "HATA" görünüyordu (P07-04/05). Ölçüm ALTYAPISININ tökezlemesi, deneyi iptal etmemeli.
 # Ama sessizce 0 da dönmemeli: iki denemede de alamazsa STDERR'e uyarı basar (stdout'a basarsa
 # değeri kirletir — bu fonksiyon hep `$( )` içinde çağrılıyor).
-_promq_raw() { curl -sfG --max-time 15 "$PROM_URL/api/v1/query" --data-urlencode "query=$1" 2>/dev/null; }
+# POST kullanılıyor, GET değil: uzun sorgular (histogram_quantile + birden çok etiket) URL
+# sınırlarına takılıyordu. Ve `-f` YOK: `-f` gövdeyi ATAR, geriye yalnızca "curl 22" kalır —
+# Prometheus'un "parse error at char 61" gibi gerçek mesajı kaybolur. Ölçüm aracının kendi
+# hatası da bir ölçümdür; onu sessizleştirmek, yanlış sonucu doğru sanmanın en kısa yoludur.
+# EN: POST, not GET: long queries hit URL limits. And no `-f`: it discards the body, leaving
+# only "curl 22" while Prometheus's actual message ("parse error at char 61") is lost. The
+# measurement tool's own failure is also a measurement.
+_promq_raw() {
+  local body code
+  body=$(curl -s --max-time 15 -w $'\n%{http_code}' -XPOST "$PROM_URL/api/v1/query" \
+           --data-urlencode "query=$1" 2>/dev/null) || return 1
+  code=${body##*$'\n'}; body=${body%$'\n'*}
+  [[ "$code" == "200" ]] || { printf '%s' "$body" >&2; return 1; }
+  printf '%s' "$body"
+}
 promq() {
-  local out rc=0
-  out=$(_promq_raw "$1") || rc=$?
+  local out err rc=0
+  err=$(mktemp); out=$(_promq_raw "$1" 2>"$err") || rc=$?
   if (( rc != 0 )); then
     sleep 2
-    rc=0; out=$(_promq_raw "$1") || rc=$?
+    rc=0; out=$(_promq_raw "$1" 2>"$err") || rc=$?
   fi
   if (( rc != 0 )); then
-    printf '  \033[33mPrometheus sorgusu başarısız (curl %s), 0 sayıldı: %.60s\033[0m\n' "$rc" "$1" >&2
-    echo 0; return 0
+    printf '  \033[33mPrometheus sorgusu başarısız, 0 sayıldı: %.70s\033[0m\n' "$1" >&2
+    printf '  \033[33m  → %s\033[0m\n' "$(jq -r '.error // .' "$err" 2>/dev/null | head -c 200)" >&2
+    rm -f "$err"; echo 0; return 0
   fi
+  rm -f "$err"
   printf '%s' "$out" | jq -r '.data.result[0].value[1] // "0"'
 }
 # Sorgu hiç seri döndürmüyor mu? (metrik yok)
