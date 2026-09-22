@@ -30,7 +30,7 @@ note "$N tıklama üretildi, hepsi topic'te bekliyor (tüketici kapalı)"
 # P03-05 ile aynı ders bir adım ileri: bir yarışın penceresi onu besleyen işlemin süresidir ve
 # hangi işlemin beslediğini yanlış bilirsen, kusursuz koşan ama etkiyi GÖSTEREMEYEN bir deney
 # elde edersin.
-chaos_apply redpanda-delay-2s
+chaos_apply redpanda-delay
 step "Tüketiciyi aç ve birikimi işlerken ÖLDÜR — commit edilmemiş partiler yeniden teslim edilecek"
 kubectl -n "$NS" scale "$(wl $CONSUMER)" --replicas=1 >/dev/null
 # Öldürmeden ÖNCE işlemeye zaman ver: sert öldürülen tüketicinin grubu yeniden dengelemesi

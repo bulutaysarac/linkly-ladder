@@ -16,10 +16,19 @@
 #     Yavaşlatılacak yanlış süreci seçmek, kusursuz koşan ama etkiyi GÖSTEREMEYEN bir deney üretir.
 apiVersion: chaos-mesh.org/v1alpha1
 kind: NetworkChaos
-metadata: { name: redpanda-delay-2s, namespace: ${NS} }
+metadata: { name: redpanda-delay, namespace: ${NS} }
 spec:
   action: delay
   mode: all
   selector: { namespaces: ["${NS}"], labelSelectors: { app.kubernetes.io/name: redpanda } }
-  delay: { latency: "2s", jitter: "200ms" }
+  # ÖLÇÜLDÜ: 2 sn gecikmede tüketici HİÇ İLERLEMİYOR — 2000 kayıtlık birikimden 0 tanesi
+  # işlendi ve deney "tekrar teslim gözlenmedi" dedi. Gecikme yalnızca commit'i değil FETCH'i de
+  # yavaşlatıyor, yani broker'ı yavaşlatmak tüketiciyi tamamen durdurabilir.
+  # 800 ms: tüketici ilerlemeye devam ediyor ama "yazdım / henüz commit etmedim" penceresi
+  # ölçülebilir genişlikte kalıyor. Bir yarışı gözlemek için sistemi DURDURMAK değil,
+  # YAVAŞLATMAK gerekir — durdurursan gözlemek istediğin geçiş hiç gerçekleşmez.
+  # EN: at 2s the consumer made NO progress at all (0 of 2000 records) and the experiment
+  # reported "no redelivery". The delay slows FETCH as well as commit. 800ms keeps the consumer
+  # moving while leaving the write-then-commit window measurably wide.
+  delay: { latency: "800ms", jitter: "100ms" }
   direction: to
