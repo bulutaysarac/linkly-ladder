@@ -7,6 +7,18 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 ensure_healthy
 step "Tanımlı politikalar"
 kubectl get clusterpolicy --no-headers 2>/dev/null | awk '{print "    " $1 " → " $2}' || note "    (Kyverno kurulu değil)"
+# KANITI KIRPMA — bu scriptin kendi tarihi.
+# EN: the three `kubectl run --dry-run=server` calls used to end with `| tail -2`. A Kyverno denial
+#     is multi-line and the word "denied" is on the FIRST line; `tail -2` kept the last two lines
+#     (the policy name and the rule message) and threw away the only thing the verdict greps for.
+#     So every denial was counted as "not blocked" and the script reported NOT-REPRODUCED while
+#     the policy was doing exactly its job. Same lesson as truncating an EXPLAIN plan with
+#     `head -3`: crop for DISPLAY, never before you match.
+# TR: üç `kubectl run --dry-run=server` çağrısı `| tail -2` ile bitiyordu. Kyverno'nun reddi çok
+#     satırlı ve "denied" kelimesi İLK satırda; `tail -2` son iki satırı (politika adı ve kural
+#     mesajı) tutup kararın aradığı tek şeyi atıyordu. Yani her reddediliş "engellenmedi" diye
+#     sayıldı ve script, politika tam da işini yaparken NOT-REPRODUCED dedi.
+#     `EXPLAIN` planını `head -3` ile kesmekle aynı ders: GÖSTERİRKEN kırp, EŞLEŞTİRMEDEN ÖNCE asla.
 # REDDEDİLMEK BEKLENEN SONUÇTUR — ama kubectl bunu sıfırdan farklı bir çıkış koduyla söyler.
 # EN: `|| true` is not sloppiness here: a denied admission is exactly what this experiment wants
 #     to observe, and `set -e` was killing the script at the first success. An experiment must not
@@ -17,18 +29,18 @@ kubectl get clusterpolicy --no-headers 2>/dev/null | awk '{print "    " $1 " →
 step "(1) :latest etiketli bir pod dağıtmayı dene"
 out1=$(kubectl -n "$NS" run policy-test-latest --image=busybox:latest --restart=Never \
         --overrides='{"spec":{"containers":[{"name":"c","image":"busybox:latest","command":["sleep","30"],"resources":{"limits":{"memory":"64Mi"}},"readinessProbe":{"exec":{"command":["true"]}}}]}}' \
-        --dry-run=server 2>&1 | tail -2) || true
-note "sonuç: $(echo "$out1" | head -c 220)"
+        --dry-run=server 2>&1) || true
+note "sonuç: $(printf '%s' "$out1" | tr '\n' ' ' | head -c 220)"
 step "(2) Bellek limiti OLMAYAN bir pod dağıtmayı dene"
 out2=$(kubectl -n "$NS" run policy-test-nolimit --image=busybox:1.36 --restart=Never \
         --overrides='{"spec":{"containers":[{"name":"c","image":"busybox:1.36","command":["sleep","30"],"readinessProbe":{"exec":{"command":["true"]}}}]}}' \
-        --dry-run=server 2>&1 | tail -2) || true
-note "sonuç: $(echo "$out2" | head -c 220)"
+        --dry-run=server 2>&1) || true
+note "sonuç: $(printf '%s' "$out2" | tr '\n' ' ' | head -c 220)"
 step "(3) readinessProbe OLMAYAN bir pod dağıtmayı dene"
 out3=$(kubectl -n "$NS" run policy-test-noprobe --image=busybox:1.36 --restart=Never \
         --overrides='{"spec":{"containers":[{"name":"c","image":"busybox:1.36","command":["sleep","30"],"resources":{"limits":{"memory":"64Mi"}}}]}}' \
-        --dry-run=server 2>&1 | tail -2) || true
-note "sonuç: $(echo "$out3" | head -c 220)"
+        --dry-run=server 2>&1) || true
+note "sonuç: $(printf '%s' "$out3" | tr '\n' ' ' | head -c 220)"
 blocked=0
 for o in "$out1" "$out2" "$out3"; do echo "$o" | grep -qiE 'denied|blocked|violation|not allowed' && blocked=$((blocked+1)); done
 grafana_hint "14 · Security → 'Kyverno policy sonuçları'"
