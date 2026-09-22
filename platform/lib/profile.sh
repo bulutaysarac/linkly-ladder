@@ -76,7 +76,29 @@ off() {
 # Chaos Mesh: 02'den itibaren (pg-delay, pg-loss, redis-delay...)
 if (( n >= 2 )); then on chaos-mesh; else off chaos-mesh; fi
 # KEDA: 07'den itibaren (lag tabanlı ölçekleme)
-if (( n >= 7 )); then on keda; else off keda; fi
+# KEDA ASLA PARK EDİLMEZ — park etmek NAMESPACE SİLMEYİ KÜMEDE KİLİTLİYOR.
+# EN: KEDA registers an AGGREGATED APIService (`v1beta1.external.metrics.k8s.io`). Scaling its
+#     deployments to 0 leaves that APIService registered with NO endpoints, so API discovery
+#     fails — and the namespace controller refuses to finish deleting ANY namespace while
+#     discovery is incomplete ("NamespaceDeletionDiscoveryFailure"). Every `make down` then
+#     returned 0 while the namespace sat in Terminating FOREVER, holding its pods. Four of them
+#     piled up (one for 4 hours), the nodes ran at 170% CPU, etcd slowed down, the kube-apiserver
+#     PostStartHook timed out and the control plane fell into a crash loop — which in turn made
+#     Prometheus OOM during WAL replay and made an entire verification round measure nothing.
+#     One parked component, a cluster-wide outage, and a day of verdicts with no measurement
+#     behind them. The moment KEDA came back, all four namespaces disappeared within seconds.
+#     Cost of keeping it up: two small idle pods. Not a trade.
+# TR: KEDA bir AGREGE APIService kaydeder (`v1beta1.external.metrics.k8s.io`). Deployment'larını
+#     0'a çekmek o APIService'i ENDPOINT'SİZ bırakır; API keşfi başarısız olur ve namespace
+#     denetleyicisi, keşif eksikken HİÇBİR namespace'in silinmesini tamamlamaz
+#     ("NamespaceDeletionDiscoveryFailure"). Böylece her `make down` 0 dönerken namespace
+#     SONSUZA KADAR Terminating'de kalıyor ve pod'larını tutuyordu. Dört tanesi birikti (biri 4
+#     saat), node'lar %170 CPU'ya çıktı, etcd yavaşladı, kube-apiserver'ın PostStartHook'u zaman
+#     aşımına uğradı ve kontrol düzlemi crash loop'a girdi — bu da Prometheus'u WAL oynatırken
+#     OOM'a soktu ve koca bir doğrulama turunun hiçbir şey ölçmemesine yol açtı. Park edilen tek
+#     bileşen, küme çapında bir kesinti. KEDA geri gelince dört namespace saniyeler içinde
+#     silindi. Ayakta tutmanın bedeli: iki küçük boşta pod. Bu bir takas değil.
+on keda
 # CNPG operatörü: 09'dan itibaren (Cluster + Pooler)
 if (( n >= 9 )); then on cnpg-system; else off cnpg-system; fi
 # Loki + Alloy (log toplama): 11'den itibaren.
@@ -113,4 +135,4 @@ else                   kubectl -n monitoring scale deploy kps-grafana --replicas
 # zaten hiçbir şey yapmaz (13'ten önce `platform && make security` çalıştırılmamış olur).
 if (( n >= 13 )); then on kyverno; else kubectl -n kyverno scale deploy --all --replicas=0 >/dev/null 2>&1; fi
 
-echo "profil: seviye $L → chaos=$(( n>=2 )) keda=$(( n>=7 )) cnpg=$(( n>=9 )) log=$(( n==11 )) tempo=$(( n==11 )) argo=$(( n>=12 )) güvenlik=$(( n>=13 ))"
+echo "profil: seviye $L → chaos=$(( n>=2 )) keda=1(hep) cnpg=$(( n>=9 )) log=$(( n==11 )) tempo=$(( n==11 )) argo=$(( n>=12 )) güvenlik=$(( n>=13 ))"
