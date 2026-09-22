@@ -49,6 +49,24 @@ tight_cpu=$(promq "sum(rate(container_cpu_usage_seconds_total{namespace=\"$NS\",
 tight_thr=$(promq "sum(rate(container_cpu_cfs_throttled_seconds_total{namespace=\"$NS\",pod=~\"redirect.*\"}[1m]))")
 note "limitli: p99=$(awk -v v="$tight_p99" 'BEGIN{printf "%.0f", v*1000}') ms · CPU=$(awk -v v="$tight_cpu" 'BEGIN{printf "%.2f", v}') çekirdek · throttle=$(awk -v v="$tight_thr" 'BEGIN{printf "%.2f", v}') s/s"
 tight_thr_total=$(promq "sum(increase(container_cpu_cfs_throttled_seconds_total{namespace=\"$NS\",pod=~\"redirect.*\"}[2m]))")
+# METRİK YOKSA HÜKÜM DE YOK.
+# Baştaki kontrol metrik ADININ Prometheus'ta bulunup bulunmadığına bakıyor; kubelet onu başka
+# namespace'ler için yayınlıyorsa "evet" der. Oysa bizim pod'larımız için SERİ olmayabilir — ve o
+# zaman `promq` 0 döner, karar "kısıtlama ölçülemedi" diye NOT-REPRODUCED basar ve bu, dersin TAM
+# TERSİ olarak okunur: "CPU limiti zararsızmış". Ölçemediğin şey hakkında hüküm verme; ölçemediğini
+# söyle. (Bir metriğin VARLIĞI ile o metriğin SENİN nesnen için var olması aynı şey değildir.)
+# EN: the check at the top only asks whether the metric NAME exists in Prometheus; kubelet may
+# publish it for other namespaces and answer "yes" while there is no SERIES for our pods. Then
+# promq returns 0, the verdict prints NOT-REPRODUCED and that reads as the OPPOSITE of the lesson:
+# "CPU limits are harmless". Don't rule on what you could not measure — say you could not measure.
+if awk -v t="$tight_thr_total" 'BEGIN{exit !(t+0==0)}' \
+   && prom_absent "container_cpu_cfs_throttled_seconds_total{namespace=\"$NS\",pod=~\"redirect.*\"}"; then
+  warn "ölçüm yapılamadı: bu kurulumda cAdvisor, pod'larımız için container_cpu_cfs_throttled_*"
+  warn "serisini yayınlamıyor (kind + cgroup v1). Kısıtlama GERÇEKLEŞİYOR ama GÖRÜNMÜYOR."
+  warn "Bu bir NOT-REPRODUCED değil, EKSİK ÖLÇÜMdür: ölçemediğin şey hakkında hüküm verilmez."
+  warn "Grafana'da dolaylı kanıt: 01 · Pods & Resources → CPU kullanımı limite dayanıp p99 fırlıyor."
+  exit 2
+fi
 step "Kotayı pratikte KALDIR (4 çekirdek), AYNI yük — tek pod"
 # `--limits=cpu=0` geçerli görünüp bozuk bir spec üretebiliyor (pod'lar hazır olmuyor, iki
 # ReplicaSet takılı kalıyor — gerçekte oldu). Niyet "kota beni sınırlamasın"; bunu geçerli bir
