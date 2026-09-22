@@ -19,15 +19,33 @@ done
 # (ilk koşuda "≈ -270" yazdı). Ölçtüğün şey bir SAYAÇ ise, seri kaybının farkı bozduğunu unutma.
 dbq() { promq "sum(db_queries_total{namespace=\"$NS\",pod=~\"api-.*\"})"; }
 delta() { awk -v a="${1:-0}" -v b="${2:-0}" 'BEGIN{d=b-a; print (d<0 ? 0 : int(d))}'; }
+# BİR SAYAÇ DELTASI, KAZIMA ARALIĞINDAN HIZLI OKUNAMAZ.
+# Prometheus bu kurulumda 15 sn'de bir kazıyor. `q0`ı 100 oluşturma isteğinin hemen ardından
+# okursak, elimizdeki değer o isteklerden ÖNCEKİ kazımadır; 12 sn sonraki `q1` ise onları içerir.
+# Sonuç: tek bir list isteğine "≈ 61 sorgu" yazdık — ölçtüğümüz şey oluşturma trafiğinin
+# artığıydı. Tuzak fazında ise rollout sırasında ölen pod'un serisi toplamdan düşüyor, fark
+# NEGATİF çıkıyor ve 0'a kırpılıyordu: "N+1 açıkken 0 sorgu" gibi kendi iddiasını çürüten bir
+# satır bastık ve hüküm yine de REPRODUCED dedi.
+# Kural: sayaç deltası ölçen her ölçüm, iki ucunda da EN AZ İKİ KAZIMA ARALIĞI beklemelidir.
+# EN: a counter delta cannot be read faster than the scrape interval (15s here). Reading `q0`
+# right after the 100 create requests returns the scrape from BEFORE them, while `q1` 12s later
+# includes them — so a single list request was reported as "≈ 61 queries", which was really the
+# leftover create traffic. In the trap phase the dying pod's series drops out of the sum, the
+# delta goes negative and is clipped to 0: we printed "0 queries with N+1 enabled", a line that
+# refutes the very claim the verdict then made. Any counter-delta measurement must wait at least
+# two scrape intervals at BOTH ends.
+SCRAPE=${SCRAPE:-40}
+settle() { sleep "$SCRAPE"; }
 # ISINDIRMA ŞART: ilk /api/links isteği havuzu açıyor ve 1.05 sn sürdü; N+1 açık koşu ise
 # 0.12 sn çıktı — yani script "N+1 daha HIZLI" gibi saçma bir sonuç üretti. İlk isteğin maliyeti
 # ölçtüğün şeyin değil, ÖLÇÜME BAŞLAMANIN maliyetidir.
 curl -s -o /dev/null -H "X-Tenant-ID: $TEN" "$BASE_API/api/links" || true
 curl -s -o /dev/null -H "X-Tenant-ID: $TEN" "$BASE_API/api/links" || true
 step "Varsayılan (tek sorgu): list süresi ve DB sorgu sayısı"
+settle                      # oluşturma trafiği sayaca işlensin
 q0=$(dbq)
 t_ok=$(curl -s -o /dev/null -w '%{time_total}' -H "X-Tenant-ID: $TEN" "$BASE_API/api/links")
-sleep 12
+settle
 q1=$(dbq)
 d_ok=$(delta "${q0%%.*}" "${q1%%.*}")
 note "varsayılan: ${t_ok}s · bu istek için DB sorgusu ≈ $d_ok"
@@ -37,9 +55,10 @@ kubectl -n "$NS" rollout status "$(wl api)" --timeout=180s >/dev/null || true
 sleep 5
 curl -s -o /dev/null -H "X-Tenant-ID: $TEN" "$BASE_API/api/links" || true   # yeni pod da soğuk
 curl -s -o /dev/null -H "X-Tenant-ID: $TEN" "$BASE_API/api/links" || true
+settle                      # ölen pod'un serisi toplamdan düşsün, yenisi kazınsın
 q2=$(dbq)
 t_bad=$(curl -s -o /dev/null -w '%{time_total}' -H "X-Tenant-ID: $TEN" "$BASE_API/api/links")
-sleep 12
+settle
 q3=$(dbq)
 d_bad=$(delta "${q2%%.*}" "${q3%%.*}")
 grafana_hint "05 · Postgres → 'DB queries by op' (op=stats patlaması) · 02 · App RED → p99 (/api/links)"
@@ -51,6 +70,13 @@ note "değil, bir MALİYET ÇARPANI hâline geldi."
 note 'Doğrusu: tek toplu sorgu (WHERE code = ANY($1)) ya da tek JOIN. "Kolay" olan döngüdür;'
 note "ucuz olan toplu sorgudur ve aradaki fark ölçekte ortaya çıkar."
 note "Servis ayrımı bunu KÖTÜLEŞTİRİR: 101 fonksiyon çağrısı 101 ağ çağrısına dönebilir → 14'te gRPC + batch."
-awk -v a="$t_ok" -v b="$t_bad" 'BEGIN{exit !(b > a*1.5)}' \
-  && reproduced "N+1 list süresini ${t_ok}s → ${t_bad}s yaptı (DB sorgusu $d_ok → $d_bad)"
-not_reproduced "N+1 etkisi ölçülemedi (link sayısını artırıp tekrar dene)"
+# ASIL ÖLÇÜ SORGU SAYISIDIR, SÜRE DEĞİL. İddia "maliyet sonuç kümesiyle doğru orantılı";
+# bunun ölçüsü 100 link için ~100 EK SORGU'dur. Süre bu kümede iki koşu arasında zaten oynar ve
+# tek başına dayanak yapılırsa, sorgu sayısı KENDİ İDDİASINI ÇÜRÜTÜRKEN bile hüküm geçebilir —
+# nitekim "61 → 0" yazıp REPRODUCED dedi. Süre yine raporlanıyor, ama karar sayıya bakıyor.
+# EN: the real measure is the query COUNT, not the duration. Duration varies run to run on this
+# cluster, and when it alone decides, the verdict can pass while the query count REFUTES it —
+# which is exactly what "61 → 0" did. Duration is still reported; the decision reads the count.
+awk -v qa="$d_ok" -v qb="$d_bad" 'BEGIN{exit !(qa > 0 && qb > qa * 2)}' \
+  && reproduced "N+1 bu istek için DB sorgusunu $d_ok → $d_bad yaptı (list süresi ${t_ok}s → ${t_bad}s)"
+not_reproduced "N+1 etkisi ölçülemedi (sorgu sayısı $d_ok → $d_bad; link sayısını artır ya da SCRAPE'i büyüt)"

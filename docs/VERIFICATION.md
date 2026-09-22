@@ -50,6 +50,7 @@ Aşağıdaki liste ikinci türden bulunan hataları içeriyor. Hepsi "çalışı
 | 30 | P07-04 | Dar kota denemesi `--requests=cpu=100m --limits=cpu=50m` uyguluyordu. | API `must be less than or equal to cpu limit` ile reddediyor, script hiçbir şey ölçmeden ölüyordu. Ayrıca temizlik requests ve limits'i AYRI çağrılarda geri alıyordu; ara durum da geçersiz olduğu için temizlik yarım kalıp seviyeyi dar kotada asılı bırakabilirdi. |
 | 31 | P07-02 | Yük `stairs` idi: 200 tohumlanmış kod + 04'ten beri PAYLAŞIMLI önbellek → isabet ~%100. | "Darboğaz DB'ye taşındı" iddiası ölçülüyordu ama yük DB'ye hiç ulaşmıyordu (0 ms havuz beklemesi, 0 hata, 38/100 bağlantı). Deney, ölçmek istediği durumu kendisi yaratmalı: eşzamanlı `scan` yükü her istekte bir DB okuması üretiyor. |
 | 32 | `promq` hata mesajı | Başarısız sorguyu `%.70s` ile basıyordu. | İki FARKLI bozuk sorgu ekranda birebir aynı görünüyordu; Prometheus sütun numarasını verdiği hâlde hatanın yeri okunamıyordu. |
+| 33 | P07-06 | Sayaç deltası kazıma aralığından (15 sn) HIZLI okunuyordu: `q0` oluşturma isteklerinden ÖNCEKİ kazımaydı, tuzak fazında ise ölen pod'un serisi toplamdan düşüp fark negatife inince 0'a kırpılıyordu. | Tek bir list isteği "≈ 61 sorgu", N+1 açık hâli "≈ 0 sorgu" yazdı — yani çıktı kendi iddiasını çürütürken hüküm (yalnızca süreye baktığı için) yine `REPRODUCED` dedi. Artık iki uçta da en az iki kazıma aralığı bekleniyor ve karar sorgu sayısına bakıyor. |
 
 ## Bulunan altyapı/kurulum hataları (13 ve 14 hiç ayağa kalkamıyordu)
 
