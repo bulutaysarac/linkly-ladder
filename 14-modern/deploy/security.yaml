@@ -132,6 +132,14 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels: { kubernetes.io/metadata.name: monitoring }
+        # Node ağı: kubelet probe'ları ve API sunucusunun pod proxy'si (ölçüm scriptleri
+        # /metrics'i bu yoldan 1 sn'lik çözünürlükle örnekliyor). Bunlar pod DEĞİL, bu yüzden
+        # podSelector ile ifade edilemez — kaynak IP ile izin vermek zorundasın.
+        # EN: The node network: kubelet probes and the API server's pod proxy (the measurement
+        # scripts sample /metrics through it at 1s resolution). These are not pods, so you
+        # cannot express them with a podSelector — you must allow them by source IP.
+        - ipBlock:
+            cidr: 172.19.0.0/16
 ---
 # PgBouncer havuzları da ayrı pod'lardır: uygulama Postgres'e DOĞRUDAN değil, buradan bağlanır.
 # EN: The poolers are separate pods. Allowing "apps → postgres" is not enough when the apps
