@@ -20,6 +20,28 @@ on_cleanup "kubectl uncordon '$node'"
 ( k6run redirect --vus 1 --duration 90s >/tmp/p0103.k6 2>&1 ) & kpid=$!
 sleep 10
 
+# UYGULAMANIN ERİŞİLEBİLİRLİĞİNİ ÖLÇ, TOPLAM 5xx'İ DEĞİL.
+# EN: `kubectl drain` evicts EVERY pod on the node — including the single Postgres at level 02.
+#     The app then returns 5xx because the DATABASE is gone, which is P02-03's problem, not this
+#     one; the verdict read those 5xx as "no safe maintenance for the app" and reproduced at a
+#     level that had already fixed app redundancy. A measurement must be scoped to the claim it
+#     supports: here the claim is about the APP's redundancy, so the measure is the app's ready
+#     endpoint count — did it ever reach zero?
+# TR: `kubectl drain` node'daki HER pod'u tahliye eder — 02'deki tek Postgres dahil. Uygulama o
+#     zaman VERİTABANI gittiği için 5xx döner; bu P02-03'ün sorunudur, bunun değil. Hüküm o
+#     5xx'leri "uygulama için güvenli bakım yok" diye okuyup, uygulama yedekliliğini zaten çözmüş
+#     bir seviyede REPRODUCED dedi. Ölçü, desteklediği iddiaya göre daraltılmalı: iddia
+#     UYGULAMANIN yedekliliği hakkında, o hâlde ölçü hazır endpoint sayısıdır — hiç sıfıra indi mi?
+EPS=$(mktemp); on_cleanup "rm -f '$EPS'"
+( while :; do
+    kubectl -n "$NS" get endpointslice -l "kubernetes.io/service-name=$(app_name)" \
+      -o jsonpath='{range .items[*]}{range .endpoints[*]}{.conditions.ready}{"\n"}{end}{end}' 2>/dev/null \
+      | count_lines true >> "$EPS"
+    echo >> "$EPS"
+    sleep 2
+  done ) & eppid=$!
+on_cleanup "kill $eppid 2>/dev/null"
+
 step "UÇ (a): normal drain — PDB'ye saygı duyarak"
 # NOT: `set -e` altında `x=$(başarısız komut)` scripti ÖLDÜRÜR — `; rc=$?` bunu engellemez,
 # çünkü hata atama komutunun kendisinde oluşur. Bu yüzden `|| rc=$?` kalıbı şart.
@@ -43,13 +65,16 @@ else
   note "bu node'da uygulama pod'u yok — zorlamaya gerek kalmadı"
 fi
 sleep 25
+kill $eppid 2>/dev/null || true
+min_ep=$(grep -E '^[0-9]+$' "$EPS" 2>/dev/null | sort -n | head -1); min_ep=${min_ep:-0}
 wait_ready >/dev/null 2>&1 || true
 wait $kpid || true
 e5=$(k6_5xx); e404=$(k6_404)
+note "bakım penceresinde EN DÜŞÜK hazır uygulama endpoint'i: $min_ep"
 grafana_hint "02 · App RED → 5xx ; 01 · Pods & Resources → 'Pod fazları' (Pending)"
 note "zorlamadan sonra: 5xx=$e5 · 404=$e404 (404'ler P01-01: yeni pod'un belleği boş)"
 note "Sonuç: PDB ya bakımı kilitler ya da kesintiyi seyreder. Üçüncü seçenek YEDEKLİLİKTİR — 02."
 note "Karşılaştırma: aynı script 02'de (3 replika, minAvailable=2) drain'i geçirir ve 5xx üretmez."
-{ [[ "$blocked" == true ]] || (( e5 > 0 )); } \
-  && reproduced "tek replikada güvenli bakım YOK: drain $([[ $blocked == true ]] && echo 'bloke oldu' || echo 'geçti'), zorlayınca $e5 istek 5xx aldı"
-not_reproduced "drain sorunsuz geçti ve kesinti olmadı — yedeklilik var (02)"
+{ [[ "$blocked" == true ]] || (( min_ep == 0 )); } \
+  && reproduced "tek replikada güvenli bakım YOK: drain $([[ $blocked == true ]] && echo 'bloke oldu' || echo 'geçti'), bakım penceresinde hazır endpoint en düşük $min_ep (5xx=$e5)"
+not_reproduced "drain geçti ve uygulama hep ayakta kaldı (en düşük endpoint $min_ep) — yedeklilik var (02). Not: 5xx=$e5 olabilir; o zaman sebep uygulama değil, tek replikalı bağımlılıktır (P02-03)."
