@@ -320,7 +320,19 @@ clicks() {
 
 kpods()       { kubectl -n "$NS" get pods -l "$APP_SELECTOR" "$@"; }
 restarts()    { kpods -o jsonpath='{range .items[*]}{.status.containerStatuses[0].restartCount}{"\n"}{end}' | awk '{s+=$1} END{print s+0}'; }
-last_reason() { kpods -o jsonpath='{range .items[*]}{.status.containerStatuses[0].lastState.terminated.reason}{"\n"}{end}' | grep -v '^$' | sort -u | paste -sd, -; }
+# BULACAK BİR ŞEY OLMAMASI, HATA DEĞİLDİR.
+# EN: no pod has terminated → `grep -v '^$'` matches nothing → exit 1 → `set -o pipefail` makes
+#     the whole pipeline fail → `reason=$(last_reason)` is a failing assignment → `set -e` kills
+#     the script WITHOUT printing a verdict. It only bites when nothing crashed, i.e. exactly on
+#     the healthy path: P00-01 passed at level 00 (where the process really does crash) and died
+#     silently at level 01 (where the map is protected) — the one place its NOT-REPRODUCED was
+#     the whole point. An empty result is a result; return it.
+# TR: hiçbir pod sonlanmadıysa `grep -v '^$'` hiçbir şey bulmaz → 1 döner → `pipefail` boru
+#     hattını düşürür → `reason=$(last_reason)` başarısız bir atama olur → `set -e` scripti
+#     HÜKÜM BASMADAN öldürür. Yalnızca hiçbir şey çökmediğinde, yani tam olarak SAĞLIKLI yolda
+#     ısırır: P00-01, 00'da (süreç gerçekten çöküyor) geçti, 01'de (map korunuyor) sessizce öldü
+#     — oysa oradaki NOT-REPRODUCED işin ta kendisiydi. Boş bir sonuç da bir sonuçtur.
+last_reason() { kpods -o jsonpath='{range .items[*]}{.status.containerStatuses[0].lastState.terminated.reason}{"\n"}{end}' | grep -v '^$' | sort -u | paste -sd, - || true; }
 # rollout status, İZLEDİĞİ nesne watch sırasında silinirse "error: object has been deleted" der.
 # Bu bir arıza değil bir yarıştır: ensure_healthy pod'u force-delete ederken ya da bir deney
 # rollout restart atarken denk gelir. Gerçekte oldu: P04-07 kendi sorunuyla ilgisiz bir hata
