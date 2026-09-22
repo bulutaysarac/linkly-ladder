@@ -63,6 +63,13 @@ note "  · sürüm damgalı anahtar (link:v<n>:code) → eski anahtar hiç okunm
 note "  · yazma sırasında L1'i atla (write-through yok) → sıcak anahtarda kazancı kaybedersin"
 note "  · dayanıklı akış (Kafka) ile yayın → sıra ve teslimat garantisi, karşılığında gecikme"
 note "Seçim: en-iyi-çaba yayın + KISA TTL. Pencereyi ÖLÇTÜK ve kabul ettik — 03'teki fark bu."
-{ (( off_bad >= on_ok )) && (( on_ok >= 0 )); } \
+# `on_ok >= 0` BİR KORUMA DEĞİL: sayaç zaten negatif olamaz (yalnızca -1, "link oluşturulamadı"
+# anlamına gelir), yani bu koşul her zaman doğruydu. Geriye tek gerçek koşul olarak
+# `off_bad >= on_ok` kalıyordu ve o da EŞİTLİKTE — ikisi de 0 iken, yani hiçbir şey ölçülmemişken
+# — geçiyordu. Yani L1 kapalıyken ya da silme başarısızken script "borç ödendi" diyebilirdi.
+# EN: `on_ok >= 0` guards nothing — the counter cannot be negative (only -1 means "link could not
+# be created"), so it was always true. That left `off_bad >= on_ok`, which passes at EQUALITY,
+# i.e. when both are 0 and nothing was measured at all.
+{ (( on_ok >= 0 )) && (( off_bad > 0 )) && (( off_bad > on_ok )); } \
   && reproduced "yayın açıkken bayat yanıt $on_ok/40, kapalıyken $off_bad/40 (gönderilen yayın ${sent%%.*}) — her kopya bir kanal borçlanır"
 not_reproduced "fark ölçülemedi (L1 açık mı? pub/sub kanalı doğru mu?)"

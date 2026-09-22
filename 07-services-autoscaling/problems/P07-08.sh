@@ -31,7 +31,7 @@ run_rollout_test() {
   local peak=0 cur
   for _ in $(seq 1 30); do
     cur=$(kubectl -n "$NS" get endpointslice -l "kubernetes.io/service-name=redirect" \
-           -o jsonpath='{range .items[*]}{range .endpoints[*]}{.conditions.ready}{"\n"}{end}{end}' 2>/dev/null | grep -c true || echo 0)
+           -o jsonpath='{range .items[*]}{range .endpoints[*]}{.conditions.ready}{"\n"}{end}{end}' 2>/dev/null | count_lines true)
     (( ${cur:-0} > peak )) && peak=${cur:-0}
     kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=3s >/dev/null 2>&1 && break
     sleep 2

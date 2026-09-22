@@ -195,6 +195,18 @@ with_timeout() {
 # "tepe p99=nan ms" basıp "burst latency'yi bozmadı" dedi). Sayı bekleyen yere sayı ver.
 num() { local v=${1:-}; case "$v" in ""|NaN|nan|+Inf|-Inf|null) printf '0' ;; *) printf '%s' "$v" ;; esac; }
 
+# SATIR SAY — VE SIFIRDA DA TEK BİR SAYI DÖNDÜR.
+# `grep -c` eşleşme bulamayınca "0" BASAR ve yine de 1 ile çıkar. Alışkanlıkla eklenen
+# `|| echo 0` de bu yüzden çalışır ve değişken "0\n0" olur. Ardından `(( got >= want ))`
+# aritmetik SÖZDİZİM HATASI verir, koşul sessizce yanlış sayılır ve bekleme döngüsü asla
+# sağlanmayacak bir koşulu bekler — yani "0 endpoint" durumu, tam da beklemenin gerektiği an,
+# ölçülemez hâle gelir. Hata ekranda da görünmez çünkü stderr bastırılmıştır.
+# EN: `grep -c` PRINTS "0" and still exits 1, so the habitual `|| echo 0` also fires and the
+# variable becomes "0\n0". The next `(( got >= want ))` is an arithmetic SYNTAX ERROR, the
+# condition is silently treated as false and the wait loop waits for a condition that can never
+# hold — precisely in the "zero endpoints" case where waiting matters most.
+count_lines() { local n; n=$(grep -c "${1:-.}" || true); n=${n//[^0-9]/}; printf '%d' "${n:-0}"; }
+
 # BİR SAYAÇ DELTASI, KAZIMA ARALIĞINDAN HIZLI OKUNAMAZ.
 # Prometheus bu kurulumda 15 sn'de bir kazır. Bir sayacı bir işlemin hemen ÖNCESİNDE okursan
 # elindeki değer o işlemden önceki kazımadır; hemen SONRASINDA okursan işlem henüz kazınmamıştır.
@@ -595,7 +607,7 @@ wait_endpoints() {
   local want=$1 got svc; svc=$(app_name)
   for _ in $(seq 1 30); do
     got=$(kubectl -n "$NS" get endpointslice -l "kubernetes.io/service-name=$svc" \
-            -o jsonpath='{range .items[*]}{range .endpoints[*]}{.addresses[0]}{"\n"}{end}{end}' 2>/dev/null | grep -c . || echo 0)
+            -o jsonpath='{range .items[*]}{range .endpoints[*]}{.addresses[0]}{"\n"}{end}{end}' 2>/dev/null | count_lines)
     (( got >= want )) && { sleep 3; return 0; }
     sleep 2
   done

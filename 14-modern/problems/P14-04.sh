@@ -29,6 +29,15 @@ awk -v rps="$peak_rps" -v hit="$hit" 'BEGIN{
 note "Kritik satır SONUNCUSU: soğuk anda DB, tepe trafiğin TAMAMINI görür (P03-02)."
 note "Kapasiteyi ortalamaya göre planlarsan ilk dağıtım seni devirir."
 note "Tam model ve tüm darboğaz sıralaması: 14-modern/docs-capacity.md"
-awk -v r="$peak_rps" 'BEGIN{exit !(r>0)}' \
-  && reproduced "tek pod kapasitesi ölçüldü ($(awk -v v="$peak_rps" 'BEGIN{printf "%.0f", v}') rps, p99 $(awk -v v="$p99" 'BEGIN{printf "%.0f", v*1000}') ms) — kapasite modeli tahmine değil ölçüme dayanıyor"
-not_reproduced "kapasite ölçülemedi (stairs yükü çalıştı mı?)"
+# KAPASİTE ÖLÇÜMÜ, "SIFIRDAN BÜYÜK BİR SAYI GÖRDÜM" DEĞİLDİR.
+# `r>0` tek bir istek tamamlandığında bile doğrudur; oysa iddia "tek pod kapasitesi ÖLÇÜLDÜ".
+# Bir kapasite sayısının anlamlı olması için üç şey gerekir: yükün gerçekten koştuğu (rps sıfır
+# değil), pod'un gerçekten ÇALIŞTIĞI (CPU harcadı — yoksa ölçtüğün şey yükün kendisi değil,
+# yükün gelmediğidir) ve gecikmenin okunabildiği. Üçü de yoksa bu bir ölçüm değil, bir temennidir.
+# EN: `r>0` is true after a single completed request, while the claim is "single-pod capacity was
+# MEASURED". A capacity number means something only if the load actually ran (rps > 0), the pod
+# actually worked (it burned CPU — otherwise you measured the absence of load, not the load) and
+# the latency could be read. Without all three it is a wish, not a measurement.
+awk -v r="$peak_rps" -v c="$cpu" -v l="$p99" 'BEGIN{exit !(r > 1 && c > 0 && l > 0)}' \
+  && reproduced "tek pod kapasitesi ölçüldü ($(awk -v v="$peak_rps" 'BEGIN{printf "%.0f", v}') rps, p99 $(awk -v v="$p99" 'BEGIN{printf "%.0f", v*1000}') ms, CPU $(awk -v v="$cpu" 'BEGIN{printf "%.2f", v}') çekirdek) — kapasite modeli tahmine değil ölçüme dayanıyor"
+not_reproduced "kapasite ölçülemedi (rps=$(awk -v v="$peak_rps" 'BEGIN{printf "%.0f", v}') · CPU=$(awk -v v="$cpu" 'BEGIN{printf "%.2f", v}') · p99=$(awk -v v="$p99" 'BEGIN{printf "%.0f", v*1000}') ms) — stairs yükü koştu mu, tek pod ayakta mıydı?"
