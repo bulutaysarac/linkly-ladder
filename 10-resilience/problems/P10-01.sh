@@ -5,7 +5,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # bağımlılık çağrısına çevirir. Kurtarma aracı, arızanın hızlandırıcısına dönüşür.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
-on_cleanup "kubectl -n \"$NS\" set env "$(wl redirect)" TRAP_NAIVE_RETRY-"
+on_cleanup "setenv "$(wl redirect)" TRAP_NAIVE_RETRY-"
 on_cleanup "$LADDER_ROOT/platform/lib/chaos.sh delete pg-loss-30"
 run() {
   kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=180s >/dev/null 2>&1 || true
@@ -25,7 +25,7 @@ step "(1) BÜTÇELİ retry (varsayılan: 2 deneme, trafiğin %10'u)"
 read -r c1 r1 p1 <<< "$(run)"
 note "bütçeli: bağımlılık çağrısı=$c1 · retry=$r1 · p99=$(awk -v v="$p1" 'BEGIN{printf "%.0f", v*1000}') ms"
 step "(2) TRAP_NAIVE_RETRY: 3 deneme, bütçe YOK, jitter yok"
-kubectl -n "$NS" set env "$(wl redirect)" TRAP_NAIVE_RETRY=true >/dev/null
+setenv "$(wl redirect)" TRAP_NAIVE_RETRY=true >/dev/null
 read -r c2 r2 p2 <<< "$(run)"
 note "bütçesiz: bağımlılık çağrısı=$c2 · retry=$r2 · p99=$(awk -v v="$p2" 'BEGIN{printf "%.0f", v*1000}') ms"
 grafana_hint "11 · Resilience → 'retry/s by dep' + 'dependency errors/s' · 05 · Postgres → DB CPU"

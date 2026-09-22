@@ -12,8 +12,8 @@ on_cleanup "kubectl -n \"$NS\" patch "$(app_workload)" --type=json -p '[{\"op\":
 # P05-01 ile aynı ölçüm notu: kaybedebileceğin şey o an TAMPONDA olandır. Varsayılan 1 sn'lik
 # flush aralığında tampon neredeyse hep boş yakalanır ve "drain'e zaman verilmedi" senaryosu bile
 # kayıpsız görünür. Pencereyi 15 sn'ye açıyoruz ki grace ayarının etkisi ölçülebilsin.
-on_cleanup "kubectl -n \"$NS\" set env "$(app_workload)" ANALYTICS_FLUSH_INTERVAL- ANALYTICS_BATCH_SIZE-"
-kubectl -n "$NS" set env "$(app_workload)" ANALYTICS_FLUSH_INTERVAL=15s ANALYTICS_BATCH_SIZE=5000 >/dev/null
+on_cleanup "setenv "$(app_workload)" ANALYTICS_FLUSH_INTERVAL- ANALYTICS_BATCH_SIZE-"
+setenv "$(app_workload)" ANALYTICS_FLUSH_INTERVAL=15s ANALYTICS_BATCH_SIZE=5000 >/dev/null
 kubectl -n "$NS" rollout status "$(app_workload)" --timeout=180s >/dev/null 2>&1 || true
 for _ in $(seq 1 30); do serving && break; sleep 2; done
 measure_loss() {

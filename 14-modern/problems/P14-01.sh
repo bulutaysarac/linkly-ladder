@@ -7,8 +7,8 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
 need_metric redis_commands_processed_total "redis ServiceMonitor deploy/servicemonitor.yaml'da mı?"
-on_cleanup "kubectl -n \"$NS\" set env rollout/redirect L1_ENABLED=true 2>/dev/null || kubectl -n \"$NS\" set env "$(wl redirect)" L1_ENABLED=true"
-setenv() { kubectl -n "$NS" set env rollout/redirect "$@" >/dev/null 2>&1 || kubectl -n "$NS" set env "$(wl redirect)" "$@" >/dev/null; }
+on_cleanup "setenv rollout/redirect L1_ENABLED=true 2>/dev/null || setenv "$(wl redirect)" L1_ENABLED=true"
+setenv() { setenv rollout/redirect "$@" >/dev/null 2>&1 || setenv "$(wl redirect)" "$@" >/dev/null; }
 waitrollout() { kubectl -n "$NS" rollout status rollout/redirect --timeout=240s >/dev/null 2>&1 || kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=240s >/dev/null 2>&1 || true; }
 measure() {
   waitrollout; for _ in $(seq 1 25); do serving && break; sleep 2; done

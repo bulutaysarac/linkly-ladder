@@ -69,7 +69,7 @@ if [[ "$lvl" != "00" ]]; then
     # TRAP tabanlı sorun SOLVES'a yazılamaz: script tuzağı kendisi açtığı için her seviyede
     # reproduce olur ve doğrulamayı kalıcı olarak kırar (08, P07-06 ile bunu yaptı).
     prevdir=$(ls -d "$ROOT"/[0-9][0-9]-*/ | sort | awk -v cur="$D/" '$0==cur{print prev; exit}{prev=$0}')
-    if [[ -n "$prevdir" && -f "$prevdir/problems/$id.sh" ]] && grep -q 'set env.*TRAP_' "$prevdir/problems/$id.sh"; then
+    if [[ -n "$prevdir" && -f "$prevdir/problems/$id.sh" ]] && grep -qE 'setenv.*TRAP_' "$prevdir/problems/$id.sh"; then
       err "SOLVES'ta TRAP tabanlı sorun: $id — tuzak duruyorsa her seviyede reproduce olur"
     fi
   done < "$D/problems/SOLVES"

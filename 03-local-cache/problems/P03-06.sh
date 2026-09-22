@@ -5,7 +5,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # yanlış yazılmış bir URL — önbelleği tamamen atlar. Önbellek yalnızca VAR OLANI korur;
 # YOK OLAN, korumasız bir tüneldir.
 ensure_healthy
-on_cleanup "kubectl -n \"$NS\" set env "$(app_workload)" TRAP_NO_NEGATIVE_CACHE-"
+on_cleanup "setenv "$(app_workload)" TRAP_NO_NEGATIVE_CACHE-"
 run_scan() {
   kubectl -n "$NS" rollout status "$(app_workload)" --timeout=180s >/dev/null || true
   for _ in $(seq 1 20); do serving && break; sleep 2; done
@@ -14,12 +14,12 @@ run_scan() {
   promq "sum(rate(db_queries_total{namespace=\"$NS\",op=\"get\"}[1m]))"
 }
 step "Negatif önbellek AÇIK (varsayılan): rastgele kod taraması"
-kubectl -n "$NS" set env "$(app_workload)" TRAP_NO_NEGATIVE_CACHE- >/dev/null
+setenv "$(app_workload)" TRAP_NO_NEGATIVE_CACHE- >/dev/null
 with=$(run_scan)
 neg=$(promq "sum(increase(cache_ops_total{namespace=\"$NS\",result=\"negative_hit\"}[5m]))")
 note "açıkken: DB get/s=$(awk -v v="$with" 'BEGIN{printf "%.0f", v}') · negatif isabet=${neg%%.*}"
 step "Negatif önbellek KAPALI, aynı tarama"
-kubectl -n "$NS" set env "$(app_workload)" TRAP_NO_NEGATIVE_CACHE=true >/dev/null
+setenv "$(app_workload)" TRAP_NO_NEGATIVE_CACHE=true >/dev/null
 without=$(run_scan)
 note "kapalıyken: DB get/s=$(awk -v v="$without" 'BEGIN{printf "%.0f", v}')"
 grafana_hint "04 · Cache → 'ops by result & layer' (negative_hit) · 05 · Postgres → 'DB queries by op'"

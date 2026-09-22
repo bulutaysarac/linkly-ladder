@@ -32,7 +32,7 @@ listp99=$(num "$(promq "histogram_quantile(0.99, sum(rate(db_query_duration_seco
 grafana_hint "05 · Postgres → 'seq scan / idx scan' · 'DB query p99 by op' (op=list)"
 note "GET /api/links süresi: ${t}s · list p99: $(awk -v v="$listp99" 'BEGIN{printf "%.0f", v*1000}') ms · seq_scan sayacı: ${seq_before%%.*} → ${seq_after%%.*}"
 note "ÇÖZÜM (002 migration, CONCURRENTLY):"
-note "  kubectl -n $NS set env job/migrate MIGRATE_TARGET=2  # ya da deploy/migrate-job.yaml'da 2 yap"
+note "  setenv job/migrate MIGRATE_TARGET=2  # ya da deploy/migrate-job.yaml'da 2 yap"
 note "  kubectl -n $NS delete job migrate && make up   →  sonra bu scripti tekrar koş"
 note "Dikkat: düz CREATE INDEX tabloyu KİLİTLER; 002 bu yüzden CONCURRENTLY kullanıyor."
 if [[ -n "$scan_line" ]]; then

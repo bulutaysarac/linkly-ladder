@@ -6,7 +6,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # rollout sırasında "hazır" sayıldığı için Kubernetes eski pod'ları güvenle öldürür.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
-on_cleanup "kubectl -n \"$NS\" set env "$(wl redirect)" TRAP_READY_ALWAYS-"
+on_cleanup "setenv "$(wl redirect)" TRAP_READY_ALWAYS-"
 # preStop beklemesini deney süresince 0 yap (İKİ FAZDA DA). Neden: 5 saniyelik preStop, pod
 # Endpoints'ten düşene kadar trafiği emiyor ve readiness'ın "HAYIR" diyebilmesinin değerini
 # GİZLİYOR — ilk koşuda iki mod da 5xx=0 verdi, yani deney kendi güvenlik ağını ölçüyordu.
@@ -43,7 +43,7 @@ step "Varsayılan readiness ile rollout"
 read -r ok5 ok_ep <<< "$(run_rollout_test)"
 note "varsayılan: rollout sırasında 5xx=$ok5 · tepe hazır endpoint=$ok_ep"
 step "TRAP_READY_ALWAYS ile aynı rollout"
-kubectl -n "$NS" set env "$(wl redirect)" TRAP_READY_ALWAYS=true >/dev/null
+setenv "$(wl redirect)" TRAP_READY_ALWAYS=true >/dev/null
 kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=180s >/dev/null 2>&1 || true
 sleep 5
 read -r trap5 trap_ep <<< "$(run_rollout_test)"

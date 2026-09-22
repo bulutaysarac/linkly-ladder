@@ -8,7 +8,7 @@ APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
 on_cleanup "kubectl -n \"$NS\" scale "$(wl redirect)" --replicas=2"
 orig_lim=$(kubectl -n "$NS" get "$(wl redirect)" -o jsonpath='{.spec.template.spec.containers[0].resources.limits.cpu}' 2>/dev/null) || true
-on_cleanup "kubectl -n \"$NS\" set resources "$(wl redirect)" --requests=cpu=150m --limits=cpu=${orig_lim:-300m}"
+on_cleanup "setres "$(wl redirect)" --requests=cpu=150m --limits=cpu=${orig_lim:-300m}"
 step "Küme kapasitesi"
 kubectl get nodes -o custom-columns=NODE:.metadata.name,CPU:.status.allocatable.cpu,BELLEK:.status.allocatable.memory --no-headers | sed 's/^/    /'
 alloc=$(promq 'sum(kube_node_status_allocatable{resource="cpu"})')
@@ -26,7 +26,7 @@ node_cpu=$(kubectl get nodes -o jsonpath='{.items[0].status.allocatable.cpu}' 2>
 # node_cpu "6" gibi bir tam sayı (ya da "6000m"). Her iki biçimi de millicore'a çevir.
 case "$node_cpu" in *m) milli=${node_cpu%m} ;; *) milli=$(( node_cpu * 1000 )) ;; esac
 req=$(( milli * 60 / 100 ))                      # node'un %60'ı → iki pod aynı node'a sığmaz
-kubectl -n "$NS" set resources "$(wl redirect)" --requests=cpu=${req}m --limits=cpu=$(( req + 500 ))m >/dev/null
+setres "$(wl redirect)" --requests=cpu=${req}m --limits=cpu=$(( req + 500 ))m >/dev/null
 kubectl -n "$NS" scale "$(wl redirect)" --replicas=10 >/dev/null
 sleep 45
 pending=$(kubectl -n "$NS" get pods -l "$APP_SELECTOR" --field-selector status.phase=Pending --no-headers 2>/dev/null | grep -c . || true)

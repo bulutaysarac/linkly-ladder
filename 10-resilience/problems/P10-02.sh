@@ -6,7 +6,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # Endpoints'ten düşer ve ingress'in yönlendirecek hedefi kalmaz.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
-on_cleanup "kubectl -n \"$NS\" set env "$(wl redirect)" TRAP_READY_CHECKS_REDIS-"
+on_cleanup "setenv "$(wl redirect)" TRAP_READY_CHECKS_REDIS-"
 on_cleanup "kubectl -n \"$NS\" rollout status statefulset/redis --timeout=180s"
 on_cleanup "kubectl -n \"$NS\" scale statefulset redis --replicas=1"
 measure_outage() {
@@ -31,7 +31,7 @@ step "(1) Varsayılan: readiness Redis'e BAKMAZ"
 read -r ep_ok e5_ok <<< "$(measure_outage ok)"
 note "varsayılan: en düşük hazır endpoint=$ep_ok · 5xx=$e5_ok"
 step "(2) TRAP_READY_CHECKS_REDIS: readiness Redis'e bakar"
-kubectl -n "$NS" set env "$(wl redirect)" TRAP_READY_CHECKS_REDIS=true >/dev/null
+setenv "$(wl redirect)" TRAP_READY_CHECKS_REDIS=true >/dev/null
 kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=180s >/dev/null 2>&1 || true
 read -r ep_bad e5_bad <<< "$(measure_outage trap)"
 grafana_hint "01 · Pods → 'hazır endpoint sayısı' · 11 · Resilience → 'degrade modu' · 02 · App RED → 5xx"

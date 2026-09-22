@@ -417,6 +417,58 @@ wl() {
 }
 # Bu seviyedeki uygulama iş yükünün tam adı: `deploy/linkly` ya da `rollout/redirect`.
 app_workload() { printf '%s/%s' "$(workload_kind)" "$(app_name)"; }
+
+# `kubectl set env` / `set resources` CRD'LERDE ÇALIŞMAZ.
+# EN: These are client-side typed commands: kubectl needs the resource's Go type in its compiled
+#     scheme. For an Argo Rollout it fails with `no kind "Rollout" is registered for version
+#     "argoproj.io/v1alpha1"`. From level 12 on, `redirect` IS a Rollout — so all 98 `set env`
+#     calls in the ladder (every TRAP toggle, every cleanup) died there, and `verify-prev` on
+#     12/13/14 was re-running earlier levels' experiments that could no longer change anything.
+#     The scripts still printed a verdict; it was just measuring an unchanged system.
+#     A command that is silently type-specific is worse than one that is loudly unsupported.
+# TR: Bunlar istemci tarafı TİPLİ komutlar: kubectl'in kaynağın Go tipini derlenmiş şemasında
+#     görmesi gerekir. Argo Rollout'ta `no kind "Rollout" is registered ...` ile patlar.
+#     12'den itibaren `redirect` bir Rollout — yani merdivendeki 98 `set env` çağrısı (her TRAP
+#     anahtarı, her temizlik) orada öldü ve 12/13/14'ün `verify-prev`i, artık HİÇBİR ŞEYİ
+#     değiştiremeyen deneyleri yeniden koşuyordu. Scriptler yine bir karar bastı; yalnızca
+#     DEĞİŞMEMİŞ bir sistemi ölçüyorlardı.
+#     Sessizce tipe bağlı olan bir komut, açıkça desteklenmeyenden daha kötüdür.
+# Kullanım: setenv "$(wl redirect)" KEY=VAL OTHER-     (sonuna `-` → değişkeni SİL)
+setenv() {
+  local w=$1; shift
+  [[ "${w%%/*}" != "rollout" ]] && { setenv "$w" "$@" >/dev/null; return; }
+  local cur a k v
+  cur=$(kubectl -n "$NS" get "$w" -o json 2>/dev/null | jq -c '.spec.template.spec.containers[0].env // []') || return 1
+  for a in "$@"; do
+    if [[ "$a" == *- && "$a" != *=* ]]; then
+      k=${a%-}; cur=$(jq -c --arg k "$k" 'map(select(.name != $k))' <<<"$cur")
+    else
+      k=${a%%=*}; v=${a#*=}
+      cur=$(jq -c --arg k "$k" --arg v "$v" 'map(select(.name != $k)) + [{name:$k,value:$v}]' <<<"$cur")
+    fi
+  done
+  # JSON Patch "add": var olan bir alanı DA değiştirir, yoksa yaratır — "replace" ikisini yapmaz.
+  kubectl -n "$NS" patch "$w" --type=json \
+    -p "[{\"op\":\"add\",\"path\":\"/spec/template/spec/containers/0/env\",\"value\":$cur}]" >/dev/null
+}
+# Kullanım: setres "$(wl redirect)" --requests=cpu=100m --limits=cpu=50m
+setres() {
+  local w=$1; shift
+  [[ "${w%%/*}" != "rollout" ]] && { setres "$w" "$@" >/dev/null; return; }
+  local cur a kind spec key val
+  cur=$(kubectl -n "$NS" get "$w" -o json 2>/dev/null | jq -c '.spec.template.spec.containers[0].resources // {}') || return 1
+  for a in "$@"; do
+    kind=${a%%=*}; kind=${kind#--}; kind=${kind%s}   # --requests → request
+    spec=${a#*=}                                      # cpu=100m
+    key=${spec%%=*}; val=${spec#*=}
+    case "$kind" in
+      request) cur=$(jq -c --arg k "$key" --arg v "$val" '.requests[$k]=$v' <<<"$cur") ;;
+      limit)   cur=$(jq -c --arg k "$key" --arg v "$val" '.limits[$k]=$v'   <<<"$cur") ;;
+    esac
+  done
+  kubectl -n "$NS" patch "$w" --type=json \
+    -p "[{\"op\":\"add\",\"path\":\"/spec/template/spec/containers/0/resources\",\"value\":$cur}]" >/dev/null
+}
 wait_endpoints() {
   local want=$1 got svc; svc=$(app_name)
   for _ in $(seq 1 30); do

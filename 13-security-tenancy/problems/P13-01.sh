@@ -6,7 +6,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 API_BASE="$BASE_URL"
 APP_SELECTOR="app.kubernetes.io/name=api"
 ensure_healthy
-on_cleanup "kubectl -n \"$NS\" set env "$(wl api)" TRAP_HEADER_TENANT-"
+on_cleanup "setenv "$(wl api)" TRAP_HEADER_TENANT-"
 AKEY=${AKEY:-acme-key-9f2c}
 BKEY=${BKEY:-globex-key-3a71}
 step "acme kiracısı bir link oluşturuyor (kendi anahtarıyla)"
@@ -22,7 +22,7 @@ step "globex, hiç kimlik göndermeden deniyor"
 noauth=$(curl -s -o /dev/null -w '%{http_code}' -XDELETE "$API_BASE/api/links/$code")
 note "kimliksiz → HTTP $noauth (401 bekleniyor)"
 step "TRAP_HEADER_TENANT aç: karar yine header'a dayansın"
-kubectl -n "$NS" set env "$(wl api)" TRAP_HEADER_TENANT=true >/dev/null
+setenv "$(wl api)" TRAP_HEADER_TENANT=true >/dev/null
 kubectl -n "$NS" rollout status "$(wl api)" --timeout=180s >/dev/null 2>&1 || true
 sleep 5
 trapped=$(curl -s -o /dev/null -w '%{http_code}' -XDELETE "$API_BASE/api/links/$code" -H "X-Tenant-ID: acme")

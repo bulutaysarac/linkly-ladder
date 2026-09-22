@@ -6,7 +6,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # dördüncü ayağı: metrik (ne kadar), trace (nerede), log (neden), profil (hangi SATIR).
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
-on_cleanup "kubectl -n \"$NS\" set env "$(wl redirect)" TRAP_REGEX_PER_REQUEST-"
+on_cleanup "setenv "$(wl redirect)" TRAP_REGEX_PER_REQUEST-"
 measure() {
   kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=180s >/dev/null 2>&1 || true
   for _ in $(seq 1 20); do serving && break; sleep 2; done
@@ -23,7 +23,7 @@ read -r c1 p1 r1 <<< "$(measure)"
 note "normal: CPU=$(awk -v v="$c1" 'BEGIN{printf "%.2f", v}') çekirdek · p99=$(awk -v v="$p1" 'BEGIN{printf "%.1f", v*1000}') ms · rps=$(awk -v v="$r1" 'BEGIN{printf "%.0f", v}')"
 note "istek başına CPU: $(awk -v c="$c1" -v r="$r1" 'BEGIN{printf "%.3f", (r>0? c*1000/r : 0)}') ms"
 step "(2) TRAP_REGEX_PER_REQUEST: her istekte yeniden derle"
-kubectl -n "$NS" set env "$(wl redirect)" TRAP_REGEX_PER_REQUEST=true >/dev/null
+setenv "$(wl redirect)" TRAP_REGEX_PER_REQUEST=true >/dev/null
 read -r c2 p2 r2 <<< "$(measure)"
 note "tuzakla: CPU=$(awk -v v="$c2" 'BEGIN{printf "%.2f", v}') çekirdek · p99=$(awk -v v="$p2" 'BEGIN{printf "%.1f", v*1000}') ms · rps=$(awk -v v="$r2" 'BEGIN{printf "%.0f", v}')"
 note "istek başına CPU: $(awk -v c="$c2" -v r="$r2" 'BEGIN{printf "%.3f", (r>0? c*1000/r : 0)}') ms"

@@ -24,7 +24,7 @@ note "p99: $(awk -v v="$p99" 'BEGIN{printf "%.0f", v*1000}') ms · havuz bekleme
 note "tepe in-flight istek: ${inflight%%.*} · hazır olmayan pod: $notready · 5xx: $e5"
 note "Zincir: yavaş sorgu → bağlantı meşgul → havuz boş → yeni istekler bekler → in-flight birikir → bellek ve p99 patlar."
 note "İki ayrı önlem gerekiyor ve biri diğerinin yerini TUTMAZ:"
-note "  1) STATEMENT_TIMEOUT (sunucu): sorguyu gerçekten DURDURUR → kubectl -n $NS set env "$(app_workload)" STATEMENT_TIMEOUT=2s"
+note "  1) STATEMENT_TIMEOUT (sunucu): sorguyu gerçekten DURDURUR → setenv "$(app_workload)" STATEMENT_TIMEOUT=2s"
 note "  2) Devre kesici + bulkhead (10): bağımlılık bozukken istek göndermeyi bırak"
 { awk -v a="$acq" 'BEGIN{exit !(a>0.05)}' || (( e5 > 0 )) || awk -v e="${empty%%.*}" 'BEGIN{exit !(e>0)}'; } \
   && reproduced "yavaş DB havuzu tıkadı (bekleme p99 $(awk -v v="$acq" 'BEGIN{printf "%.0f", v*1000}') ms, boş bekleme ${empty%%.*}, 5xx $e5)"

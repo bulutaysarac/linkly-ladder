@@ -6,7 +6,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # uğrar, tekrar dener ve kimse cevap alamaz. Kısmi hizmet, tekdüze başarısızlıktan iyidir.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
-on_cleanup "kubectl -n \"$NS\" set env "$(wl redirect)" SHED_ENABLED=true SHED_MAX_INFLIGHT=200"
+on_cleanup "setenv "$(wl redirect)" SHED_ENABLED=true SHED_MAX_INFLIGHT=200"
 run_overload() {
   kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=180s >/dev/null 2>&1 || true
   for _ in $(seq 1 20); do serving && break; sleep 2; done
@@ -19,11 +19,11 @@ run_overload() {
   echo "$p99 ${shed%%.*}"
 }
 step "(1) Yük atma AÇIK (in-flight > 200 → hızlı 503)"
-kubectl -n "$NS" set env "$(wl redirect)" SHED_ENABLED=true SHED_MAX_INFLIGHT=60 >/dev/null
+setenv "$(wl redirect)" SHED_ENABLED=true SHED_MAX_INFLIGHT=60 >/dev/null
 read -r p_on s_on <<< "$(run_overload)"
 note "shedding açık: kabul edilenlerin p99=$(awk -v v="$p_on" 'BEGIN{printf "%.0f", v*1000}') ms · atılan=$s_on"
 step "(2) Yük atma KAPALI: her şey kabul edilir"
-kubectl -n "$NS" set env "$(wl redirect)" SHED_ENABLED=false >/dev/null
+setenv "$(wl redirect)" SHED_ENABLED=false >/dev/null
 read -r p_off s_off <<< "$(run_overload)"
 note "shedding kapalı: kabul edilenlerin p99=$(awk -v v="$p_off" 'BEGIN{printf "%.0f", v*1000}') ms · atılan=$s_off"
 grafana_hint "11 · Resilience → 'load shed/s' + 'kabul edilen isteklerin p99 (503 hariç)'"

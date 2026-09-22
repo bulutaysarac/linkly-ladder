@@ -6,7 +6,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # (commit önce → veri KAYBI) gösteriyor. "Tam bir kez" yok; seçtiğin şey hangi hatayı yaşayacağın.
 ensure_healthy
 CONSUMER=analytics
-on_cleanup "kubectl -n \"$NS\" set env deploy/$CONSUMER TRAP_COMMIT_BEFORE_WRITE-"
+on_cleanup "setenv deploy/$CONSUMER TRAP_COMMIT_BEFORE_WRITE-"
 # DENEY KURULUMU ÖNEMLİ: tüketiciyi ÖNCE durdurup birikim yarat, SONRA aç ve işlerken öldür.
 # İlk hâlde tıklamalar üretilirken tüketici de çalışıyordu; olayları anında işleyip commit ediyor,
 # öldürdüğümüzde ortada commit edilmemiş parti KALMIYORDU. Yani deney, ölçmek istediği durumu
@@ -52,7 +52,7 @@ grafana_hint "08 · Stream → 'consumer records by result' (duplicate) · 07 ·
 note "üretilen: $N · sayılan: $counted · tüketici ok=${ok%%.*} duplicate=${dup%%.*}"
 note "duplicate>0 demek: aynı olay birden fazla teslim edildi ve İDEMPOTENCY onu yuttu."
 note "Sayım $N'e yakınsa 'tam bir kez ETKİ' çalışıyor: en-az-bir-kez teslimat + idempotent yazma."
-note "Ters uç için: kubectl -n $NS set env deploy/$CONSUMER TRAP_COMMIT_BEFORE_WRITE=true"
+note "Ters uç için: setenv deploy/$CONSUMER TRAP_COMMIT_BEFORE_WRITE=true"
 note "  → commit yazmadan önce yapılır; tüketici ölürse o kayıtlar bir daha GELMEZ (veri kaybı)."
 note "Dağıtık sistemlerde 'tam bir kez teslimat' yoktur; olan şey en-az-bir-kez + idempotency'dir."
 awk -v d="${dup%%.*}" 'BEGIN{exit !(d>0)}' \

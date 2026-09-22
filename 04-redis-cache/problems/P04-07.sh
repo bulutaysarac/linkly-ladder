@@ -4,10 +4,10 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # Redis TEK İŞ PARÇACIKLIDIR: bir komut çalışırken diğerleri SIRADA BEKLER. KEYS O(N)'dir.
 # Bir milyon anahtarda "sadece debug için" eklenmiş bir uç, tüm redirect'leri saniyelerce durdurur.
 ensure_healthy
-on_cleanup "kubectl -n \"$NS\" set env "$(app_workload)" TRAP_DEBUG_KEYS-"
+on_cleanup "setenv "$(app_workload)" TRAP_DEBUG_KEYS-"
 rpod=$(dep_pod app.kubernetes.io/name=redis) || exit 2   # bağımlılık hazır değilse ölçüm anlamsız
 step "Tuzağı aç: /debug/keys ucu (KEYS * çalıştırır)"
-kubectl -n "$NS" set env "$(app_workload)" TRAP_DEBUG_KEYS=true >/dev/null
+setenv "$(app_workload)" TRAP_DEBUG_KEYS=true >/dev/null
 kubectl -n "$NS" rollout status "$(app_workload)" --timeout=180s >/dev/null || true
 for _ in $(seq 1 20); do serving && break; sleep 2; done
 step "Önbelleği doldur (anahtar sayısı ne kadar çoksa kilit o kadar uzun)"

@@ -8,8 +8,8 @@ ensure_healthy
 # darbesiyle aynı büyüklükte. İlk ölçümde tam olarak bu oldu: kararlı hâl 17.6/s, rollout penceresi
 # 12.0/s — yani sinyal gürültünün ALTINDA kaldı. İki ayrı olayı (TTL dolması = P03-07, pod'un boş
 # doğması = P03-02) ölçmek istiyorsan birini susturman gerekir.
-on_cleanup "kubectl -n \"$NS\" set env "$(app_workload)" CACHE_TTL-"
-kubectl -n "$NS" set env "$(app_workload)" CACHE_TTL=10m >/dev/null
+on_cleanup "setenv "$(app_workload)" CACHE_TTL-"
+setenv "$(app_workload)" CACHE_TTL=10m >/dev/null
 kubectl -n "$NS" rollout status "$(app_workload)" --timeout=180s >/dev/null || true
 for _ in $(seq 1 30); do serving && break; sleep 2; done
 # ÖLÇÜM NOTU — "tepe" tek başına kanıt değil:

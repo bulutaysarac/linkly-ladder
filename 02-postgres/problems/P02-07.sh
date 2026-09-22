@@ -3,12 +3,12 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # P02-07 · TRAP_MIGRATE_IN_MAIN: migration'ı her pod kendi açılışında koşarsa N replika yarışır
 # Varsayılan doğru: tek seferlik Job. Tuzağı açınca 3 pod aynı anda şema kilidine saldırıyor.
 ensure_healthy
-on_cleanup "kubectl -n \"$NS\" set env "$(app_workload)" TRAP_MIGRATE_IN_MAIN-"
+on_cleanup "setenv "$(app_workload)" TRAP_MIGRATE_IN_MAIN-"
 step "Varsayılan: migration nerede koşuyor?"
 kubectl -n "$NS" get job migrate -o jsonpath='  Job: {.metadata.name} · tamamlanan: {.status.succeeded}{"\n"}' 2>/dev/null || note "  Job bulunamadı"
 note "Uygulama yalnızca şemanın hazır olmasını BEKLİYOR (cmd/linkly/main.go · waitForSchema)"
 step "Tuzağı aç: her pod kendi migration'ını koşsun, hepsini aynı anda yeniden başlat"
-kubectl -n "$NS" set env "$(app_workload)" TRAP_MIGRATE_IN_MAIN=true >/dev/null
+setenv "$(app_workload)" TRAP_MIGRATE_IN_MAIN=true >/dev/null
 kubectl -n "$NS" rollout restart "$(app_workload)" >/dev/null
 sleep 5
 kubectl -n "$NS" delete pod -l "$APP_SELECTOR" --force --grace-period=0 >/dev/null 2>&1 || true

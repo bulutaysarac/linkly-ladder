@@ -12,7 +12,7 @@ TTLS=${TTLS:-30s}
 LOAD=${LOAD:-150}
 SKIP=${SKIP:-35}
 ensure_healthy
-on_cleanup "kubectl -n \"$NS\" set env "$(app_workload)" TRAP_NO_TTL_JITTER- CACHE_TTL-"
+on_cleanup "setenv "$(app_workload)" TRAP_NO_TTL_JITTER- CACHE_TTL-"
 warm_and_watch() {
   local out=$1 pod
   kubectl -n "$NS" rollout status "$(app_workload)" --timeout=180s >/dev/null || true
@@ -24,12 +24,12 @@ warm_and_watch() {
   wait "$kpid" 2>/dev/null || true
 }
 step "Jitter AÇIK (varsayılan, ±%20), TTL $TTLS — ${LOAD}s boyunca saniyede bir örnekleniyor"
-kubectl -n "$NS" set env "$(app_workload)" CACHE_TTL="$TTLS" TRAP_NO_TTL_JITTER- >/dev/null
+setenv "$(app_workload)" CACHE_TTL="$TTLS" TRAP_NO_TTL_JITTER- >/dev/null
 warm_and_watch /tmp/p0404-jitter.txt
 read -r p1 a1 r1 <<< "$(peak_avg /tmp/p0404-jitter.txt)"
 note "jitter'lı:  tepe=${p1}/s ort=${a1}/s → tepe/ortalama=$r1"
 step "Jitter KAPALI (TRAP_NO_TTL_JITTER), aynı senaryo"
-kubectl -n "$NS" set env "$(app_workload)" TRAP_NO_TTL_JITTER=true >/dev/null
+setenv "$(app_workload)" TRAP_NO_TTL_JITTER=true >/dev/null
 warm_and_watch /tmp/p0404-nojitter.txt
 read -r p2 a2 r2 <<< "$(peak_avg /tmp/p0404-nojitter.txt)"
 note "jitter'sız: tepe=${p2}/s ort=${a2}/s → tepe/ortalama=$r2"

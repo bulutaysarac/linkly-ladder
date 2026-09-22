@@ -5,7 +5,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # kesilince TÜM pod'lar aynı anda Endpoints'ten düşer, ingress'in yönlendirecek HİÇBİR hedefi kalmaz.
 # Üstelik DB dönünce hepsi aynı anda geri gelip onu ikinci kez devirir.
 ensure_healthy
-on_cleanup "kubectl -n \"$NS\" set env "$(app_workload)" TRAP_READYZ_CHECKS_DB-"
+on_cleanup "setenv "$(app_workload)" TRAP_READYZ_CHECKS_DB-"
 step "Önce varsayılan davranış: DB'yi kes, endpoint sayısını izle"
 # NOT: bu KSM sürümü `kube_endpoint_address` ÜRETMİYOR; karşılığı `kube_endpointslice_endpoints`.
 # Metrik adının var olduğunu VARSAYMAK, sessizce 0 ölçmenin en kolay yoludur.
@@ -14,7 +14,7 @@ step "Önce varsayılan davranış: DB'yi kes, endpoint sayısını izle"
 base_ep=$(promq "sum(kube_endpointslice_endpoints{namespace=\"$NS\",endpointslice=~\"linkly-.*\",ready=\"true\"})")
 note "hazır endpoint (normal): ${base_ep%%.*}"
 step "Tuzağı aç: readyz DB'ye ping atsın"
-kubectl -n "$NS" set env "$(app_workload)" TRAP_READYZ_CHECKS_DB=true >/dev/null
+setenv "$(app_workload)" TRAP_READYZ_CHECKS_DB=true >/dev/null
 kubectl -n "$NS" rollout status "$(app_workload)" --timeout=180s >/dev/null || true
 for _ in $(seq 1 20); do serving && break; sleep 2; done
 need_confirm "postgres pod'u silinecek"

@@ -6,7 +6,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # kapatır — ve yerine kaçınılmaz bir yarış bırakır: biz ŞİMDİ çözüyoruz, tarayıcı SONRA çözecek.
 APP_SELECTOR="app.kubernetes.io/name=api"
 ensure_healthy
-on_cleanup "kubectl -n \"$NS\" set env "$(wl api)" TRAP_NO_DNS_CHECK-"
+on_cleanup "setenv "$(wl api)" TRAP_NO_DNS_CHECK-"
 AKEY=${AKEY:-acme-key-9f2c}
 try() {
   curl -s -o /dev/null -w '%{http_code}' -XPOST "$BASE_URL/api/links" \
@@ -18,7 +18,7 @@ note "  localhost             → $(try 'http://localhost:8080/admin')"
 note "  özel ağa çözülen ad   → $(try 'http://localtest.me/')   (localtest.me → 127.0.0.1)"
 note "  normal public adres   → $(try 'https://example.com/ok')"
 step "(2) TRAP_NO_DNS_CHECK: yalnızca düz IP kontrolü (01'deki hâli)"
-kubectl -n "$NS" set env "$(wl api)" TRAP_NO_DNS_CHECK=true >/dev/null
+setenv "$(wl api)" TRAP_NO_DNS_CHECK=true >/dev/null
 kubectl -n "$NS" rollout status "$(wl api)" --timeout=180s >/dev/null 2>&1 || true
 sleep 5
 trapped=$(try 'http://localtest.me/')

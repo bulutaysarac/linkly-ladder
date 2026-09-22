@@ -7,7 +7,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # Üçüncü bir seçenek yok. Mühendislik, hangi hatayı yaşayacağını seçmektir.
 ensure_healthy
 CONSUMER=analytics
-on_cleanup "kubectl -n \"$NS\" set env deploy/$CONSUMER TRAP_COMMIT_BEFORE_WRITE-"
+on_cleanup "setenv deploy/$CONSUMER TRAP_COMMIT_BEFORE_WRITE-"
 # Her iki modda da AYNI kurulum: önce birikim (tüketici kapalı), sonra aç ve işlerken öldür.
 # Tüketici üretimden hızlıysa ortada commit edilmemiş parti kalmaz ve iki mod da aynı sonucu verir
 # — fark ölçülemez. Ölçmek istediğin durumu deneyin kendisi ÜRETMELİ.
@@ -44,7 +44,7 @@ need_confirm "tüketici pod'u tekrar tekrar öldürülecek"
 def=$(run_kill_test default)
 note "üretilen ${N:-2000} · sayılan $def  → fark $(( def - ${N:-2000} ))"
 step "TRAP (commit → yaz): tekrar teslim yok, ama yazma başarısız olursa kayıp var"
-kubectl -n "$NS" set env deploy/$CONSUMER TRAP_COMMIT_BEFORE_WRITE=true >/dev/null
+setenv deploy/$CONSUMER TRAP_COMMIT_BEFORE_WRITE=true >/dev/null
 kubectl -n "$NS" rollout status deploy/$CONSUMER --timeout=120s >/dev/null 2>&1 || true
 trap_res=$(run_kill_test trap)
 note "üretilen ${N:-2000} · sayılan $trap_res  → fark $(( trap_res - ${N:-2000} ))"

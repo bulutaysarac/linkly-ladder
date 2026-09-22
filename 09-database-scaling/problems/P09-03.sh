@@ -7,7 +7,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # ARALIKLI olandır.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
-on_cleanup "kubectl -n \"$NS\" set env "$(wl redirect)" TRAP_PREPARED_STATEMENTS=false"
+on_cleanup "setenv "$(wl redirect)" TRAP_PREPARED_STATEMENTS=false"
 step "Pooler modu"
 kubectl -n "$NS" get pooler pg-pooler-rw -o jsonpath='    poolMode={.spec.pgbouncer.poolMode} · default_pool_size={.spec.pgbouncer.parameters.default_pool_size}{"\n"}' 2>/dev/null
 step "(1) Varsayılan (prepared KAPALI, QueryExecModeExec): yük ver"
@@ -17,7 +17,7 @@ err_off=$(promq "sum(increase(db_queries_total{namespace=\"$NS\",result=\"error\
 e5_off=$(k6_5xx)
 note "prepared kapalı: DB hatası=${err_off%%.*} · 5xx=$e5_off"
 step "(2) TRAP: prepared statement AÇIK"
-kubectl -n "$NS" set env "$(wl redirect)" TRAP_PREPARED_STATEMENTS=true >/dev/null
+setenv "$(wl redirect)" TRAP_PREPARED_STATEMENTS=true >/dev/null
 kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=180s >/dev/null 2>&1 || true
 for _ in $(seq 1 20); do serving && break; sleep 2; done
 k6run mixed --vus 30 --duration 40s >/dev/null 2>&1 || true
