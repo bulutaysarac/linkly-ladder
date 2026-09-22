@@ -175,7 +175,7 @@ geri almak şemayı geri almayı **gerektirmez**.
 | Bayrak | Ne yapar | Reproduce | Düzeltme |
 |---|---|---|---|
 | `BAD_VERSION_ERROR_PCT` | Kasıtlı bozuk sürüm üretir | `make repro P=P12-01` | 0'a döndür |
-| `TRAP_BREAKING_MIGRATION` / migration 007 | Kırıcı `RENAME COLUMN` | `CONFIRM=1 make repro P=P12-02` | expand/contract |
+| *(bayrak yok — deneyin kendisi)* | Kırıcı `RENAME COLUMN` **doğrudan `psql` ile** uygulanır ve geri alınır. Bir zamanlar `TRAP_BREAKING_MIGRATION` bayrağı ve `007_breaking_rename.sql` migration'ı vardı; ikisi de kaldırıldı — bayrak kodda hiç okunmuyordu, migration ise sıradan geçerken 13/14'ün şemasını bozuyordu. | `CONFIRM=1 make repro P=P12-02` | expand/contract |
 | `TRAP_TENANT_LABEL` · `TRAP_REGEX_PER_REQUEST` | (11'den devam) | 11'de | — |
 
 Elle denemeye değer:

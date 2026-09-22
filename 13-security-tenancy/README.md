@@ -211,7 +211,7 @@ base imaj güncelleme otomasyonu.
 | Bayrak | Ne yapar | Reproduce | Düzeltme |
 |---|---|---|---|
 | `TRAP_HEADER_TENANT` | Kiracıyı yine header'dan alır | `make repro P=P13-01` | Bayrağı kapat |
-| `TRAP_DROP_TENANT_FILTER` | Bir sorguda tenant filtresini atlar | `make repro P=P13-02` | RLS yakalar |
+| *(bayrak yok — script SQL'i doğrudan koşar)* | "Unutulmuş `WHERE tenant = …`" filtresiz bir sorgu olarak koşulur; sonra RLS açılıp aynı sorgu tekrarlanır. `TRAP_DROP_TENANT_FILTER` bayrağı config'de tanımlıydı ve kodda hiç okunmuyordu — açması hiçbir şeyi değiştirmiyordu, kaldırıldı. | `CONFIRM=1 make repro P=P13-02` | RLS yakalar |
 | `TRAP_NO_DNS_CHECK` | DNS çözümü yapmaz | `make repro P=P13-05` | Bayrağı kapat |
 
 Elle denemeye değer:
