@@ -27,7 +27,21 @@ spec:
       failureLimit: 1
       provider:
         prometheus:
-          address: http://kps-kube-prometheus-stack-prometheus.monitoring.svc:9090
+          # ADRES YANLIŞTI ve arıza YANLIŞ SEBEPTEN "doğru" görünüyordu.
+          # EN: the service is `kps-prometheus`, not `kps-kube-prometheus-stack-prometheus`.
+          #     The name did not resolve, so every query failed with "network is unreachable",
+          #     consecutiveErrors passed the limit and the canary was ABORTED — which is exactly
+          #     what P12-01 expects to see. The experiment "passed" while the analysis had never
+          #     read a single metric. An analysis that fails to run and an analysis that fails a
+          #     threshold produce the same rollout status; only the message tells them apart.
+          #     Whenever a guard fires, ask what it actually evaluated.
+          # TR: servis adı `kps-prometheus`, `kps-kube-prometheus-stack-prometheus` değil. Ad
+          #     çözülmediği için her sorgu "network is unreachable" ile düştü, consecutiveErrors
+          #     sınırı aştı ve canary DURDURULDU — P12-01'in görmeyi beklediği şey tam da buydu.
+          #     Deney "geçti" ama analiz tek bir metrik bile okumamıştı. Koşamayan bir analiz ile
+          #     eşiği geçemeyen bir analiz AYNI rollout durumunu üretir; ikisini yalnızca mesaj
+          #     ayırır. Bir koruma devreye girdiğinde, neyi değerlendirdiğini sor.
+          address: http://kps-prometheus.monitoring.svc.cluster.local:9090
           query: |
             sum(rate(http_requests_total{namespace="{{args.namespace}}",route="/{code}",code=~"5.."}[1m]))
             /
@@ -40,7 +54,7 @@ spec:
       failureLimit: 2
       provider:
         prometheus:
-          address: http://kps-kube-prometheus-stack-prometheus.monitoring.svc:9090
+          address: http://kps-prometheus.monitoring.svc.cluster.local:9090
           query: |
             histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace="{{args.namespace}}",route="/{code}"}[2m])) by (le))
 ---
