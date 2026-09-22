@@ -34,7 +34,13 @@ spec:
             # 3 = clicks_daily tablosu (05). Bu seviyede ŞART: analitik yazıcısı ona yazıyor.
             # (2 = tenant index'i, P02-05'in çözümü — burada da uygulanmış oluyor.)
             - name: MIGRATE_TARGET
-              value: "8"   # 8 = RLS politikası (13)
+              # 7 = RLS politikası (13). Eskiden 8'di ve sıradaki 007_breaking_rename.sql'i de
+              # uyguluyordu: `links.url` → `url_old`. Yani seviyenin KENDİ migration'ı, seviyenin
+              # kendi uygulamasını bozuyordu ("column url does not exist", her yazma 503).
+              # Kırıcı rename bir migration değil bir DENEYDİR — P12-02 onu doğrudan psql ile
+              # uyguluyor ve deney bitince geri alıyor. Sıraya konmuş bir deney, deney olmaktan
+              # çıkıp herkesin ödediği bir bedele dönüşür.
+              value: "7"
           resources:
             requests: { cpu: 50m, memory: 32Mi }
             limits: { memory: 128Mi }

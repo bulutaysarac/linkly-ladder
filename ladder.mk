@@ -83,6 +83,16 @@ wait: ## Deployment/StatefulSet + (varsa) Argo Rollout hazır olana kadar bekle
 	  done; \
 	  echo "  $$c hazır: $${got:-0}/$${want:-1}"; \
 	done
+	@# Tek seferlik Job'lar (migrate, topics) da beklenmeli: şema yoksa uygulama AYAKTA ama
+	@# her yazma "store_error" döner ve smoke, veritabanı hazır olmadığı için değil ŞEMA hazır
+	@# olmadığı için düşer. İkisi aynı görünür, sebepleri farklıdır.
+	@# EN: wait for the one-shot Jobs too — without the schema the app is UP but every write
+	@# returns store_error, and smoke fails for a reason that looks exactly like "DB not ready".
+	@for j in $$(kubectl -n $(NS) get job -o name 2>/dev/null); do \
+	  kubectl -n $(NS) wait --for=condition=complete $$j --timeout=300s >/dev/null 2>&1 \
+	    || { echo "  ✘ $$j tamamlanmadı"; kubectl -n $(NS) logs $$j --tail=15 2>/dev/null; exit 1; }; \
+	  echo "  $$j tamamlandı"; \
+	done
 	@for d in $$(kubectl -n $(NS) get deploy,statefulset -o name 2>/dev/null); do kubectl -n $(NS) rollout status $$d --timeout=300s || exit 1; done
 	@# `kubectl rollout status` Argo Rollout'u tanımaz (yalnızca yerleşik türler). 12+ seviyelerde
 	@# beklemezsek smoke, henüz hazır olmayan bir uygulamaya çarpar.
