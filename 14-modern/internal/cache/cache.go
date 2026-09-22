@@ -55,7 +55,38 @@ func NewMetrics(reg prometheus.Registerer, layer string) *Metrics {
 		Errors: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "cache_errors_total", Help: "Önbellek hatası"}, []string{"op"}),
 	}
-	reg.MustRegister(m.Ops, m.Stampede, m.Evictions, m.Entries, m.Errors)
+	// AYNI METRİK ADI, İKİ SAHİP — 14'te L1 ve L2 aynı anda var.
+	// EN: level 14 constructs the cache metrics twice, once per layer ("l1" and "l2"), and the
+	//     metric names are shared on purpose: `layer` is a LABEL, not part of the name. With
+	//     MustRegister the second call panicked at startup with "duplicate metrics collector
+	//     registration attempted" and api-svc never came up — level 14 had never actually run.
+	//     Prometheus has a contract for exactly this: if registration fails with
+	//     AlreadyRegisteredError, use the collector that is already there.
+	//     A metric name is a CONTRACT; when it has two owners, both must write to ONE series.
+	//     (The same bug hit `ratelimit_decisions_total` at level 08 — same shape, same fix.)
+	// TR: 14, önbellek metriklerini katman başına iki kez kuruyor ("l1" ve "l2") ve metrik adları
+	//     BİLEREK ortak: `layer` adın parçası değil, bir ETİKET. MustRegister ile ikinci çağrı
+	//     açılışta "duplicate metrics collector registration attempted" diye panikliyor ve
+	//     api-svc hiç ayağa kalkmıyordu — yani 14 hiç çalışmamıştı.
+	//     Prometheus'un tam da bunun için bir sözleşmesi var: kayıt AlreadyRegisteredError ile
+	//     düşerse, ZATEN ORADA olan collector'ı kullan.
+	//     Bir metriğin adı bir SÖZLEŞMEDİR; iki sahibi varsa ikisi de TEK seriye yazmalı.
+	//     (Aynı hata 08'de `ratelimit_decisions_total`'da çıkmıştı — aynı biçim, aynı çözüm.)
+	register := func(c prometheus.Collector) prometheus.Collector {
+		if err := reg.Register(c); err != nil {
+			var are prometheus.AlreadyRegisteredError
+			if errors.As(err, &are) {
+				return are.ExistingCollector
+			}
+			panic(err)
+		}
+		return c
+	}
+	m.Ops = register(m.Ops).(*prometheus.CounterVec)
+	m.Stampede = register(m.Stampede).(prometheus.Counter)
+	m.Evictions = register(m.Evictions).(*prometheus.CounterVec)
+	m.Entries = register(m.Entries).(prometheus.Gauge)
+	m.Errors = register(m.Errors).(*prometheus.CounterVec)
 	// Sıfırla pre-register: "hiç olmadı" ile "raporlamıyor" ayırt edilebilsin.
 	for _, r := range []string{"hit", "miss", "negative_hit", "expired"} {
 		m.Ops.WithLabelValues(layer, r)
