@@ -116,3 +116,32 @@ Düzeltmeden sonra 14 ilk kez ayağa kalktı: CNPG 2/2, rollout 3/3, smoke ✔, 
 
 `make verify` → gofmt temiz · `go vet` temiz · 15/15 iskelet lint temiz · `go test -race` tüm
 seviyelerde geçiyor.
+
+
+---
+
+## 14'ün kendi sonuçları ve ortaya çıkardığı iki şey
+
+| ID | Sonuç | Not |
+|---|---|---|
+| P14-01 | HATA → düzeltildi | Yerel `setenv()` sarmalayıcısı **kendi adını** çağırıyordu → sonsuz özyineleme, script altı dakika "koşuyor" göründü |
+| P14-02 | HATA → düzeltildi | 1. faz ölçümünü YAPTI (yayın açık: 40 okumadan 0'ı bayat, 4 gönderildi / 16 alındı); 2. fazda `pipefail` altında geçici bir curl hatası atamayı düşürüp scripti öldürdü |
+| P14-03 | REPRODUCED → **ölçüsü düzeltildi** | Geçti ama iddiasını kanıtlamadı: KEDA hiç ölçeklenmedi (lag 14 < eşik 500), tüketici tek pod'da kaldı ve karar yalnızca *partition sayısına* bakıyordu. Artık replika sabitlenip **kaç pod'un gerçekten kayıt işlediği** sayılıyor |
+| P14-04 | HATA | Tek pod kapasite ölçümü; tam çıktıyla yeniden koşulacak |
+| P14-05 | NOT-REPRODUCED → **iki gerçek bulgu** | (1) `promq`'nun yeni hata raporlaması bozuk bir PromQL'i görünür kıldı; (2) **chaos hiç enjekte edilmiyordu** |
+
+### chaos-daemon saatlerdir ölüydü ve chaos-mesh "sağlıklı" görünüyordu
+
+`chaos-daemon` bir **DaemonSet**'tir; replika sayısı yoktur, park etmenin tek yolu imkânsız bir
+`nodeSelector`'dır. `platform/lib/profile.sh`'ın `on()`/`off()` fonksiyonları yalnızca Deployment
+ve StatefulSet'leri yönetiyordu — yani bir noktada `kapali=true` ile park edilen chaos-daemon'ı
+**geri getirecek hiçbir şey yoktu**. `kubectl -n chaos-mesh get pods` controller-manager ve
+dns-server'ı Running gösteriyordu; her şey yolunda görünüyordu.
+
+O pencerede koşan **her chaos deneyi, kimsenin bozmadığı bir sistemi ölçtü.** Tek koruma
+`chaos_apply`'ın `AllInjected` kontrolüydü: scriptler sahte yeşil yerine SKIPPED bastı. Ama delik
+deneylerde değil, profil scriptindeydi.
+
+> **Bir bileşeni kapatabiliyorsan, AYNI ARAÇLA geri açabilmek zorundasın.**
+> `off()` bir şeyi park ediyorsa, `on()` onu tam olarak geri almalı — yoksa "kapalı" sessizce
+> "kalıcı olarak bozuk"a dönüşür.
