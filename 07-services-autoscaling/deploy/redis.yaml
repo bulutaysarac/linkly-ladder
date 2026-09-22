@@ -78,6 +78,13 @@ spec:
           env:
             - name: REDIS_ADDR
               value: redis://127.0.0.1:6379
+          # Sidecar'ın da readiness'i olmalı: exporter ölürse pod "hazır" görünmeye devam eder
+          # ve metrik akışı sessizce durur. (13'ün require-probes politikası bunu zorunlu kılar.)
+          # EN: A sidecar needs readiness too — if the exporter dies the pod still reports Ready
+          # and the metrics simply stop, silently. Level 13's require-probes policy enforces this.
+          readinessProbe:
+            httpGet: { path: /health, port: metrics }
+            periodSeconds: 10
           resources:
             requests: { cpu: 25m, memory: 32Mi }
             limits: { memory: 96Mi }

@@ -60,6 +60,11 @@ spec:
               selector:
                 matchExpressions:
                   - { key: cnpg.io/cluster, operator: Exists }
+          - resources:
+              kinds: [Pod]
+              selector:
+                matchExpressions:
+                  - { key: cnpg.io/poolerName, operator: Exists }
       validate:
         message: "Bellek limiti zorunlu — limitsiz bir konteyner node'u düşürebilir (P00-08)"
         pattern:
@@ -105,12 +110,32 @@ spec:
           - resources:
               kinds: [Pod]
               selector:
+                matchExpressions:
+                  - { key: cnpg.io/poolerName, operator: Exists }
+          - resources:
+              kinds: [Pod]
+              selector:
                 matchLabels:
                   app.kubernetes.io/name: topics      # tek seferlik topic oluşturma Job'ı
       validate:
         message: "readinessProbe zorunlu — probe'suz pod hazır olmadan trafik alır (P00-04, P07-08)"
+        # DESEN TUZAĞI · PATTERN PITFALL
+        # EN: The first version of this rule was `readinessProbe: {"?*": "?*"}`. It read as
+        #     "any key, any value" but Kyverno applies the value wildcard to each key's value,
+        #     and `httpGet` is a MAP, not a scalar — so it rejected pods that DID have a probe.
+        #     Three redirect replicas were refused while the policy message said the opposite of
+        #     what was wrong. A policy that lies about why it denied you is worse than no policy.
+        #     `periodSeconds: ">0"` is safe: the API server defaults it for every probe kind
+        #     (httpGet, exec, tcpSocket), so its presence proves a probe exists.
+        # TR: Bu kuralın ilk hâli `readinessProbe: {"?*": "?*"}` idi. "Her anahtar, her değer"
+        #     gibi okunuyor ama Kyverno değer joker'ini her anahtarın DEĞERİNE uyguluyor ve
+        #     `httpGet` skaler değil MAP — yani probe'u OLAN pod'ları reddetti. Üç redirect
+        #     replikası geri çevrildi ve politikanın mesajı, asıl sorunun tam tersini söyledi.
+        #     Reddetme sebebi hakkında yalan söyleyen bir politika, politikasızlıktan kötüdür.
+        #     `periodSeconds: ">0"` güvenli: API sunucusu bunu her probe türü için (httpGet,
+        #     exec, tcpSocket) varsayılan olarak doldurur — varlığı probe'un varlığını kanıtlar.
         pattern:
           spec:
             containers:
               - readinessProbe:
-                  "?*": "?*"
+                  periodSeconds: ">0"
