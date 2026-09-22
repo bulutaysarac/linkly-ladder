@@ -68,7 +68,15 @@ measure_peak() {
 # Limiter'ın gerçekten ÇALIŞTIĞINI ve yükün sınıra dayandığını göster: reddedilen istek sayısı.
 # allow ~ limit ve deny >> 0 ise bağlayıcı kısıt limiter'dır; deny ≈ 0 ise yük sınıra hiç
 # gelmemiştir ve "sabit pencere 2x geçirmedi" demek anlamsızdır.
-denies() { promq "sum(increase(ratelimit_decisions_total{namespace=\"$NS\",decision=\"deny\",key_type=\"ip\"}[2m]))"; }
+# ETİKET DEĞERİNİ KODDAN DOĞRULA: sayaç "deny" değil **"reject"** yazıyor
+# (internal/ratelimit/redis.go → Decisions.WithLabelValues("reject", keyType)). Var olmayan bir
+# etiket değeri sorgusu HATA VERMEZ; sessizce 0 döner ve "hiç reddedilmedi" gibi okunur — yani
+# deneyin önkoşul kontrolü, kontrol ettiğini sanarak hep aynı cevabı verir. Bir metriği
+# sorgulamadan önce üretildiği satıra bak.
+# EN: a query for a label value that does not exist is not an error — it silently returns 0 and
+# reads as "nothing was ever rejected", so the precondition check always answers the same way.
+# Look at the line that produces the metric before you query it.
+denies() { promq "sum(increase(ratelimit_decisions_total{namespace=\"$NS\",decision=\"reject\",key_type=\"ip\"}[2m]))"; }
 
 step "(1) KAYAN pencere (varsayılan)"
 read -r slide slide_tot slide_n <<< "$(measure_peak)"
