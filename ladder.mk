@@ -63,7 +63,14 @@ deploy: ## kubectl apply -k deploy/ (IMAGE_TAG yerine gerçek tag)
 	@# Tek seferlik Job'lar (migrate, topics) IMMUTABLE: namespace ayakta kalmışsa ve imaj etiketi
 	@# değiştiyse `apply` "field is immutable" ile düşer ve seviye hiç kurulamaz. Bunlar zaten
 	@# bir kez koşup biten işler; yeniden uygulamadan ÖNCE sil.
-	@kubectl -n $(NS) delete job migrate topics --ignore-not-found --wait=false >/dev/null 2>&1 || true
+	@# --wait=false DEĞİL: silme tamamlanmadan apply çalışırsa yeni Job, devam eden silmeye
+	@# yakalanıp SESSİZCE kaybolur. Sonuç: şema hiç uygulanmaz, uygulama ayakta ama her yazma
+	@# store_error döner ve smoke "link oluşturulamadı" der — silme yarışından bahseden hiçbir
+	@# şey görünmez. `make wait` artık Job'ları saydığı için bu bir kez daha olursa fark edilir.
+	@# EN: not --wait=false: if apply runs while the delete is still in flight, the new Job is
+	@# swallowed by the pending deletion. The schema is never applied, the app is UP, every write
+	@# returns store_error, and nothing in the output mentions a delete race.
+	@kubectl -n $(NS) delete job migrate topics --ignore-not-found --timeout=90s >/dev/null 2>&1 || true
 	@# YENİDEN DENE: yüklü bir kümede admission webhook'ları (CNPG, Kyverno) anlık olarak
 	@# "connection refused" verebiliyor — operatör pod'u yeniden başlıyorsa. Tek denemede
 	@# pes etmek, geçici bir arızayı "seviye kurulamadı"ya çeviriyor (11 gece turunda böyle düştü).

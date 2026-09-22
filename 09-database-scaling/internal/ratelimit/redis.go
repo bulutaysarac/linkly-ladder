@@ -1,8 +1,8 @@
 package ratelimit
 
 import (
-	"errors"
 	"context"
+	"errors"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -44,6 +44,39 @@ if cur == 1 then
   redis.call('EXPIRE', key_cur, window * 2)
 end
 return {1, math.floor(estimated) + 1}
+`
+
+// TRAP_FIXED_WINDOW — sabit pencere sayacı: önceki pencereyi HİÇ hesaba katmaz.
+//
+// EN: This trap was declared in config and read NOWHERE. P08-04 claims "a fixed window lets 2x
+//
+//	through at the boundary" and then measured only the sliding window, so the claim was never
+//	put to the test — the script could not have failed. A trap that is not wired to code is a
+//	comment pretending to be an experiment.
+//	The failure it models is real and famous: with a 10s/300 limit, 300 requests at t=9.9s and
+//	300 more at t=10.1s both pass. 600 requests in 0.2 seconds, and every single check said
+//	"within the limit", because each one looked at a different window.
+//
+// TR: Bu tuzak config'de tanımlıydı ve HİÇBİR YERDE okunmuyordu. P08-04 "sabit pencere sınırda
+//
+//	2x geçirir" diyor ve yalnızca kayan pencereyi ölçüyordu; yani iddia hiç sınanmadı — script
+//	düşemezdi. Koda bağlanmamış bir tuzak, deney taklidi yapan bir yorumdur.
+//	Modellediği arıza gerçek ve meşhur: 10 sn/300 limitte, t=9.9'da 300 ve t=10.1'de 300 daha
+//	geçer. 0.2 saniyede 600 istek ve her kontrol "limit içinde" dedi, çünkü her biri BAŞKA bir
+//	pencereye baktı.
+const fixedWindowLua = `
+local key_cur = KEYS[1]
+local limit   = tonumber(ARGV[1])
+local window  = tonumber(ARGV[2])
+local cur = tonumber(redis.call('GET', key_cur) or '0')
+if cur + 1 > limit then
+  return {0, cur}
+end
+cur = redis.call('INCR', key_cur)
+if cur == 1 then
+  redis.call('EXPIRE', key_cur, window)
+end
+return {1, cur}
 `
 
 type Metrics struct {
@@ -104,6 +137,8 @@ type DistConfig struct {
 	//     kuruyoruz — korumayı kaybetmek telafi edilebilir, hizmeti kaybetmek edilemez.
 	//     P08-01 iki tarafı da ölçüyor.
 	FailOpen bool
+	// FixedWindow: kayan pencere yerine sabit pencere (TRAP_FIXED_WINDOW, P08-04).
+	FixedWindow bool
 }
 
 type Distributed struct {
@@ -116,7 +151,11 @@ type Distributed struct {
 
 func NewDistributed(ctx context.Context, rdb *redis.Client, cfg DistConfig, m *Metrics) *Distributed {
 	d := &Distributed{rdb: rdb, cfg: cfg, m: m}
-	if sha, err := rdb.ScriptLoad(ctx, slidingWindowLua).Result(); err == nil {
+	lua := slidingWindowLua
+	if cfg.FixedWindow {
+		lua = fixedWindowLua
+	}
+	if sha, err := rdb.ScriptLoad(ctx, lua).Result(); err == nil {
 		d.sha = sha
 	}
 	return d

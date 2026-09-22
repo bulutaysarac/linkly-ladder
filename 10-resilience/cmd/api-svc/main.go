@@ -99,10 +99,11 @@ func main() {
 
 	// Paylaşılan limiter: limit artık pod başına değil, SİSTEM genelinde geçerli.
 	dist := ratelimit.NewDistributed(ctx, rdb, ratelimit.DistConfig{
-		Window:    cfg.RateLimitWindow,
-		PerIP:     cfg.RateLimitPerIP,
-		PerTenant: cfg.RateLimitPerTenant,
-		FailOpen:  cfg.RateLimitFailOpen,
+		Window:      cfg.RateLimitWindow,
+		PerIP:       cfg.RateLimitPerIP,
+		PerTenant:   cfg.RateLimitPerTenant,
+		FailOpen:    cfg.RateLimitFailOpen,
+		FixedWindow: cfg.TrapFixedWindow,
 	}, ratelimit.NewMetrics(met.Registry()))
 
 	// Dayanıklılık katmanı: devre kesici + bulkhead + timeout + bütçeli retry.
