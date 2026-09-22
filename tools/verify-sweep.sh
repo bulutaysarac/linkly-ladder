@@ -37,7 +37,9 @@ run_level() {
     return 1
   }
   echo "═══ $L · verify-prev"
-  CONFIRM=1 hard_timeout "${PREV_TIMEOUT:-5400}" make verify-prev 2>&1 | grep -E '^(ID|P[0-9]{2}-)' || echo "(önceki seviye yok)"
+  # --line-buffered: yoksa grep çıktıyı tamponlar ve verify-prev'in TAMAMI bitene kadar tek
+  # satır bile görünmez. Saatler süren bir turda "ilerliyor mu, asıldı mı?" ayrımını kaybedersin.
+  CONFIRM=1 hard_timeout "${PREV_TIMEOUT:-5400}" make verify-prev 2>&1 | grep --line-buffered -E '^(ID|P[0-9]{2}-)' || echo "(önceki seviye yok)"
   echo "═══ $L · kendi sorunları"
   for f in problems/P${lvl}-*.sh; do
     [[ -e "$f" ]] || continue
