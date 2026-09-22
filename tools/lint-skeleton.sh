@@ -103,5 +103,25 @@ if [[ -f "$cfg" ]]; then
              | sed -E 's/([A-Za-z]+):[[:space:]]*env[A-Za-z]*\("(TRAP_[A-Z0-9_]+)"/\1 \2/')
 fi
 
+# 10. README, VAR OLMAYAN bir tuzağı ÖNERİYOR mu?
+# EN: rule 9 catches a flag that exists in config but nothing reads. This catches the opposite
+#     direction: the README's exercise table tells the reader to set a flag that no longer exists
+#     at all. They set it, nothing happens, and they conclude the technique does not work — the
+#     same failure as the pprof endpoint that was documented but never registered.
+#     Only the exercise table is checked (a row whose first cell is `TRAP_…`), so prose that
+#     EXPLAINS a removed flag stays legal — and that prose is usually the right thing to write.
+# TR: 9. kural config'de olup kimsenin okumadığı bayrağı yakalar. Bu, ters yönü yakalar: README'nin
+#     alıştırma tablosu, artık HİÇ var olmayan bir bayrağı ayarlamayı söylüyor. Okuyucu ayarlar,
+#     hiçbir şey olmaz ve tekniğin çalışmadığı sonucuna varır — belgelenmiş ama hiç kaydedilmemiş
+#     pprof ucuyla aynı arıza.
+#     Yalnızca alıştırma tablosu denetlenir (ilk hücresi `TRAP_…` olan satır); kaldırılmış bir
+#     bayrağı AÇIKLAYAN düzyazı serbest kalır — ki yazılması gereken şey genelde odur.
+if [[ -f "$cfg" && -f "$D/README.md" ]]; then
+  while read -r t; do
+    [[ -z "$t" ]] && continue
+    grep -q "\"$t\"" "$cfg" || err "README var olmayan tuzağı öneriyor: $t (config'de yok)"
+  done < <(grep -oE '^\| `(TRAP_[A-Z0-9_]+)`' "$D/README.md" | grep -oE 'TRAP_[A-Z0-9_]+' | sort -u)
+fi
+
 [[ $fail == 0 ]] && echo "  ✔ $name iskelet OK"
 exit $fail
