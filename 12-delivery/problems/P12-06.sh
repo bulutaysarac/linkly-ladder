@@ -14,13 +14,46 @@ appimg=$(kubectl -n "$NS" get rollout redirect -o jsonpath='{.spec.template.spec
 note "şema sürümü (goose): ${dbver:-?} · uygulama imaj etiketi: ${appimg:-?}"
 note "Bu iki sayı BAĞIMSIZ ilerliyor ve hiçbir yerde birbirine bağlı değil. 'Hangi kod hangi"
 note "şemayla uyumlu?' sorusunun cevabı yalnızca insan hafızasında."
-step "Migration'lar geri alınabilir mi? (Down bloğu var mı?)"
+# DÜŞEMEYEN BİR DENEY, DENEY DEĞİLDİR.
+# EN: the verdict used to be `[[ -n "$dbver" ]] && [[ -n "$appimg" ]]` — it passed whenever two
+#     strings could be read, which is true in every healthy cluster. That is not a measurement of
+#     the claim ("the app rolls back, the schema does not"); it is a tautology wearing a verdict's
+#     clothes, and a script that cannot fail cannot tell you anything. The falsifiable version is
+#     cheap and static: count the migrations that CANNOT be undone. If every migration in this
+#     repo had a complete Down block and no destructive statement, the script would — correctly —
+#     report NOT-REPRODUCED.
+# TR: hüküm `[[ -n "$dbver" ]] && [[ -n "$appimg" ]]` idi: iki metin okunabildiğinde geçiyordu,
+#     yani sağlıklı her kümede. Bu, iddianın ("uygulama geri alınır, şema alınmaz") ölçümü değil,
+#     hüküm kılığına girmiş bir totolojidir; düşemeyen bir script sana hiçbir şey söyleyemez.
+#     Falsifiye edilebilir hâli ucuz ve statiktir: geri ALINAMAYAN migration'ları say. Bu depodaki
+#     her migration'ın eksiksiz bir Down bloğu olsaydı ve yıkıcı ifade içermeseydi, script haklı
+#     olarak NOT-REPRODUCED derdi.
+step "Migration'lar geri alınabilir mi? (Down bloğu var mı, içerik yıkıcı mı?)"
+nodown=0; destructive=0; total=0
 for f in "$(dirname "$0")"/../internal/store/migrations/*.sql; do
-  n=$(basename "$f")
+  n=$(basename "$f"); total=$(( total + 1 ))
   has_down=$(grep -c '^-- +goose Down' "$f" || true)
-  body=$(sed -n '/+goose Down/,$p' "$f" | grep -vc '^--' || true)
-  printf '    %-28s Down bloğu: %s\n' "$n" "$([[ ${has_down:-0} -gt 0 ]] && echo var || echo YOK)"
+  # Down bloğunun GÖVDESİ: yalnızca başlık varsa geri alma yok demektir.
+  body=$(sed -n '/+goose Down/,$p' "$f" | grep -vcE '^\s*(--|$)' || true)
+  # ASIL SORU DOWN BLOĞUNUN VARLIĞI DEĞİL, NE YAPTIĞIDIR.
+  # Bir Down bloğu `DROP TABLE` / `DROP COLUMN` içeriyorsa "geri alma" işlemi, Up'tan bu yana
+  # o tabloya/sütuna yazılan HER ŞEYİ siler. Yani migration teknik olarak geri alınabilir,
+  # pratikte ise geri alınamaz: kaybettiğin veri geri gelmez. `DROP INDEX` bunun istisnasıdır —
+  # indeks türetilmiş veridir, yeniden kurulabilir.
+  # EN: the question is not whether a Down block exists but what it DOES. A Down that drops a
+  # table or a column deletes everything written since the Up: technically reversible, practically
+  # not. `DROP INDEX` is the exception — an index is derived data and can be rebuilt.
+  bad=$(sed -n '/+goose Down/,$p' "$f" | grep -icE 'drop +(column|table)|truncate' || true)
+  [[ ${has_down:-0} -eq 0 || ${body:-0} -eq 0 ]] && nodown=$(( nodown + 1 ))
+  [[ ${bad:-0} -gt 0 ]] && destructive=$(( destructive + 1 ))
+  printf '    %-28s Down: %-4s gövde: %-4s geri alma veri kaybettiriyor: %s\n' "$n" \
+    "$([[ ${has_down:-0} -gt 0 ]] && echo var || echo YOK)" \
+    "$([[ ${body:-0} -gt 0 ]] && echo var || echo YOK)" \
+    "$([[ ${bad:-0} -gt 0 ]] && echo EVET || echo hayır)"
 done
+note "$total migration · geri alma bloğu olmayan: $nodown · geri alması veri kaybettiren: $destructive"
+note "\"Down bloğu var\" ile \"geri alınabilir\" aynı şey değildir: DROP COLUMN'lu bir Down,"
+note "Up'tan bu yana o sütuna yazılan her şeyi siler. Geri alma İLERİ bir işlemdir."
 step "Geri alınamayan değişiklik türleri"
 note "  · DROP COLUMN / DROP TABLE → veri gitti, Down bloğu onu geri GETİREMEZ"
 note "  · Veri dönüştürme (UPDATE ... SET x = f(y)) → ters fonksiyon yoksa geri alınamaz"
@@ -31,6 +64,6 @@ note "Pratik kural: bir sürümde YALNIZCA geriye uyumlu şema değişikliği ya
 note "geri almak şemayı geri almayı GEREKTİRMEZ — expand/contract'ın asıl sebebi budur."
 note "Runbook'a yazılacak cümle: 'Uygulama geri alındığında şema İLERİ kalır ve bu SORUN DEĞİLDİR,"
 note "çünkü N-1 sürümü N şemasıyla çalışabilir.' Bu cümleyi yazamıyorsan, migration'ın güvenli değil."
-{ [[ -n "$dbver" ]] && [[ -n "$appimg" ]]; } \
-  && reproduced "şema (v${dbver}) ve uygulama (${appimg}) sürümleri bağımsız ilerliyor; uyumluluk yalnızca expand/contract disipliniyle garanti ediliyor"
-not_reproduced "sürüm bilgileri okunamadı"
+{ [[ -n "$dbver" ]] && (( nodown + destructive > 0 )); } \
+  && reproduced "şema (v${dbver}) uygulamadan (${appimg:-?}) bağımsız ilerliyor ve $total migration'ın $destructive tanesinde geri alma VERİ KAYBETTİRİYOR ($nodown tanesinde Down bloğu yok) — uygulamayı geri almak şemayı geri almaz"
+not_reproduced "bu depodaki $total migration'ın geri alınması veri kaybettirmiyor (Down blokları dolu ve yıkıcı değil) — iddia bu haliyle gösterilemiyor"

@@ -57,6 +57,7 @@ Aşağıdaki liste ikinci türden bulunan hataları içeriyor. Hepsi "çalışı
 | 37 | `chaos_apply` temizliği (tüm seviyeler) | Arıza nesnesi siliniyordu, ama durumlu bileşenin TOPARLANMASI beklenmiyordu. | 09'da replikaya gecikme enjekte edildi, chaos temizlendi, CNPG `pg-2`'yi yeniden başlattı ve **bir sonraki script** "ortam bozuk" deyip çıktı — ortamı değil ÖNCEKİ DENEYİ tarif eden bir hata. Bekleyecek yer, bozan scriptin kendisidir. |
 | 38 | `ensure_deps_ready` | Bekleme bütçesi sabit 2 dakikaydı. | Stateless bir rollout için bol, bir CNPG replikası için az. Bütçe, beklediğin şeyin doğal toparlanma süresinden kısa olmamalı; yoksa komşu scriptleri zincirleme düşürürsün. |
 | 39 | `run_cleanup` | Her temizlik kancasını `>/dev/null 2>&1` ile koşuyordu. | Gürültüyü bastırırken temizlik sırasında ORTAYA ÇIKAN gerçek sorunu da yutuyordu; bedelini sonraki script ödüyordu. `warn_hard` gerçek stderr'e (fd 9) yazıyor. |
+| 40 | P12-06 | Hüküm `[[ -n "$dbver" ]] && [[ -n "$appimg" ]]` idi: iki metin okunabildiğinde geçiyordu, yani sağlıklı her kümede. | Düşemeyen bir deney, deney değildir — hüküm kılığına girmiş bir totoloji. Falsifiye edilebilir ölçü: Down bloğu **ne yapıyor**? `DROP TABLE`/`DROP COLUMN` içeren bir geri alma, Up'tan bu yana yazılan her şeyi siler (6 migration'ın 5'i). Hepsi zararsız olsaydı script haklı olarak NOT-REPRODUCED derdi. |
 
 ## Bulunan altyapı/kurulum hataları (13 ve 14 hiç ayağa kalkamıyordu)
 
