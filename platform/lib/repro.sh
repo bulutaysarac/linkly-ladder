@@ -170,7 +170,12 @@ sample_series() {
     sleep 1
   done
   if (( fails > secs / 5 )); then
-    warn "örnekleme kayıpları: $fails/$secs — ilk hata: ${firsterr:-<yok>}"
+    # TEŞHİS METNİ, ÖLÇÜLEN DEĞERE KARIŞMAMALI. `warn` STDOUT'a yazar; bu fonksiyonun çağrıldığı
+    # yer `$( ... )` ile YAKALANIYORSA uyarı, sayının yanına yapışır. Gerçekte oldu: P08-04
+    # "sabit: ... = örnekleme" bastı — ölçülen değer "örnekleme" kelimesi oldu.
+    # EN: `warn` writes to stdout; when this function's caller captures it with `$( ... )` the
+    # warning is glued onto the number. It happened: a measured value became the word "örnekleme".
+    warn "örnekleme kayıpları: $fails/$secs — ilk hata: ${firsterr:-<yok>}" >&2
   fi
   return 0
 }

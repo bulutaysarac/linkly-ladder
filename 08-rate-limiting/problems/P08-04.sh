@@ -26,6 +26,18 @@ note "pencere=${win:-10s} · IP başına limit=$LIM"
 # three measures a third of the accepted requests, while the question is about the TOTAL.
 on_cleanup "scale 2"   # manifest 2 replika ilan ediyor
 kubectl -n "$NS" scale "$(wl redirect)" --replicas=1 >/dev/null; wait_endpoints 1; sleep 3
+# LİMİT, DENEYİN BİR PARAMETRESİDİR. Tek pod bu kümede 400 rps'i servis edemiyor; yük limitin
+# (300/10 sn = 30 rps) ÜSTÜNE hiç çıkmıyor ve reddedilen istek 0 kalıyor — yani pencere sınırı
+# davranışı gözlenemiyor (ölçüldü: kabul=558, reddedilen=0). Pod'u hızlandıramayız; limiti
+# indirebiliriz. Ölçmek istediğin rejimi kuramıyorsan, sistemi o rejime SOK.
+# EN: one pod cannot serve 400 rps here, so the offered load never exceeds the limit and nothing
+# is ever denied — the boundary behaviour cannot be observed. We cannot make the pod faster; we
+# can lower the limit. If you cannot reach the regime you want to measure, move the regime.
+on_cleanup "setenv \"$(wl redirect)\" RATE_LIMIT_PER_IP-"
+setenv "$(wl redirect)" RATE_LIMIT_PER_IP="${LIM_TEST:-60}" >/dev/null
+settle_rollout "$(wl redirect)"
+LIM=${LIM_TEST:-60}
+note "deney için IP limiti geçici olarak $LIM/${WIN_S}s yapıldı (manifest değeri ${lim:-300})"
 
 # Tepe kabul hızını ÖLÇ: pencere uzunluğu kadar bir aralıkta kaç istek KABUL edildi?
 # Prometheus'un çözünürlüğü (30 sn scrape) pencere sınırındaki 0.2 saniyelik sıçramayı yutar,
