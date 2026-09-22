@@ -62,9 +62,20 @@ prometheus:
     serviceMonitorSelectorNilUsesHelmValues: false
     podMonitorSelectorNilUsesHelmValues: false
     ruleSelectorNilUsesHelmValues: false
+    # WAL OYNATMA, KARARLI DURUMDAN DAHA FAZLA BELLEK İSTER.
+    # Kararlı hâlde ~880 MB yeterliydi ve limit 1536Mi konmuştu. Ama kind control-plane'i sert
+    # yeniden başlayınca Prometheus 73 segmentlik WAL'i oynatmak zorunda kaldı ve tam orada
+    # OOMKilled oldu; kubelet yeniden başlattı, replay baştan başladı ve SONSUZ bir döngüye
+    # girdi. O sırada koşan doğrulama turu Prometheus'a ulaşamadığı için her `promq` 0 döndü:
+    # ÖLÇÜM YAPILMADAN sonuç üretiliyordu. Bir bileşenin limitini KARARLI durumuna göre değil,
+    # EN KÖTÜ ANINA (kurtarma) göre seç; kurtarma yolu, en çok ihtiyaç duyulan yoldur.
+    # EN: steady state fit in 1536Mi, but after a hard control-plane restart Prometheus had to
+    # replay a 73-segment WAL and was OOMKilled mid-replay — restart, replay again, forever. The
+    # verification sweep running at the time got 0 from every `promq` and produced verdicts with
+    # no measurement behind them. Size a limit for the RECOVERY path, not the steady state.
     resources:
       requests: { cpu: 200m, memory: 512Mi }
-      limits: { memory: 1536Mi }
+      limits: { memory: 3Gi }
     storageSpec:
       volumeClaimTemplate:
         spec:

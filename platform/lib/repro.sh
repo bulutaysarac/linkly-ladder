@@ -48,20 +48,35 @@ grafana_hint()   { note "Grafana → $GRAFANA_URL/dashboards?query=Ladder → $1
 # only "curl 22" while Prometheus's actual message ("parse error at char 61") is lost. The
 # measurement tool's own failure is also a measurement.
 _promq_raw() {
-  local body code
+  local body code crc=0
+  # BAŞARISIZLIĞIN SEBEBİNİ DE YAZ. Önceki hâl curl hatasında sessizce 1 dönüyordu; ekranda
+  # "Prometheus sorgusu başarısız → " diye BOŞ bir sebep görünüyordu ve bağlantı hatası ile
+  # sorgu hatası ayırt edilemiyordu. Bir ölçüm neden yapılamadığını söyleyemiyorsa, o ölçümün
+  # yokluğu da teşhis edilemez.
+  # EN: the old version returned 1 silently on a curl failure, so the screen showed an EMPTY
+  # reason and a connection error was indistinguishable from a query error.
   body=$(curl -s --max-time 15 -w $'\n%{http_code}' -XPOST "$PROM_URL/api/v1/query" \
-           --data-urlencode "query=$1" 2>/dev/null) || return 1
+           --data-urlencode "query=$1" 2>/dev/null) || crc=$?
+  if (( crc != 0 )); then printf 'curl hatası %s (%s ulaşılabilir mi?)' "$crc" "$PROM_URL" >&2; return 1; fi
   code=${body##*$'\n'}; body=${body%$'\n'*}
-  [[ "$code" == "200" ]] || { printf '%s' "$body" >&2; return 1; }
+  [[ "$code" == "200" ]] || { printf 'HTTP %s · %s' "$code" "$body" >&2; return 1; }
   printf '%s' "$body"
 }
 promq() {
-  local out err rc=0
-  err=$(mktemp); out=$(_promq_raw "$1" 2>"$err") || rc=$?
-  if (( rc != 0 )); then
-    sleep 2
+  # GEÇİCİ BİR HATA, BİR ÖLÇÜM SONUCU DEĞİLDİR.
+  # Tek bir yeniden deneme yetmiyordu: Prometheus kısa süre meşgulse (kazıma, compaction, pod
+  # yeniden başlatma) iki deneme de aynı pencereye denk gelir, `promq` 0 döner ve deney sıfırı
+  # GERÇEK bir ölçüm sanır — P02-01'in tabanı tam olarak böyle "0" oldu. Artan beklemeyle dört
+  # deneme, geçici bir tökezlemeyi deneyin sonucuna dönüşmekten çıkarır.
+  # EN: one retry was not enough — if Prometheus is briefly busy both attempts land in the same
+  # window, `promq` returns 0 and the experiment mistakes that zero for a real measurement.
+  local out err rc=0 attempt
+  err=$(mktemp)
+  for attempt in 1 2 3 4; do
     rc=0; out=$(_promq_raw "$1" 2>"$err") || rc=$?
-  fi
+    (( rc == 0 )) && break
+    (( attempt < 4 )) && sleep $(( attempt * 2 ))
+  done
   if (( rc != 0 )); then
     # SORGUNUN TAMAMINI BAS. `%.70s` ilk 70 karakteri gösteriyordu; iki FARKLI bozuk sorgu
     # ekranda birebir aynı görünüyor ve hatanın nerede olduğu — Prometheus sütun numarasını
