@@ -51,6 +51,15 @@ spec:
           - resources:
               kinds: [Pod]
               namespaces: ["lvl13"]
+      exclude:
+        any:
+          # Operatörün yarattığı pod'lar (CNPG bootstrap/instance) bu kuralın dışında: onların
+          # kaynak ayarını Cluster manifest'i belirler, pod şablonunu sen yazmıyorsun.
+          - resources:
+              kinds: [Pod]
+              selector:
+                matchExpressions:
+                  - { key: cnpg.io/cluster, operator: Exists }
       validate:
         message: "Bellek limiti zorunlu — limitsiz bir konteyner node'u düşürebilir (P00-08)"
         pattern:
@@ -72,6 +81,32 @@ spec:
               selector:
                 matchLabels:
                   app.kubernetes.io/name: migrate     # Job'ın readiness'i olmaz
+          # OPERATÖRÜN KENDİ POD'LARINI DIŞARIDA BIRAK.
+          # EN: This rule blocked CloudNativePG's own `pg-1-initdb` bootstrap Job — a one-shot pod
+          #     that legitimately has no readiness probe — so the level's security policy prevented
+          #     the level's own database from ever starting. The policy did exactly what it said
+          #     and that was the problem: a cluster-wide rule must carve out the controllers that
+          #     create pods you do not author. Otherwise "secure" means "does not run".
+          # TR: Bu kural CloudNativePG'nin kendi `pg-1-initdb` bootstrap Job'ını engelledi —
+          #     readiness'i olmayan tek seferlik bir pod — ve seviyenin güvenlik politikası,
+          #     seviyenin KENDİ veritabanının açılmasını imkânsız kıldı. Politika tam da yazdığı
+          #     şeyi yaptı; sorun da buydu: küme geneli bir kural, senin yazmadığın pod'ları
+          #     yaratan denetleyicileri dışarıda bırakmalı. Yoksa "güvenli", "çalışmıyor" demektir.
+          - resources:
+              kinds: [Pod]
+              selector:
+                matchExpressions:
+                  - { key: cnpg.io/cluster, operator: Exists }
+          - resources:
+              kinds: [Pod]
+              selector:
+                matchExpressions:
+                  - { key: cnpg.io/podRole, operator: Exists }
+          - resources:
+              kinds: [Pod]
+              selector:
+                matchLabels:
+                  app.kubernetes.io/name: topics      # tek seferlik topic oluşturma Job'ı
       validate:
         message: "readinessProbe zorunlu — probe'suz pod hazır olmadan trafik alır (P00-04, P07-08)"
         pattern:
