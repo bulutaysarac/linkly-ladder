@@ -8,8 +8,25 @@ step "Tanımlı NetworkPolicy'ler"
 kubectl -n "$NS" get networkpolicy --no-headers 2>/dev/null | awk '{print "    " $1}' || note "    (yok)"
 step "Yetkisiz bir pod'dan Postgres'e bağlanmayı dene"
 kubectl -n "$NS" delete pod netcheck --ignore-not-found --wait=true >/dev/null 2>&1
-out=$(kubectl -n "$NS" run netcheck --image=busybox:1.36 --restart=Never --command --timeout=90s \
-      -- sh -c 'nc -z -w 3 pg-pooler-rw 5432 && echo POSTGRES_ERISILEBILIR || echo POSTGRES_ENGELLENDI; nc -z -w 3 redis 6379 && echo REDIS_ERISILEBILIR || echo REDIS_ENGELLENDI' 2>&1)
+# TEST POD'U DA POLİTİKAYA UYMAK ZORUNDA.
+# EN: the first version ran a plain `kubectl run busybox`. This level's own Kyverno policy
+#     (memory limit + readinessProbe required) DENIED it, `kubectl run` returned non-zero and
+#     `set -e` killed the script before it measured anything. The security test was blocked by
+#     the security policy. That is not a bug in the policy — it is the policy working, and it is
+#     the second time tonight this level stopped its own tooling (the first was CNPG's bootstrap
+#     Job). The lesson generalises: after you install a gate, every tool you own becomes a client
+#     of that gate, including the ones that test it.
+# TR: ilk hâl düz bir `kubectl run busybox` koşuyordu. Bu seviyenin KENDİ Kyverno politikası
+#     (bellek limiti + readinessProbe zorunlu) onu REDDETTİ, `kubectl run` sıfırdan farklı döndü
+#     ve `set -e` scripti hiçbir şey ölçmeden öldürdü. Güvenlik testini güvenlik politikası
+#     engelledi. Bu politikanın hatası değil, politikanın ÇALIŞMASIDIR — ve bu seviyenin kendi
+#     araçlarını durdurmasının bu gece ikinci örneği (ilki CNPG'nin bootstrap Job'ıydı).
+#     Genel ders: bir kapı koyduktan sonra sahip olduğun her araç o kapının müşterisi olur —
+#     onu test edenler dahil.
+ov='{"spec":{"containers":[{"name":"netcheck","image":"busybox:1.36","command":["sh","-c","nc -z -w 3 pg-pooler-rw 5432 && echo POSTGRES_ERISILEBILIR || echo POSTGRES_ENGELLENDI; nc -z -w 3 redis 6379 && echo REDIS_ERISILEBILIR || echo REDIS_ENGELLENDI"],"resources":{"limits":{"memory":"64Mi"}},"readinessProbe":{"exec":{"command":["true"]}}}]}}'
+out=$(kubectl -n "$NS" run netcheck --image=busybox:1.36 --restart=Never --timeout=90s \
+      --overrides="$ov" 2>&1) || true
+printf '%s' "$out" | grep -qi 'denied\|blocked' && { warn "test pod'u admission tarafından reddedildi: $(printf '%s' "$out" | head -c 200)"; exit 2; }
 sleep 12
 logs=$(kubectl -n "$NS" logs netcheck 2>/dev/null) || true
 kubectl -n "$NS" delete pod netcheck --ignore-not-found --wait=false >/dev/null 2>&1
