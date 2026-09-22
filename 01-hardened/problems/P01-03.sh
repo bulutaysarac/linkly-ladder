@@ -75,6 +75,20 @@ grafana_hint "02 · App RED → 5xx ; 01 · Pods & Resources → 'Pod fazları' 
 note "zorlamadan sonra: 5xx=$e5 · 404=$e404 (404'ler P01-01: yeni pod'un belleği boş)"
 note "Sonuç: PDB ya bakımı kilitler ya da kesintiyi seyreder. Üçüncü seçenek YEDEKLİLİKTİR — 02."
 note "Karşılaştırma: aynı script 02'de (3 replika, minAvailable=2) drain'i geçirir ve 5xx üretmez."
-{ [[ "$blocked" == true ]] || (( min_ep == 0 )); } \
-  && reproduced "tek replikada güvenli bakım YOK: drain $([[ $blocked == true ]] && echo 'bloke oldu' || echo 'geçti'), bakım penceresinde hazır endpoint en düşük $min_ep (5xx=$e5)"
-not_reproduced "drain geçti ve uygulama hep ayakta kaldı (en düşük endpoint $min_ep) — yedeklilik var (02). Not: 5xx=$e5 olabilir; o zaman sebep uygulama değil, tek replikalı bağımlılıktır (P02-03)."
+# DRAIN'İN ÇIKIŞ KODU DA KİRLİ BİR SİNYALDİR.
+# EN: `kubectl drain` must evict EVERY pod on the node. At level 02 the same node also carries
+#     the single Postgres, whose eviction can exceed the 40s timeout — the drain then "fails" for
+#     a reason that has nothing to do with the APP's disruption budget, and the verdict read that
+#     as "no safe maintenance for the app". Ask the question directly instead: does the app's PDB
+#     ALLOW a voluntary disruption, and did the app stay up while one happened? Everything else
+#     (drain exit code, total 5xx) is context, not evidence.
+# TR: `kubectl drain` node'daki HER pod'u tahliye etmek zorundadır. 02'de aynı node tek Postgres'i
+#     de taşıyor ve onun tahliyesi 40 sn'lik süreyi aşabiliyor; drain o zaman UYGULAMANIN kesinti
+#     bütçesiyle ilgisi olmayan bir sebepten "başarısız" oluyor ve hüküm bunu "uygulama için
+#     güvenli bakım yok" diye okuyordu. Soruyu doğrudan sor: uygulamanın PDB'si gönüllü bir
+#     kesintiye İZİN VERİYOR MU ve kesinti olurken uygulama ayakta kaldı mı? Gerisi (drain çıkış
+#     kodu, toplam 5xx) kanıt değil bağlamdır.
+note "drain sonucu: $([[ $blocked == true ]] && echo 'bloke/başarısız' || echo 'geçti') — bu, node'daki DİĞER pod'lardan da etkilenir, hükümde kanıt sayılmaz"
+{ (( ${allowed:-0} == 0 )) || (( min_ep == 0 )); } \
+  && reproduced "güvenli bakım YOK: PDB'nin izin verdiği kesinti=${allowed:-0}, bakım penceresinde hazır endpoint en düşük $min_ep (drain $([[ $blocked == true ]] && echo 'bloke' || echo 'geçti'), 5xx=$e5)"
+not_reproduced "PDB ${allowed:-0} kesintiye izin veriyor ve uygulama hep ayakta kaldı (en düşük endpoint $min_ep) — yedeklilik var (02). Not: 5xx=$e5 olabilir; o zaman sebep uygulama değil, tek replikalı bağımlılıktır (P02-03)."
