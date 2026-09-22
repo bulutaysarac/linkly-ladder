@@ -33,6 +33,15 @@ Aşağıdaki liste ikinci türden bulunan hataları içeriyor. Hepsi "çalışı
 | 14 | P08-05 / P04-03 sınıfı | Sıcak anahtarın arızası yavaşlama değil **tavan**; birkaç yüz rps'te tek Redis anahtarı zorlanmaz. | "Sorun yok" değil, "sorunun göründüğü yüke çıkmadın". |
 | 15 | P11-03 ölçüsü | Sampling oranının kontrol ettiği şey span sayısı; script Alloy CPU'suna bakıyordu (Alloy aynı anda log da topluyor). | %100 koşusu %5'ten daha ucuz ölçülebiliyordu. |
 
+| 16 | `setenv` / `setres` yardımcıları | 102 çağrı yerini değiştiren sed, yardımcının **kendi gövdesindeki** `kubectl set env` satırını da `setenv` yaptı → sonsuz özyineleme, `Segmentation fault: 11`. | Rollout hedefleyen çağrılar diğer daldan geçip çalışmaya devam etti, bu yüzden hata bir süre yalnızca Deployment hedefleyen deneylerde göründü. **Toplu değiştirme, değiştirdiği şeyin TANIMINI da kapsar.** |
+| 17 | Canary analizi (12/13/14) | `AnalysisTemplate` var olmayan bir Prometheus servis adını sorguluyordu; her sorgu "network is unreachable" ile düşüyor, `consecutiveErrors` sınırı aşıyor ve canary **duruyordu**. | P12-01 bunu "kötü sürüm yakalandı" diye okuyordu. **Koşamayan bir analiz ile eşiği geçemeyen bir analiz aynı rollout durumunu üretir.** |
+| 18 | P13-02 (RLS) | Sorgular `postgres` ile koşuyordu; süper kullanıcı RLS'i **tamamen atlar** (FORCE yalnızca tablo sahibini bağlar). | Politika çalışıyordu, biz göremiyorduk. "Veritabanından kontrol ettim" cümlesi, hangi ROLLE bakıldığını söylemiyorsa bilgi taşımaz. |
+| 19 | P13-02 (psql) | `psql -tA` komut etiketlerini (`SET`) susturmaz; çok ifadeli sorguda çıktı `tenant=acme → SET` oluyordu. | Sayı sandığın şey bir komut adıydı. `-q` şart. |
+| 20 | P13-03 (ağ testi) | Düz `kubectl run busybox`, seviyenin **kendi** Kyverno politikası tarafından reddediliyordu. | Güvenlik testini güvenlik politikası engelledi ve `set -e` scripti hiçbir şey ölçmeden öldürdü. Bir kapı koyduktan sonra her araç o kapının müşterisidir — onu test edenler dahil. |
+| 21 | P06-06, P10-05, P10-06, P11-04, P14-01 | Kararlar `>=` / `<=` kullanıyordu: **iki taraf da 0 iken geçer**. | Başarısız bir ölçüm, geçen bir deneye dönüşüyordu — kanıt gibi görünen bir yanlış pozitif. |
+| 22 | P12-03 | Drift'i geri almak için `make deploy` çağırıyordu; 12'nin Makefile'ı **kendi** namespace'ini hedefler. | 13'ün `verify-prev`i içinde koşunca kümeye üçüncü bir seviye kuruyordu. Bir önceki seviyenin scripti, bulunduğu namespace'ten başka yere dokunamaz. |
+| 23 | `PLAN.md` | İki sorun vaat ediyordu (P09-07, P10-07) ve scriptleri yoktu; sekiz script de planda yoktu. | Plan ile depo arasındaki sessiz sapma. Artık birebir örtüşüyor. |
+
 ## Bulunan altyapı/kurulum hataları (13 ve 14 hiç ayağa kalkamıyordu)
 
 | Ne | Ayrıntı |
@@ -45,6 +54,7 @@ Aşağıdaki liste ikinci türden bulunan hataları içeriyor. Hepsi "çalışı
 | RLS | Politika `app.tenant_id` bekliyor, uygulama hiç ayarlamıyor, public yönlendirme yolunun kiracısı yok → her yazma 42501. |
 | `make wait` sırası | Uygulamanın readiness'i DB ping'ine bağlıyken `deploy/api`, CNPG'den **önce** bekleniyordu. |
 | Job silme yarışı | `delete job --wait=false` + hemen `apply` → yeni Job sessizce kayboluyor, şema hiç uygulanmıyor. |
+| `make wait` Job kapsamı | Namespace'teki HER Job bekleniyordu; CNPG kendi bootstrap Job'ını başarıyla bitince **siler** → "tamamlanmadı". Bir kaynağı beklemek, yaşam döngüsünün sahibini bilmeyi gerektirir. |
 
 ---
 
