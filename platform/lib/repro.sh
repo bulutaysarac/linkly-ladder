@@ -262,6 +262,29 @@ need_metric() {
 # ölçüm yapar ve "sorun yok" der. Gerçekte oldu: 09-14'te Postgres CNPG'ye geçti, pod'lar
 # `app.kubernetes.io/name=postgres` etiketini taşımıyordu ve pg-loss/pg-delay deneylerinin
 # hepsi sessizce arızasız koştu. Ölçemediğin şeyi "yok" sanma; enjekte edemediğin arızayı da.
+# `setenv` SONRASI `rollout status` YENİ NESLİ BEKLEMEYEBİLİR.
+# EN: `kubectl rollout status` reports on what the controller has OBSERVED. Called immediately
+#     after a `set env`, it can see the PREVIOUS generation — already complete — and return at
+#     once, so the script measures the OLD pods and concludes the trap "had no effect".
+#     P05-06 printed "301 modunda: durum=302": the flag was set, the measurement was taken before
+#     any new pod existed, and the verdict blamed the feature. Wait for observedGeneration to
+#     catch up FIRST, then wait for the rollout.
+# TR: `kubectl rollout status` denetleyicinin GÖZLEDİĞİ duruma bakar. `set env`in hemen ardından
+#     çağrılırsa ÖNCEKİ nesli — zaten tamamlanmış — görüp anında döner; script eski pod'ları ölçer
+#     ve tuzağın "etkisi yok" sonucuna varır. P05-06 tam olarak "301 modunda: durum=302" bastı.
+#     Önce observedGeneration'ın yetişmesini bekle, sonra rollout'u.
+settle_rollout() {
+  local w=$1 gen obs i
+  gen=$(kubectl -n "$NS" get "$w" -o jsonpath='{.metadata.generation}' 2>/dev/null || echo 0)
+  for i in $(seq 1 30); do
+    obs=$(kubectl -n "$NS" get "$w" -o jsonpath='{.status.observedGeneration}' 2>/dev/null || echo 0)
+    (( ${obs:-0} >= ${gen:-0} )) && break
+    sleep 2
+  done
+  kubectl -n "$NS" rollout status "$w" --timeout=180s >/dev/null 2>&1 || true
+  for i in $(seq 1 30); do serving && break; sleep 2; done
+}
+
 chaos_cleanup() {
   local c=$1 kind name
   "$LADDER_ROOT/platform/lib/chaos.sh" delete "$c" >/dev/null 2>&1 || true

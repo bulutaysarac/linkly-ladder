@@ -17,10 +17,24 @@ st302=$(status_of "$code"); cc=$(header_of "$code" Cache-Control)
 note "302 modunda: durum=$st302 · Cache-Control='${cc:-<yok>}' · sayılan tıklama=$c302 / $N"
 step "Tuzağı aç: 301 (Cache-Control yok)"
 setenv "$(app_workload)" TRAP_REDIRECT_301=true >/dev/null
-kubectl -n "$NS" rollout status "$(app_workload)" --timeout=180s >/dev/null || true
-for _ in $(seq 1 20); do serving && break; sleep 2; done
+settle_rollout "$(app_workload)"
 code2=$(create_link "https://example.com/uncounted")
+# TUZAĞIN DEVREDE OLDUĞUNU DAVRANIŞTAN DOĞRULA. Bayrağı yazmak, yeni pod'un trafiği almaya
+# başlaması demek değildir; ölçüm eski pod'a denk gelirse sonuç "tuzağın etkisi yok" olur ve bu,
+# özelliği suçlayan YANLIŞ bir cümledir. Değişimi bekle; olmazsa ölçemediğini söyle.
+# EN: setting the flag is not the same as the new pod serving traffic. If the measurement lands on
+# the old pod the result reads as "the trap has no effect" — a false statement about the feature.
+for _ in $(seq 1 30); do
+  [[ "$(status_of "$code2")" == 301 ]] && break
+  sleep 2
+done
 st301=$(status_of "$code2"); cc2=$(header_of "$code2" Cache-Control)
+if [[ "$st301" != 301 ]]; then
+  warn "ölçüm yapılamadı: TRAP_REDIRECT_301 açıldı ama yönlendirme hâlâ $st301 —"
+  warn "yeni pod trafiğe girmemiş ya da bayrak kodda okunmuyor olabilir (lint kuralı 9)."
+  warn "Bu bir NOT-REPRODUCED değil, EKSİK ÖLÇÜMdür: tuzak devreye girmeden hüküm verilmez."
+  exit 2
+fi
 note "301 modunda: durum=$st301 · Cache-Control='${cc2:-<yok>}'"
 note "curl önbellek tutmadığı için burada sayım düşmez — ama TARAYICI tutar."
 warn "Elle doğrula: Chrome'da http://${BASE_URL#http://}/$code2 adresini 5 kez aç,"

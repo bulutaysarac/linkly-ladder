@@ -25,8 +25,24 @@ measure_loss() {
   kubectl -n "$NS" rollout restart "$(app_workload)" >/dev/null
   kubectl -n "$NS" rollout status "$(app_workload)" --timeout=200s >/dev/null 2>&1 || true
   for _ in $(seq 1 25); do serving && break; sleep 2; done
-  sleep 8
-  a=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0') || true
+  # SABİT UYKU, FLUSH ARALIĞINDAN KISA OLAMAZ.
+  # `sleep 8` ile okunan sayı henüz DURULMAMIŞTI: tampon aralığı 15 sn, yani son flush çoğu zaman
+  # o 8 saniyenin dışında kalıyor ve "kayıp" diye yazdığımız şey aslında HENÜZ YAZILMAMIŞ olan
+  # kayıtlardı. İki fazın rollout süresi farklı olduğu için bu artık iki fazı FARKLI oranda
+  # bozdu ve sonuç ters çıktı: doğru ayarda 39 kayıp, bozuk ayarda 0 kayıp.
+  # Sayım durulana kadar bekle; "durdu" eşiği flush aralığını aşmalı (7 × 3 sn = 21 sn > 15 sn).
+  # EN: the count had not SETTLED after a fixed 8s: with a 15s buffer interval the final flush
+  # usually falls outside that window, so what we recorded as "loss" was simply not-yet-written.
+  # The two phases restart at different speeds, so the artifact skewed them unequally and the
+  # result came out inverted. Wait for the count to stop changing, past the flush interval.
+  local prev=-1 stable=0 cur=0
+  for _ in $(seq 1 40); do
+    cur=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0') || true
+    if [[ "$cur" == "$prev" ]]; then stable=$(( stable + 1 )); else stable=0; fi
+    (( stable >= 7 )) && break
+    prev=$cur; sleep 3
+  done
+  a=$cur
   echo $(( b + ${N:-2000} - a ))
 }
 step "Mevcut ayar (grace=${orig_grace}s, preStop=${orig_prestop}s, SHUTDOWN_GRACE=20s): drain'e zaman VAR"
