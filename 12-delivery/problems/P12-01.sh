@@ -35,6 +35,23 @@ note "~%2.5 ile sınırlı kaldı ve analiz bunu 30-60 sn içinde yakaladı."
 note "Rolling update olsaydı (maxSurge/maxUnavailable ile) hata oranı kademeli olarak %25'e"
 note "çıkardı ve durduracak bir mekanizma OLMAZDI — yalnızca birinin fark etmesi."
 note "Canary'nin bedeli: dağıtım 30 sn yerine birkaç dakika sürer. Bu, sigorta primidir."
-{ (( aborted == 1 )) || awk -v e="$err_ratio" 'BEGIN{exit !(e < 25)}'; } \
-  && reproduced "kötü sürüm canary'de yakalandı (rollout=${phase:-?}, toplam hata %$err_ratio — kötü sürümün kendi oranı %25 idi)"
-not_reproduced "canary kötü sürümü durduramadı (analiz şablonu ve Prometheus adresi doğru mu?)"
+# ANALİZ NEDEN DURDURDU? Bunu SORMAK zorundayız.
+# EN: an analysis that cannot RUN and an analysis that fails a THRESHOLD produce the same rollout
+#     status (Degraded / RolloutAborted). For a while this script reported REPRODUCED while the
+#     AnalysisTemplate pointed at a Prometheus service name that did not exist: every query failed
+#     with "network is unreachable", consecutiveErrors passed the limit and the canary was
+#     aborted — without a single metric ever being read. The guard fired; it just had not
+#     measured anything. Whenever a guard fires, ask what it evaluated.
+# TR: KOŞAMAYAN bir analiz ile EŞİĞİ geçemeyen bir analiz aynı rollout durumunu üretir
+#     (Degraded / RolloutAborted). Bu script bir süre REPRODUCED dedi; oysa AnalysisTemplate
+#     var olmayan bir Prometheus servis adını gösteriyordu, her sorgu "network is unreachable"
+#     ile düşüyor, consecutiveErrors sınırı aşıyor ve canary duruyordu — tek bir metrik bile
+#     okunmadan. Koruma devreye girdi, yalnızca hiçbir şey ÖLÇMEMİŞTİ.
+msg=$(kubectl -n "$NS" get rollout redirect -o jsonpath='{.status.message}' 2>/dev/null) || true
+[[ -n "${msg:-}" ]] && note "rollout mesajı: $(printf '%s' "$msg" | head -c 220)"
+infra_err=0
+printf '%s' "${msg:-}" | grep -qiE 'unreachable|no such host|connection refused|dial tcp|timeout awaiting' && infra_err=1
+(( infra_err == 1 )) && warn "analiz ALTYAPI hatasıyla düştü (metrik okunamadı) — bu, kötü sürümün yakalandığı ANLAMINA GELMEZ"
+{ (( aborted == 1 )) && (( infra_err == 0 )); } \
+  && reproduced "kötü sürüm canary'de METRİKLE yakalandı (rollout=${phase:-?}, toplam hata %$err_ratio — kötü sürümün kendi oranı %25 idi)"
+not_reproduced "canary kötü sürümü metrikle durduramadı (rollout=${phase:-?}, altyapı hatası=${infra_err}) — AnalysisTemplate'in Prometheus adresi doğru mu? (kubectl -n monitoring get svc | grep prometheus)"
