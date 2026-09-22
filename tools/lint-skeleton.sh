@@ -144,5 +144,24 @@ for f in "$D"/problems/P*.sh; do
   done < <(grep -E '^[a-z_][a-z0-9_]*\(\)[[:space:]]*\{.*\}[[:space:]]*$' "$f" || true)
 done
 
+# 12. BAĞIMLILIK KURULDU AMA BAĞLANMADI: nil bir alanın arkasındaki tuzak GÖRÜNMEZdir.
+# EN: every `cmd/*/main.go` that builds a Redis client AND an httpapi must also hand the client to
+#     the API. Levels 04-06 did; 07-14 did not, so `a.rdb` stayed nil and
+#     `TRAP_READY_CHECKS_REDIS` (P10-02) read its flag, saw nil and did nothing. The experiment
+#     ran, measured no difference and reported "readiness is fine" — the opposite of the lesson.
+#     Rule 9 could not catch it: the flag WAS read. A flag behind a nil dependency is not
+#     disabled, it is invisible — nothing fails and nothing logs.
+# TR: Redis istemcisi VE httpapi kuran her `cmd/*/main.go`, istemciyi API'ye de vermek zorundadır.
+#     04-06 veriyordu, 07-14 vermiyordu; `a.rdb` nil kalıyor ve `TRAP_READY_CHECKS_REDIS` (P10-02)
+#     bayrağını okuyup nil görüyor ve hiçbir şey yapmıyordu. Deney koşuyor, fark bulamıyor ve
+#     "readiness sorunsuz" diyordu — dersin tam tersi. 9. kural bunu yakalayamazdı, çünkü bayrak
+#     OKUNUYORDU. Nil bir bağımlılığın arkasındaki bayrak kapalı değil GÖRÜNMEZdir.
+for f in "$D"/cmd/*/main.go; do
+  [[ -e "$f" ]] || continue
+  grep -q 'redis.NewClient' "$f" || continue
+  grep -q 'httpapi.New(' "$f" || continue
+  grep -q 'SetRedis(' "$f" || err "$(basename "$(dirname "$f")")/main.go: redis.NewClient var ama api.SetRedis çağrılmıyor — Redis'e bağlı tuzaklar sessizce ölü"
+done
+
 [[ $fail == 0 ]] && echo "  ✔ $name iskelet OK"
 exit $fail

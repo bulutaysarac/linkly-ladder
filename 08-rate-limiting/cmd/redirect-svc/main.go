@@ -96,6 +96,16 @@ func main() {
 	}, ratelimit.NewMetrics(met.Registry()))
 
 	api := httpapi.New(cfg, log, met, cached, version)
+	// SetRedis OLMADAN a.rdb NIL KALIR ve ona bağlı tuzaklar SESSİZCE ÖLÜR.
+	// EN: 04-06 wired this and 07+ did not, so `TRAP_READY_CHECKS_REDIS` (P10-02) read its flag,
+	//     found `a.rdb == nil` and did nothing — the experiment ran, measured no difference and
+	//     reported "readiness is fine", which is the OPPOSITE of the lesson. A feature flag guarded
+	//     by a nil dependency is not disabled, it is INVISIBLE: nothing fails, nothing logs.
+	// TR: 04-06 bunu bağlıyordu, 07+ bağlamıyordu; `TRAP_READY_CHECKS_REDIS` (P10-02) bayrağını
+	//     okuyup `a.rdb == nil` görüyor ve hiçbir şey yapmıyordu — deney koşuyor, fark bulamıyor ve
+	//     "readiness sorunsuz" diyordu; dersin TAM TERSİ. Nil bir bağımlılığın arkasındaki bayrak
+	//     kapalı değil GÖRÜNMEZdir: hiçbir şey patlamaz, hiçbir şey loglanmaz.
+	api.SetRedis(rdb)
 	api.SetDistributedLimiter(dist)
 	api.SetClicks(clicks)
 	srv := api.Server(api.RedirectHandler(ratelimit.New(cfg.RateLimitPerSec, cfg.RateLimitBurst)))
