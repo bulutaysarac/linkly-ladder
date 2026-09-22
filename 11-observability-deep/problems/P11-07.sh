@@ -12,20 +12,20 @@ note "kaynak: platform/dashboards/gen.py → out/*.json → ConfigMap (grafana_d
 cm=$(kubectl -n monitoring get configmap ladder-dashboards -o jsonpath='{.metadata.resourceVersion}' 2>/dev/null) || true
 note "ConfigMap resourceVersion: ${cm:-?}"
 step "Grafana'daki dashboard'ları say ve düzenlenebilirliği kontrol et"
-dash=$(curl -s -u "$GRAFANA_USER:$GRAFANA_PASS" "$GRAFANA_URL/api/search?type=dash-db&limit=100" 2>/dev/null | jq -r '[.[] | select(.title|startswith("Ladder"))] | length')
-editable=$(curl -s -u "$GRAFANA_USER:$GRAFANA_PASS" "$GRAFANA_URL/api/dashboards/uid/ladder-app-red" 2>/dev/null | jq -r '.dashboard.editable')
+dash=$(curl -s -u "$GRAFANA_USER:$GRAFANA_PASS" "$GRAFANA_URL/api/search?type=dash-db&limit=100" 2>/dev/null | jq -r '[.[] | select(.title|startswith("Ladder"))] | length') || true
+editable=$(curl -s -u "$GRAFANA_USER:$GRAFANA_PASS" "$GRAFANA_URL/api/dashboards/uid/ladder-app-red" 2>/dev/null | jq -r '.dashboard.editable') || true
 note "Ladder dashboard sayısı: ${dash:-?} · 'editable' bayrağı: ${editable:-?}"
 step "Drift denemesi: dashboard'ı API üzerinden değiştirmeye çalış"
 resp=$(curl -s -u "$GRAFANA_USER:$GRAFANA_PASS" -XPOST "$GRAFANA_URL/api/dashboards/db" \
   -H 'Content-Type: application/json' \
   -d '{"dashboard":{"uid":"ladder-app-red","title":"Ladder / 02 · App RED (ELLE DEĞİŞTİRİLDİ)","panels":[],"schemaVersion":39},"overwrite":true}' 2>/dev/null | head -c 200)
 note "API yanıtı: ${resp:-<boş>}"
-title_now=$(curl -s -u "$GRAFANA_USER:$GRAFANA_PASS" "$GRAFANA_URL/api/dashboards/uid/ladder-app-red" 2>/dev/null | jq -r '.dashboard.title')
+title_now=$(curl -s -u "$GRAFANA_USER:$GRAFANA_PASS" "$GRAFANA_URL/api/dashboards/uid/ladder-app-red" 2>/dev/null | jq -r '.dashboard.title') || true
 note "şimdiki başlık: ${title_now:-?}"
 step "Kaynaktan yeniden uygula (make dashboards) — drift silinir"
 (cd "$LADDER_ROOT/platform" && make dashboards >/dev/null 2>&1) || warn "make dashboards çalışmadı"
 sleep 25
-title_after=$(curl -s -u "$GRAFANA_USER:$GRAFANA_PASS" "$GRAFANA_URL/api/dashboards/uid/ladder-app-red" 2>/dev/null | jq -r '.dashboard.title')
+title_after=$(curl -s -u "$GRAFANA_USER:$GRAFANA_PASS" "$GRAFANA_URL/api/dashboards/uid/ladder-app-red" 2>/dev/null | jq -r '.dashboard.title') || true
 note "yeniden uygulamadan sonra başlık: ${title_after:-?}"
 grafana_hint "Ladder klasörü — dashboard'lar salt okunur (editable: false)"
 note "Bu merdivende dashboard'lar KODDUR: platform/dashboards/gen.py üretir, ConfigMap taşır,"

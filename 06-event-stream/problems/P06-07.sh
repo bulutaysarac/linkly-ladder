@@ -6,7 +6,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 ensure_healthy
 rp=$(dep_pod app.kubernetes.io/name=redpanda) || exit 2   # bağımlılık hazır değilse ölçüm anlamsız
 code=$(create_link "https://example.com/schema")
-before=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0')
+before=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0') || true
 step "Geleceğin sürümünden bir olay bas (v=99, bilinmeyen alanlar)"
 future='{"v":99,"event_id":"future-1","code":"'"$code"'","at":"2030-01-01T00:00:00Z","new_field":{"nested":true},"another":42}'
 kubectl -n "$NS" exec "$rp" -- sh -c "echo '$future' | rpk topic produce clicks" >/dev/null 2>&1 || true
@@ -14,7 +14,7 @@ step "Ardından normal tıklamalar — eski tüketici bunları işleyebilmeli"
 N=${N:-150}
 for i in $(seq 1 "$N"); do status_of "$code" >/dev/null; done
 sleep 20
-after=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0')
+after=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0') || true
 unknown=$(promq "sum(increase(consumer_records_total{namespace=\"$NS\",result=\"unknown_version\"}[10m]))")
 restarts=$(kubectl -n "$NS" get pods -l app.kubernetes.io/name=analytics -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}' 2>/dev/null) || true
 grafana_hint "08 · Stream → 'consumer records by result' (unknown_version)"

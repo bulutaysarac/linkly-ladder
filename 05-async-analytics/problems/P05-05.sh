@@ -20,13 +20,13 @@ measure_loss() {
   local label=$1
   local code b a
   code=$(create_link "https://example.com/grace/$label")
-  b=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0')
+  b=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0') || true
   clicks "$code" "${N:-2000}" 20
   kubectl -n "$NS" rollout restart "$(app_workload)" >/dev/null
   kubectl -n "$NS" rollout status "$(app_workload)" --timeout=200s >/dev/null 2>&1 || true
   for _ in $(seq 1 25); do serving && break; sleep 2; done
   sleep 8
-  a=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0')
+  a=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0') || true
   echo $(( b + ${N:-2000} - a ))
 }
 step "Mevcut ayar (grace=${orig_grace}s, preStop=${orig_prestop}s, SHUTDOWN_GRACE=20s): drain'e zaman VAR"

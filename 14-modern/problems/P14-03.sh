@@ -6,7 +6,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 ensure_healthy
 rp=$(dep_pod app.kubernetes.io/name=redpanda) || exit 2   # bağımlılık hazır değilse ölçüm anlamsız
 step "Topic yapılandırması"
-parts=$(kubectl -n "$NS" exec "$rp" -- rpk topic describe clicks -p 2>/dev/null | grep -c '^[0-9]' || echo "?")
+parts=$(kubectl -n "$NS" exec "$rp" -- rpk topic describe clicks -p 2>/dev/null | grep -c '^[0-9]' || echo "?") || true
 note "clicks partition sayısı: ${parts:-?}"
 kedamax=$(kubectl -n "$NS" get scaledobject analytics -o jsonpath='{.spec.maxReplicaCount}' 2>/dev/null) || true
 note "KEDA maxReplicaCount: ${kedamax:-?} (partition sayısını AŞMAMALI — fazlası boşta oturur)"

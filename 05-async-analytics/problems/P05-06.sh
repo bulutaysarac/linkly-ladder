@@ -12,7 +12,7 @@ N=${N:-50}
 # curl her istekte yeni bağlantı açar ve önbellek tutmaz → sunucu hepsini görür
 for i in $(seq 1 $N); do status_of "$code" >/dev/null; done
 sleep 5
-c302=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0')
+c302=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0') || true
 st302=$(status_of "$code"); cc=$(header_of "$code" Cache-Control)
 note "302 modunda: durum=$st302 · Cache-Control='${cc:-<yok>}' · sayılan tıklama=$c302 / $N"
 step "Tuzağı aç: 301 (Cache-Control yok)"

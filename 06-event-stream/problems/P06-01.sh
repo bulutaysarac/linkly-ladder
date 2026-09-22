@@ -17,7 +17,7 @@ kubectl -n "$NS" scale "$(wl $CONSUMER)" --replicas=0 >/dev/null
 on_cleanup "kubectl -n \"$NS\" scale "$(wl $CONSUMER)" --replicas=1"
 code=$(create_link "https://example.com/dedup")
 N=${N:-2000}
-before=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0')
+before=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0') || true
 clicks "$code" "$N" 20
 note "$N tıklama üretildi, hepsi topic'te bekliyor (tüketici kapalı)"
 # PENCEREYİ GÖRÜNÜR YAP — ve DOĞRU pencereyi seç.
@@ -44,12 +44,12 @@ kubectl -n "$NS" rollout status "$(wl $CONSUMER)" --timeout=120s >/dev/null 2>&1
 # Sayım DURULANA kadar bekle (rebalance + birikimin işlenmesi sabit bir süre değildir).
 prev=-1; stable=0
 for _ in $(seq 1 60); do
-  cur=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0')
+  cur=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0') || true
   if [[ "$cur" == "$prev" ]]; then stable=$(( stable + 1 )); else stable=0; fi
   (( stable >= 4 )) && break
   prev=$cur; sleep 3
 done
-after=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0')
+after=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0') || true
 counted=$(( after - before ))
 dup=$(promq "sum(increase(consumer_records_total{namespace=\"$NS\",result=\"duplicate\"}[10m]))")
 ok=$(promq "sum(increase(consumer_records_total{namespace=\"$NS\",result=\"ok\"}[10m]))")

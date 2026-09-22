@@ -8,7 +8,7 @@ ensure_healthy
 code=$(create_link "https://example.com/counter")
 step "Aynı koda 300 tıklama, sonra sayacı oku"
 for i in $(seq 1 300); do status_of "$code" >/dev/null; done
-clicks=$(curl -s "$BASE_URL/api/links/$code" | jq -r .clicks)
+clicks=$(curl -s "$BASE_URL/api/links/$code" | jq -r .clicks) || true
 note "kaydedilen tıklama: $clicks / 300"
 step "Yazma, okuma yolunun İÇİNDE mi? Hot key ile p99'a bak"
 k6run hot-key --vus 50 --duration 30s >/dev/null 2>&1 || true
@@ -19,7 +19,7 @@ step "Pod'u yeniden başlat: sayaç hayatta kalıyor mu?"
 need_confirm "pod yeniden başlatılacak"
 kubectl -n "$NS" delete pod -l "$APP_SELECTOR" --wait=true >/dev/null; wait_ready
 for _ in $(seq 1 20); do serving && break; sleep 2; done
-after=$(curl -s "$BASE_URL/api/links/$code" | jq -r '.clicks // "link yok"')
+after=$(curl -s "$BASE_URL/api/links/$code" | jq -r '.clicks // "link yok"') || true
 grafana_hint "02 · App RED → 'p99 by route' (/{code}) · 03 · App Business → 'redirect ok/s'"
 note "restart sonrası tıklama: $after"
 note "Çözüm yönü: tıklamayı istek yolundan ÇIKAR (05: bounded kuyruk + batch) ve dayanıklı yaz (06: olay akışı)."

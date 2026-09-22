@@ -22,7 +22,7 @@ step "İsteği büyüt ve çok replika iste — kapasiteyi kasıtlı olarak aş"
 # çekirdek, ama scheduler'ın gördüğü sayı budur ve Pending kararını O verir). 10 × 900m = 9 CPU
 # rahat sığdı, PENDING=0 çıktı. Pod'u bir node'a SIĞMAYACAK kadar büyük iste: node başına
 # ayrılabilirin yarısından fazlası → 10 replikanın çoğu yer bulamaz.
-node_cpu=$(kubectl get nodes -o jsonpath='{.items[0].status.allocatable.cpu}' 2>/dev/null || echo 6)
+node_cpu=$(kubectl get nodes -o jsonpath='{.items[0].status.allocatable.cpu}' 2>/dev/null || echo 6) || true
 # node_cpu "6" gibi bir tam sayı (ya da "6000m"). Her iki biçimi de millicore'a çevir.
 case "$node_cpu" in *m) milli=${node_cpu%m} ;; *) milli=$(( node_cpu * 1000 )) ;; esac
 req=$(( milli * 60 / 100 ))                      # node'un %60'ı → iki pod aynı node'a sığmaz

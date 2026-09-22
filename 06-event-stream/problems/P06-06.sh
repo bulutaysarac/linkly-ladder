@@ -16,7 +16,7 @@ run_kill_test() {
   kubectl -n "$NS" scale "$(wl $CONSUMER)" --replicas=0 >/dev/null
   kubectl -n "$NS" rollout status "$(wl $CONSUMER)" --timeout=120s >/dev/null 2>&1 || true
   code=$(create_link "https://example.com/eo/$label")
-  b=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0')
+  b=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0') || true
   clicks "$code" "${N:-2000}" 20
   kubectl -n "$NS" scale "$(wl $CONSUMER)" --replicas=1 >/dev/null
   # İşleme sırasında öldür
@@ -30,12 +30,12 @@ run_kill_test() {
   # 0'ı sayılmıştı — tüketici hâlâ dengelenirken okuduk. Sayım DURULANA kadar bekle.
   local prev=-1 stable=0 cur
   for _ in $(seq 1 60); do
-    cur=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0')
+    cur=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0') || true
     if [[ "$cur" == "$prev" ]]; then stable=$(( stable + 1 )); else stable=0; fi
     (( stable >= 4 )) && break          # 4 ardışık ölçümde (12 sn) değişmiyorsa durulmuştur
     prev=$cur; sleep 3
   done
-  a=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0')
+  a=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0') || true
   echo $(( a - b ))
 }
 on_cleanup "kubectl -n \"$NS\" scale "$(wl $CONSUMER)" --replicas=1"

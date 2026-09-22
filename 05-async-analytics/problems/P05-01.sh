@@ -16,7 +16,7 @@ kubectl -n "$NS" rollout status "$(app_workload)" --timeout=180s >/dev/null || t
 for _ in $(seq 1 30); do serving && break; sleep 2; done
 code=$(create_link "https://example.com/atmostonce")
 step "Sayacı sıfırla ve bilinen sayıda tıklama üret"
-before=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0')
+before=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0') || true
 N=${N:-400}
 for i in $(seq 1 "$N"); do status_of "$code" >/dev/null; done
 step "Kuyruk daha boşalmadan pod'ları SERT öldür (graceful DEĞİL)"
@@ -24,18 +24,18 @@ need_confirm "pod'lar --force ile öldürülecek"
 kubectl -n "$NS" delete pod -l "$APP_SELECTOR" --force --grace-period=0 >/dev/null 2>&1 || true
 wait_ready; for _ in $(seq 1 25); do serving && break; sleep 2; done
 sleep 6
-hard=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0')
+hard=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0') || true
 lost_hard=$(( before + N - hard ))
 note "sert ölüm: $N tıklama üretildi, kaydedilen $(( hard - before )) → KAYIP $lost_hard"
 step "Karşılaştırma: aynı senaryo GRACEFUL kapanışla (drain devrede)"
 code2=$(create_link "https://example.com/graceful")
-b2=$(curl -s "$BASE_URL/api/links/$code2/stats" | jq -r '.clicks // 0')
+b2=$(curl -s "$BASE_URL/api/links/$code2/stats" | jq -r '.clicks // 0') || true
 for i in $(seq 1 "$N"); do status_of "$code2" >/dev/null; done
 kubectl -n "$NS" rollout restart "$(app_workload)" >/dev/null
 kubectl -n "$NS" rollout status "$(app_workload)" --timeout=180s >/dev/null 2>&1 || true
 for _ in $(seq 1 25); do serving && break; sleep 2; done
 sleep 8
-g=$(curl -s "$BASE_URL/api/links/$code2/stats" | jq -r '.clicks // 0')
+g=$(curl -s "$BASE_URL/api/links/$code2/stats" | jq -r '.clicks // 0') || true
 lost_soft=$(( b2 + N - g ))
 note "graceful: $N tıklama üretildi, kaydedilen $(( g - b2 )) → KAYIP $lost_soft"
 grafana_hint "07 · Analytics → 'events by result' (dropped/written) + 'k6 tıklama − DB tıklama' farkı"

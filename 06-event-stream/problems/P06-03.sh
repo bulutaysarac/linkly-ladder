@@ -19,7 +19,7 @@ measure() {
   sleep 8
   local code b t0 t1
   code=$(create_link "https://example.com/part/$reps")
-  b=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0')
+  b=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0') || true
   t0=$(date +%s)
   k6run hot-key --vus 40 --duration 30s >/dev/null 2>&1 || true
   for _ in $(seq 1 30); do
