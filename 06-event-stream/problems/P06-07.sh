@@ -13,8 +13,15 @@ kubectl -n "$NS" exec "$rp" -- sh -c "echo '$future' | rpk topic produce clicks"
 step "Ardından normal tıklamalar — eski tüketici bunları işleyebilmeli"
 N=${N:-150}
 for i in $(seq 1 "$N"); do status_of "$code" >/dev/null; done
-sleep 20
-after=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0') || true
+# SABİT UYKU YERİNE DURULMAYI BEKLE: analitik tamponlu yazıyor, 20 sn her zaman yetmez.
+# EN: the analytics path writes in batches; a fixed 20s does not always cover the final flush.
+prev=-1; stable=0; after=0
+for _ in $(seq 1 40); do
+  after=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0') || true
+  if [[ "$after" == "$prev" ]]; then stable=$(( stable + 1 )); else stable=0; fi
+  (( stable >= 5 )) && break
+  prev=$after; sleep 3
+done
 unknown=$(promq "sum(increase(consumer_records_total{namespace=\"$NS\",result=\"unknown_version\"}[10m]))")
 restarts=$(kubectl -n "$NS" get pods -l app.kubernetes.io/name=analytics -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}' 2>/dev/null) || true
 grafana_hint "08 · Stream → 'consumer records by result' (unknown_version)"
@@ -25,6 +32,17 @@ note "  tüketici bilmediği alanları yok saymalı, bilmediği SÜRÜMÜ ise g�
 note "İkinci kural: alan SİLME ve alan ANLAMI DEĞİŞTİRME geriye dönük uyumsuzdur; yeni alan eklemek uyumludur."
 note "Üçüncü kural: üreticiyi yeni sürüme geçirmeden ÖNCE tüketicileri hazırla (sıra önemlidir)."
 note "Daha güçlü çözüm: şema kayıt defteri (Schema Registry) + uyumluluk kuralları — 14'te opsiyonel."
+# BORU HATTI HİÇ AKMADIYSA HÜKÜM YOK. Hem bilinmeyen sürüm sayacı hem normal olaylar sıfırsa,
+# tüketici o pencerede HİÇBİR ŞEY işlememiştir: bu, "bilinmeyen sürüm zarar vermedi" değil
+# "deneyi koşamadık" demektir. (Ölçüldü: 0 / 150.)
+# EN: if both the unknown-version counter and the normal events are zero, the consumer processed
+# nothing at all — that is "we could not run the experiment", not "the unknown version was
+# harmless".
+if (( after - before == 0 )) && awk -v u="${unknown%%.*}" 'BEGIN{exit !(u+0==0)}'; then
+  warn "ölçüm yapılamadı: tüketici bu pencerede hiçbir kayıt işlemedi (normal olay 0/$N, bilinmeyen sürüm 0)."
+  warn "Tüketici ayakta mı ve tüketici grubu ilerliyor mu? kubectl -n $NS logs deploy/analytics --tail=50"
+  exit 2
+fi
 { awk -v u="${unknown%%.*}" 'BEGIN{exit !(u>0)}' && (( after - before > 0 )); } \
   && reproduced "bilinmeyen sürüm (${unknown%%.*} kayıt) atlandı, tüketici çökmedi ve $(( after - before ))/$N normal olay işlendi"
 not_reproduced "bilinmeyen sürüm etkisi ölçülemedi (rpk produce çalışmamış olabilir)"

@@ -17,7 +17,11 @@ run_kill_test() {
   kubectl -n "$NS" rollout status "$(wl $CONSUMER)" --timeout=120s >/dev/null 2>&1 || true
   code=$(create_link "https://example.com/eo/$label")
   b=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0') || true
-  clicks "$code" "${N:-2000}" 20
+  # BİRİKİM, ÖLDÜRME DİZİSİNDEN UZUN SÜRMELİ. 2000 kayıtla tüketici birikimi öldürmeler
+  # başlamadan bitiriyor ve iki mod da 2000 sayıyor: fark yok, çünkü ölmek için geç kalındı.
+  # EN: with 2000 records the consumer drains the backlog before the kills start, both modes
+  # count 2000 and there is no difference — because the kills arrived too late.
+  clicks "$code" "${N:-6000}" 20
   kubectl -n "$NS" scale "$(wl $CONSUMER)" --replicas=1 >/dev/null
   # İşleme sırasında öldür
   for i in 1 2; do
@@ -42,12 +46,12 @@ on_cleanup "kubectl -n \"$NS\" scale "$(wl $CONSUMER)" --replicas=1"
 step "VARSAYILAN (yaz → commit) + idempotency: tekrar teslim çift saymaya dönüşmemeli"
 need_confirm "tüketici pod'u tekrar tekrar öldürülecek"
 def=$(run_kill_test default)
-note "üretilen ${N:-2000} · sayılan $def  → fark $(( def - ${N:-2000} ))"
+note "üretilen ${N:-6000} · sayılan $def  → fark $(( def - ${N:-6000} ))"
 step "TRAP (commit → yaz): tekrar teslim yok, ama yazma başarısız olursa kayıp var"
 setenv "$(wl $CONSUMER)" TRAP_COMMIT_BEFORE_WRITE=true >/dev/null
 kubectl -n "$NS" rollout status "$(wl $CONSUMER)" --timeout=120s >/dev/null 2>&1 || true
 trap_res=$(run_kill_test trap)
-note "üretilen ${N:-2000} · sayılan $trap_res  → fark $(( trap_res - ${N:-2000} ))"
+note "üretilen ${N:-6000} · sayılan $trap_res  → fark $(( trap_res - ${N:-6000} ))"
 dup=$(promq "sum(increase(consumer_records_total{namespace=\"$NS\",result=\"duplicate\"}[15m]))")
 grafana_hint "08 · Stream → 'consumer records by result' · 07 · Analytics → tıklama farkı"
 note "duplicate sayacı: ${dup%%.*} — idempotency'nin emdiği tekrar sayısı"
@@ -67,5 +71,5 @@ note "'Tam bir kez' pazarlama terimidir; gerçekte en-az-bir-kez + idempotent ya
 #     between the modes, yet the verdict claims the commit point decides the guarantee. If you
 #     assert a difference, measure a difference — require t < d, not t <= d.
 awk -v d="$def" -v t="$trap_res" 'BEGIN{exit !(d > 0 && t < d)}' \
-  && reproduced "yaz→commit $def, commit→yaz $trap_res (üretilen ${N:-2000}) — commit noktası teslimat garantisini belirliyor"
+  && reproduced "yaz→commit $def, commit→yaz $trap_res (üretilen ${N:-6000}) — commit noktası teslimat garantisini belirliyor"
 not_reproduced "iki mod arasında fark ölçülemedi (N'i artırıp tekrar dene)"
