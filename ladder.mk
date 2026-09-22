@@ -128,6 +128,24 @@ up: push deploy wait smoke ## build → push → deploy → wait → smoke
 	@echo; echo "✔ $(NS) ayakta → $(BASE_URL)"; echo "  Grafana: $(GRAFANA_URL)/dashboards?query=Ladder  (level=$(NS))"
 
 down: ## Namespace'i sil
+	@# OPERATÖR KAYNAKLARINI ÖNCE BIRAK.
+	@# EN: CloudNativePG puts a finalizer on its Cluster/Pooler objects and its controller keeps
+	@#     reconciling them while the namespace terminates — so the namespace sits in Terminating
+	@#     for tens of minutes ("Unable to create required cluster objects") and the next level
+	@#     cannot start. Deleting them FIRST, and clearing the finalizer if the operator is gone,
+	@#     turns a 33-minute hang into seconds. A namespace delete is not atomic: it is a
+	@#     negotiation with every controller that owns something inside it.
+	@# TR: CloudNativePG Cluster/Pooler nesnelerine finalizer koyar ve controller'ı, namespace
+	@#     silinirken bile onları uzlaştırmaya devam eder — namespace onlarca dakika Terminating'te
+	@#     kalır ve bir sonraki seviye başlayamaz. Onları ÖNCE silmek (ve operatör yoksa
+	@#     finalizer'ı düşürmek) 33 dakikalık takılmayı saniyelere indiriyor.
+	@#     Namespace silme atomik bir işlem değildir: içindeki her şeyin sahibi olan her
+	@#     controller ile yapılan bir PAZARLIKTIR.
+	@-kubectl -n $(NS) delete pooler --all --wait=false >/dev/null 2>&1
+	@-kubectl -n $(NS) delete cluster.postgresql.cnpg.io --all --wait=false >/dev/null 2>&1
+	@-for r in $$(kubectl -n $(NS) get pooler,cluster.postgresql.cnpg.io -o name 2>/dev/null); do \
+	    kubectl -n $(NS) patch $$r --type=merge -p '{"metadata":{"finalizers":null}}' >/dev/null 2>&1 || true; \
+	  done
 	kubectl delete namespace $(NS) --ignore-not-found --wait=false
 
 status: ## Pod/servis durumu
