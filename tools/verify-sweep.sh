@@ -21,10 +21,36 @@ hard_timeout() {
   return "$rc"
 }
 
+# TUR, BOZUK BİR PLATFORMDA BAŞLAMAMALI.
+# EN: after ~11 hours of namespace churn the kind API server fell into a crash loop (etcd too
+#     slow → PostStartHook timeout → restart → more load). Every `make up` then failed with
+#     "failed to download openapi: TLS handshake timeout" and the sweep happily recorded level
+#     after level as broken. A run that cannot tell "the level is broken" from "the cluster is
+#     broken" produces a report nobody can act on. Wait for the platform before each level.
+# TR: ~11 saatlik namespace döngüsünden sonra kind API sunucusu crash loop'a girdi (etcd yavaş →
+#     PostStartHook zaman aşımı → yeniden başlatma → daha fazla yük). Ardından her `make up`
+#     "failed to download openapi: TLS handshake timeout" ile düştü ve tur, seviye seviye
+#     "bozuk" kaydetmeye devam etti. "Seviye bozuk" ile "küme bozuk" ayrımını yapamayan bir tur,
+#     kimsenin bir şey yapamayacağı bir rapor üretir. Her seviyeden önce platformu bekle.
+wait_platform() {
+  local budget=${PLATFORM_TIMEOUT:-900} waited=0 bad
+  while (( waited < budget )); do
+    if kubectl get --raw=/readyz >/dev/null 2>&1; then
+      bad=$(kubectl get pods -A --no-headers 2>/dev/null \
+            | awk '$4!="Running" && $4!="Completed"' | wc -l | tr -d ' ')
+      [[ "${bad:-1}" == "0" ]] && { (( waited > 0 )) && echo "  (platform ${waited} sn'de hazır oldu)"; return 0; }
+    fi
+    sleep 15; waited=$(( waited + 15 ))
+  done
+  echo "✘ PLATFORM HAZIR DEĞİL (${budget} sn) — seviye değil KÜME bozuk; tur durduruluyor"
+  return 1
+}
+
 run_level() {
   local L=$1 lvl=${1%%-*}
   "$R/platform/lib/profile.sh" "$lvl"
   cd "$R/$L" || return 1
+  wait_platform || return 1
   echo "═══ $L · make up"
   local upout; upout=$(hard_timeout "${UP_TIMEOUT:-1500}" make up 2>&1) || {
     echo "✘ $L ayağa kalkmadı"
