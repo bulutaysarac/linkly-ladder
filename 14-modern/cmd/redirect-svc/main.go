@@ -126,7 +126,7 @@ func main() {
 	}
 	l2 := cache.NewRedis[store.Link](rdb, cache.Config{
 		TTL: cfg.CacheTTL, NegativeTTL: cfg.CacheNegativeTTL, Layer: "l2",
-		NoNegative: cfg.TrapNoNegative, NoJitter: cfg.TrapNoJitter,
+		NoSingleflight: cfg.TrapNoSingleflight, NoNegative: cfg.TrapNoNegative, NoJitter: cfg.TrapNoJitter,
 	}, cache.NewMetrics(met.Registry(), "l2"), "linkly:link:")
 	// L1+L2: en sıcak anahtarlar pod belleğinde, gerisi Redis'te, geçersiz kılma pub/sub ile yayınlanıyor.
 	var cached *store.Cached

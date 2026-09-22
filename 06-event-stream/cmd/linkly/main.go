@@ -93,11 +93,12 @@ func main() {
 		log.Warn("redis'e ulaşılamadı, DB'ye düşerek devam", "err", err, "addr", cfg.RedisAddr)
 	}
 	l2 := cache.NewRedis[store.Link](rdb, cache.Config{
-		TTL:         cfg.CacheTTL,
-		NegativeTTL: cfg.CacheNegativeTTL,
-		Layer:       "l2",
-		NoNegative:  cfg.TrapNoNegative,
-		NoJitter:    cfg.TrapNoJitter,
+		TTL:            cfg.CacheTTL,
+		NegativeTTL:    cfg.CacheNegativeTTL,
+		Layer:          "l2",
+		NoSingleflight: cfg.TrapNoSingleflight,
+		NoNegative:     cfg.TrapNoNegative,
+		NoJitter:       cfg.TrapNoJitter,
 	}, cache.NewMetrics(met.Registry(), "l2"), "linkly:link:")
 	met.BindRedisStats(func() (hits, misses uint32) {
 		st := rdb.PoolStats()

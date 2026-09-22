@@ -62,7 +62,7 @@ func main() {
 	defer rdb.Close()
 	l2 := cache.NewRedis[store.Link](rdb, cache.Config{
 		TTL: cfg.CacheTTL, NegativeTTL: cfg.CacheNegativeTTL, Layer: "l2",
-		NoNegative: cfg.TrapNoNegative, NoJitter: cfg.TrapNoJitter,
+		NoSingleflight: cfg.TrapNoSingleflight, NoNegative: cfg.TrapNoNegative, NoJitter: cfg.TrapNoJitter,
 	}, cache.NewMetrics(met.Registry(), "l2"), "linkly:link:")
 	cached := store.NewCached(db, l2)
 
