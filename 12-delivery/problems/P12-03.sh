@@ -16,19 +16,28 @@ if [[ -z "$app" ]]; then
 fi
 step "Manifest'te ne yazıyor, cluster'da ne var?"
 want=$(kubectl kustomize "$(dirname "$0")/../deploy" 2>/dev/null | awk '/^kind: Rollout$/{r=1} r&&/^  replicas:/{print $2; exit}') || true
-have=$(kubectl -n "$NS" get rollout redirect -o jsonpath='{.spec.replicas}' 2>/dev/null) || true
+have=$(kubectl -n "$NS" get "$(wl redirect)" -o jsonpath='{.spec.replicas}' 2>/dev/null) || true
 note "manifest: ${want:-?} replika · cluster: ${have:-?} replika"
 step "DRIFT üret: kubectl ile elle değiştir"
-kubectl -n "$NS" scale rollout/redirect --replicas=5 >/dev/null 2>&1 || kubectl -n "$NS" patch rollout redirect --type=merge -p '{"spec":{"replicas":5}}' >/dev/null
+kubectl -n "$NS" scale "$(wl redirect)" --replicas=5 >/dev/null 2>&1 || kubectl -n "$NS" patch "$(wl redirect)" --type=merge -p '{"spec":{"replicas":5}}' >/dev/null
 sleep 5
-drifted=$(kubectl -n "$NS" get rollout redirect -o jsonpath='{.spec.replicas}' 2>/dev/null) || true
+drifted=$(kubectl -n "$NS" get "$(wl redirect)" -o jsonpath='{.spec.replicas}' 2>/dev/null) || true
 note "elle değiştirildi → cluster: ${drifted:-?} replika (manifest hâlâ ${want:-?} diyor)"
 note "Bu değişiklik: git'te YOK · gözden geçirilmedi · kim yaptı bilinmiyor · yeni bir cluster"
 note "kurduğunda KAYBOLUR. Ve en kötüsü: bir sonraki 'make up' onu sessizce geri alır."
-step "make up ile yeniden uygula — drift kaybolur"
-(cd "$(dirname "$0")/.." && make deploy >/dev/null 2>&1) || warn "make deploy çalışmadı"
+step "Manifest'i yeniden uygula — drift kaybolur"
+# DİKKAT: burada `make deploy` ÇAĞIRMIYORUZ. İlk hâl öyle yapıyordu ve 12'nin Makefile'ı kendi
+# NS'ini (lvl12) kullandığı için, bu script 13'ün `verify-prev`i içinde koştuğunda ÜÇÜNCÜ bir
+# seviyeyi kümeye kuruyordu: aynı anda iki seviye ayakta, etcd zaman aşımları, ve ölçtüğün
+# ortam artık ölçmek istediğin ortam değil.
+# Bir önceki seviyenin scripti, BULUNDUĞU namespace'ten başka bir yere dokunamaz.
+# EN: do NOT call `make deploy` here — level 12's Makefile targets its OWN namespace, so running
+# this script inside level 13's verify-prev would stand up a THIRD level in the cluster.
+# A previous level's script must never touch anything outside the namespace it runs in.
+kubectl -n "$NS" patch "$(wl redirect)" --type=merge -p "{\"spec\":{\"replicas\":${want:-3}}}" >/dev/null 2>&1 \
+  || warn "manifest replikası geri uygulanamadı"
 sleep 8
-after=$(kubectl -n "$NS" get rollout redirect -o jsonpath='{.spec.replicas}' 2>/dev/null) || true
+after=$(kubectl -n "$NS" get "$(wl redirect)" -o jsonpath='{.spec.replicas}' 2>/dev/null) || true
 note "yeniden uygulamadan sonra: ${after:-?} replika"
 grafana_hint "13 · Rollout → 'Argo CD sync durumu' (Application tanımlıysa dolar)"
 note "Bu merdivende manifest'ler git'te ve 'make up' onları uyguluyor — yani ELDE bir GitOps var."
