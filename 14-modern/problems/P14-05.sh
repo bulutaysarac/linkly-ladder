@@ -7,7 +7,6 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
 need_confirm "game day: Redis gecikmesi + DB paket kaybı + pod öldürme ÜST ÜSTE uygulanacak"
-on_cleanup "$LADDER_ROOT/platform/lib/chaos.sh delete redis-delay-200ms; $LADDER_ROOT/platform/lib/chaos.sh delete pg-loss-30"
 step "Taban: her şey sağlıklıyken"
 k6run mixed --vus 20 --duration 30s >/dev/null 2>&1 || true
 sleep 10

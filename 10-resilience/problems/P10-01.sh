@@ -6,7 +6,6 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
 on_cleanup "setenv "$(wl redirect)" TRAP_NAIVE_RETRY-"
-on_cleanup "$LADDER_ROOT/platform/lib/chaos.sh delete pg-loss-30"
 run() {
   kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=180s >/dev/null 2>&1 || true
   for _ in $(seq 1 20); do serving && break; sleep 2; done

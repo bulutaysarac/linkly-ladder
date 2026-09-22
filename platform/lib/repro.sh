@@ -248,9 +248,33 @@ need_metric() {
 # `app.kubernetes.io/name=postgres` etiketini taşımıyordu ve pg-loss/pg-delay deneylerinin
 # hepsi sessizce arızasız koştu. Ölçemediğin şeyi "yok" sanma; enjekte edemediğin arızayı da.
 chaos_cleanup() {
-  "$LADDER_ROOT/platform/lib/chaos.sh" delete "$1" >/dev/null 2>&1 || true
-  wait_pods_ready_quiet "${CHAOS_RECOVER_TIMEOUT:-300}" \
-    || warn_hard "chaos kaldırıldı ama ortam ${CHAOS_RECOVER_TIMEOUT:-300} sn'de toparlanmadı: $(not_ready_pods)"
+  local c=$1 kind name
+  "$LADDER_ROOT/platform/lib/chaos.sh" delete "$c" >/dev/null 2>&1 || true
+  # SİLMEYİ DOĞRULA. Chaos Mesh nesnelerinde finalizer vardır: `kubectl delete` dönse bile nesne
+  # ayakta kalabilir ve ARIZA UYGULANMAYA DEVAM EDER. Gerçekte oldu: P10-01'in temizliği koştu,
+  # `pg-loss-30` kümede kaldı ve ardından gelen ÜÇ script sırayla hata verdi — hiçbiri kendi
+  # ölçümüyle ilgili olmayan bir sebepten. Temizliğin başarısız olduğunu söylemeyen bir temizlik,
+  # başarısızlığı bir sonraki deneye taşır.
+  # EN: Chaos Mesh objects carry finalizers, so `kubectl delete` can return while the object — and
+  # the injected fault — survives. It happened: P10-01's cleanup ran, `pg-loss-30` stayed in the
+  # cluster and the next THREE scripts failed for a reason that had nothing to do with what they
+  # were measuring. A cleanup that cannot say it failed hands the failure to the next experiment.
+  kind=$(awk '/^kind:/{print tolower($2); exit}' "$LADDER_ROOT/platform/chaos/$c.yaml" 2>/dev/null)
+  name=$(sed -n 's/.*name: *\([a-z0-9-]*\).*/\1/p' "$LADDER_ROOT/platform/chaos/$c.yaml" 2>/dev/null | head -1)
+  if [[ -n "${kind:-}" && -n "${name:-}" ]]; then
+    local i
+    for i in $(seq 1 15); do
+      kubectl -n "$NS" get "$kind" "$name" >/dev/null 2>&1 || break
+      kubectl -n "$NS" patch "$kind" "$name" --type=merge -p '{"metadata":{"finalizers":[]}}' >/dev/null 2>&1 || true
+      kubectl -n "$NS" delete "$kind" "$name" --wait=false >/dev/null 2>&1 || true
+      sleep 2
+    done
+    kubectl -n "$NS" get "$kind" "$name" >/dev/null 2>&1 \
+      && warn_hard "ARIZA HÂLÂ KÜMEDE: $kind/$name silinemedi — sonraki scriptler bozuk ortam bulacak"
+  fi
+  # Temizlik, ölçüm bütçesini yiyemez: kısa bir toparlanma penceresi bekle, olmazsa yüksek sesle söyle.
+  wait_pods_ready_quiet "${CHAOS_RECOVER_TIMEOUT:-120}" \
+    || warn_hard "chaos kaldırıldı ama ortam ${CHAOS_RECOVER_TIMEOUT:-120} sn'de toparlanmadı: $(not_ready_pods)"
 }
 
 chaos_apply() {

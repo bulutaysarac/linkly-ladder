@@ -7,7 +7,6 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
 on_cleanup "setenv "$(wl redirect)" TRAP_NO_DEP_TIMEOUT-"
-on_cleanup "$LADDER_ROOT/platform/lib/chaos.sh delete redis-delay-3s"
 step "Redis'e 3 sn gecikme enjekte et (ölmedi, YAVAŞLADI)"
 chaos_apply redis-delay-3s
 sleep 5

@@ -6,7 +6,6 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # verdiğini gösteriyor. Aradaki fark, bir gecelik nöbetle bir kahve molası arasındaki farktır.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
-on_cleanup "$LADDER_ROOT/platform/lib/chaos.sh delete redis-delay-200ms"
 step "Önce temiz taban"
 k6run redirect --vus 20 --duration 30s >/dev/null 2>&1 || true
 sleep 10

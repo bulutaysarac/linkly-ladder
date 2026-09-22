@@ -6,7 +6,6 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # Timeout bütçesi bir zincirdir: her katman, kendisini çağıranın kalan süresinden AZ beklemeli.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
-on_cleanup "$LADDER_ROOT/platform/lib/chaos.sh delete pg-delay-2s"
 step "Bütçe zinciri"
 ht=$(kubectl -n "$NS" get "$(wl redirect)" -o jsonpath='{range .spec.template.spec.containers[0].env[?(@.name=="HANDLER_TIMEOUT")]}{.value}{end}') || true
 dt=$(kubectl -n "$NS" get "$(wl redirect)" -o jsonpath='{range .spec.template.spec.containers[0].env[?(@.name=="DEP_TIMEOUT")]}{.value}{end}') || true
