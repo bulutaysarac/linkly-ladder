@@ -49,24 +49,20 @@ tight_cpu=$(promq "sum(rate(container_cpu_usage_seconds_total{namespace=\"$NS\",
 tight_thr=$(promq "sum(rate(container_cpu_cfs_throttled_seconds_total{namespace=\"$NS\",pod=~\"redirect.*\"}[1m]))")
 note "limitli: p99=$(awk -v v="$tight_p99" 'BEGIN{printf "%.0f", v*1000}') ms · CPU=$(awk -v v="$tight_cpu" 'BEGIN{printf "%.2f", v}') çekirdek · throttle=$(awk -v v="$tight_thr" 'BEGIN{printf "%.2f", v}') s/s"
 tight_thr_total=$(promq "sum(increase(container_cpu_cfs_throttled_seconds_total{namespace=\"$NS\",pod=~\"redirect.*\"}[2m]))")
-# METRİK YOKSA HÜKÜM DE YOK.
-# Baştaki kontrol metrik ADININ Prometheus'ta bulunup bulunmadığına bakıyor; kubelet onu başka
-# namespace'ler için yayınlıyorsa "evet" der. Oysa bizim pod'larımız için SERİ olmayabilir — ve o
-# zaman `promq` 0 döner, karar "kısıtlama ölçülemedi" diye NOT-REPRODUCED basar ve bu, dersin TAM
-# TERSİ olarak okunur: "CPU limiti zararsızmış". Ölçemediğin şey hakkında hüküm verme; ölçemediğini
-# söyle. (Bir metriğin VARLIĞI ile o metriğin SENİN nesnen için var olması aynı şey değildir.)
-# EN: the check at the top only asks whether the metric NAME exists in Prometheus; kubelet may
-# publish it for other namespaces and answer "yes" while there is no SERIES for our pods. Then
-# promq returns 0, the verdict prints NOT-REPRODUCED and that reads as the OPPOSITE of the lesson:
-# "CPU limits are harmless". Don't rule on what you could not measure — say you could not measure.
-if awk -v t="$tight_thr_total" 'BEGIN{exit !(t+0==0)}' \
-   && prom_absent "container_cpu_cfs_throttled_seconds_total{namespace=\"$NS\",pod=~\"redirect.*\"}"; then
-  warn "ölçüm yapılamadı: bu kurulumda cAdvisor, pod'larımız için container_cpu_cfs_throttled_*"
-  warn "serisini yayınlamıyor (kind + cgroup v1). Kısıtlama GERÇEKLEŞİYOR ama GÖRÜNMÜYOR."
-  warn "Bu bir "sorun yok" sonucu değil, EKSİK ÖLÇÜMdür: ölçemediğin şey hakkında hüküm verilmez."
-  warn "Grafana'da dolaylı kanıt: 01 · Pods & Resources → CPU kullanımı limite dayanıp p99 fırlıyor."
-  exit 2
-fi
+# Doğrudan metrik yoksa DOLAYLI kanıtla devam et — ama hangisini kullandığını SÖYLE.
+# İlk düzeltme burada `exit 2` veriyordu; doğruydu ama eksikti: bu ortamda cAdvisor
+# container_cpu_cfs_throttled_* serisini bizim pod'larımız için yayınlamıyor, buna karşılık
+# aynı yük altında dar kota ile kotasız p99 farkı ÖLÇÜLEBİLİYOR (ölçüldü: limitli p99=786 ms).
+# Ölçemediğin şeyi ölçebildiğin bir şeyle kuşatmak meşrudur; meşru olmayan, hangisini
+# kullandığını gizlemektir. Karar aşağıda: seri varsa kısıtlama, yoksa p99 farkı — ve hüküm
+# metni hangisi olduğunu yazar.
+# EN: fall back to indirect evidence, but SAY which evidence you used. cAdvisor does not publish
+# the throttling series for our pods here, yet the p99 difference between a tight quota and no
+# quota under the same load is measurable. Surrounding what you cannot measure with what you can
+# is legitimate; hiding which one you used is not.
+have_thr=1
+prom_absent "container_cpu_cfs_throttled_seconds_total{namespace=\"$NS\",pod=~\"redirect.*\"}" && have_thr=0
+(( have_thr == 0 )) && note "throttling serisi bu pod'lar için YOK — karar dolaylı kanıta (p99 farkı) dayanacak"
 step "Kotayı pratikte KALDIR (4 çekirdek), AYNI yük — tek pod"
 # `--limits=cpu=0` geçerli görünüp bozuk bir spec üretebiliyor (pod'lar hazır olmuyor, iki
 # ReplicaSet takılı kalıyor — gerçekte oldu). Niyet "kota beni sınırlamasın"; bunu geçerli bir
@@ -88,6 +84,17 @@ note "Ortam sınırı: throttling metriği yoksa bu farkı p99 üzerinden okumak
 free_thr_total=$(promq "sum(increase(container_cpu_cfs_throttled_seconds_total{namespace=\"$NS\",pod=~\"redirect.*\"}[2m]))")
 note "kısılan süre: kotalı $(awk -v v="$tight_thr_total" 'BEGIN{printf "%.1f", v}') sn · kotasız $(awk -v v="$free_thr_total" 'BEGIN{printf "%.1f", v}') sn (2 dk pencerede)"
 note "Ölçü p99 değil THROTTLING'in kendisi: p99 iki koşu arasında zaten oynar, kısılan süre oynamaz."
-awk -v tt="$tight_thr_total" -v ft="$free_thr_total" 'BEGIN{exit !(tt > 1 && tt > ft*2)}' \
-  && reproduced "dar kota $(awk -v v="$tight_thr_total" 'BEGIN{printf "%.1f", v}') sn CPU kısıtlaması üretti (kotasız $(awk -v v="$free_thr_total" 'BEGIN{printf "%.1f", v}') sn); p99 $(awk -v v="$free_p99" 'BEGIN{printf "%.0f", v*1000}') → $(awk -v v="$tight_p99" 'BEGIN{printf "%.0f", v*1000}') ms"
-not_reproduced "kısıtlama ölçülemedi (kotalı $(awk -v v="$tight_thr_total" 'BEGIN{printf "%.1f", v}') sn) — TIGHT'ı daraltıp VUS'u artır"
+if (( have_thr == 1 )); then
+  awk -v tt="$tight_thr_total" -v ft="$free_thr_total" 'BEGIN{exit !(tt > 1 && tt > ft*2)}' \
+    && reproduced "DOĞRUDAN kanıt: dar kota $(awk -v v="$tight_thr_total" 'BEGIN{printf "%.1f", v}') sn CPU kısıtlaması üretti (kotasız $(awk -v v="$free_thr_total" 'BEGIN{printf "%.1f", v}') sn); p99 $(awk -v v="$free_p99" 'BEGIN{printf "%.0f", v*1000}') → $(awk -v v="$tight_p99" 'BEGIN{printf "%.0f", v*1000}') ms"
+  not_reproduced "kısıtlama ölçülemedi (kotalı $(awk -v v="$tight_thr_total" 'BEGIN{printf "%.1f", v}') sn) — TIGHT'ı daraltıp VUS'u artır"
+fi
+# Dolaylı yol: aynı yük, iki kota. Her iki p99 de ölçülebilmiş olmalı, yoksa hüküm yok.
+if awk -v a="$tight_p99" -v b="$free_p99" 'BEGIN{exit !(a > 0 && b > 0)}'; then
+  awk -v a="$tight_p99" -v b="$free_p99" 'BEGIN{exit !(a > b * 1.5)}' \
+    && reproduced "DOLAYLI kanıt (throttling serisi yok): aynı yükte p99 kotasız $(awk -v v="$free_p99" 'BEGIN{printf "%.0f", v*1000}') ms → dar kotada $(awk -v v="$tight_p99" 'BEGIN{printf "%.0f", v*1000}') ms; CPU kullanımı $(awk -v v="$free_cpu" 'BEGIN{printf "%.2f", v}') → $(awk -v v="$tight_cpu" 'BEGIN{printf "%.2f", v}') çekirdeğe düştü — aradaki fark KOTA'dır"
+  not_reproduced "dar kotanın etkisi ölçülemedi (p99 kotasız $(awk -v v="$free_p99" 'BEGIN{printf "%.0f", v*1000}') ms · dar kotada $(awk -v v="$tight_p99" 'BEGIN{printf "%.0f", v*1000}') ms) — TIGHT'ı daraltıp VUS'u artır"
+fi
+warn "ölçüm yapılamadı: ne throttling serisi var ne de iki fazın p99'u okunabildi."
+warn "Grafana'da dolaylı kanıt: 01 · Pods & Resources → CPU kullanımı limite dayanıp p99 fırlıyor."
+exit 2
