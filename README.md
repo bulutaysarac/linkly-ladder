@@ -154,6 +154,12 @@ listeye bak.
 | Arızayı **kaldırmak**, etkisinin geçmesi demek değil | Chaos nesnesi silindi, CNPG replikayı yeniden başlatıyordu; bedelini bir sonraki script ödedi. Bekleyecek yer, bozan scriptin kendisi |
 | **ATLANDI** ile **HATA** aynı kovaya girmemeli | Ölçemediğini fark edip 2 ile çıkan script dürüst davranıyor; ikisini karıştıran rapor, ölçüm disiplinini cezalandırır |
 | `grep -c` sıfırda **"0" basar ve 1 ile çıkar** | Alışkanlıkla eklenen `\|\| echo 0` de çalışıp değişkeni `0\\n0` yapıyor; sonraki `(( ))` sözdizimi hatası veriyor ve bekleme döngüsü asla sağlanmayacak bir koşulu bekliyordu |
+| **Bulamamak hata değildir** | `grep` eşleşme bulamazsa 1 döner; `pipefail` + atama + `set -e` scripti hüküm basmadan öldürür. Yalnızca bulunacak bir şey yokken, yani genelde SAĞLIKLI yolda ısırır: P00-01 seviye 01'de, P02-05 indeks yerindeyken, P13-04 sır bulunamayınca — iyi haber scripti öldürüyordu |
+| `${var:-varsayılan}` içindeki **kesme işareti** tırnak açar | bash, varsayılan kelimede tırnakları çift tırnak içinde bile işler; "Endpoint'e" kapanış `}`ını yuttu ve script `bad substitution` ile öldü — yalnızca değişken boşken, yani varsayılanın var olma sebebi olan yolda |
+| Ölçü, **desteklediği iddiaya** göre daraltılmalı | P01-03 "uygulama yedekliliği" iddiasını toplam 5xx ile ölçüyordu; `drain` node'daki TEK Postgres'i de tahliye edince 5xx geliyordu ve script zaten çözülmüş bir seviyede REPRODUCED dedi |
+| Pod'un **"Running" olması**, servisin cevap vermesi değildir | Prometheus WAL oynatırken OOM olup döngüye girdi; pod Running görünürken her sorgu 503 döndü ve tur, ardında ölçüm olmayan hükümler üretti |
+| Limiti **kararlı duruma göre değil, kurtarmaya göre** seç | 1536Mi kararlı hâlde yetiyordu; 73 segmentlik WAL oynatmada yetmedi ve Prometheus sonsuz OOM döngüsüne girdi. Kurtarma yolu, en çok ihtiyaç duyulan yoldur |
+| **Agrege bir APIService'i endpoint'siz bırakma** | KEDA park edilince `external.metrics.k8s.io` endpoint'siz kaldı, API keşfi bozuldu ve namespace denetleyicisi HİÇBİR namespace'i silemedi: `make down` 0 dönerken dört namespace saatlerce Terminating'de kaldı → CPU → etcd → apiserver crash loop → Prometheus OOM. Park edilen tek bileşen, küme çapında kesinti |
 | **Her zaman boş** bir panel, olmayan panelden kötüdür | Kyverno metrikleri hiç kazınmıyordu: "ihlal yok" gibi okunuyordu, "veri yok" değil |
 
 ## Sayılarla
