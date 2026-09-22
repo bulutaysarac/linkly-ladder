@@ -57,7 +57,7 @@ grafana_hint "01 · Pods & Resources → 'CPU kullanımı' · 02 · App RED → 
 note "ÖLÇÜM DERSİ: istek başına regexp.MustCompile birkaç MİKROSANİYEDİR. 600 rps'te bu, saniyede"
 note "birkaç milisaniyelik CPU demek — konteyner CPU metriğinin gürültüsünün ALTINDA. Yani bu"
 note "scriptin ilk hâli 'istek başına CPU arttı mı?' diye sorup çoğu koşuda HAYIR cevabı alıyordu"
-note "ve NOT-REPRODUCED diyordu. Oysa sorunun kendisi tam olarak buydu: metrik bunu göremez."
+note "ve "sorun yok" diyordu. Oysa sorunun kendisi tam olarak buydu: metrik bunu göremez."
 note "Bir tezi, tezin YANLIŞ olduğu durumda geçecek bir ölçüyle sınayamazsın."
 note "Go'da profil bedava: net/http/pprof (bu seviyede iç portta açık), sonra"
 note "  kubectl -n $NS port-forward $(wl redirect) 8080:8080"

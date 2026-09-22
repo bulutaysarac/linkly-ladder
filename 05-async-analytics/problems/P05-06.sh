@@ -32,7 +32,7 @@ st301=$(status_of "$code2"); cc2=$(header_of "$code2" Cache-Control)
 if [[ "$st301" != 301 ]]; then
   warn "ölçüm yapılamadı: TRAP_REDIRECT_301 açıldı ama yönlendirme hâlâ $st301 —"
   warn "yeni pod trafiğe girmemiş ya da bayrak kodda okunmuyor olabilir (lint kuralı 9)."
-  warn "Bu bir NOT-REPRODUCED değil, EKSİK ÖLÇÜMdür: tuzak devreye girmeden hüküm verilmez."
+  warn "Bu bir "sorun yok" sonucu değil, EKSİK ÖLÇÜMdür: tuzak devreye girmeden hüküm verilmez."
   exit 2
 fi
 note "301 modunda: durum=$st301 · Cache-Control='${cc2:-<yok>}'"

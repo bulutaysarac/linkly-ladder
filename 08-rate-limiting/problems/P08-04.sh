@@ -87,7 +87,7 @@ note "kötü yapar: hata ayıklanması zor, çünkü tekrar üretmek için ZAMAN
 if awk -v d="${slide_deny%%.*}" -v e="${fixed_deny%%.*}" 'BEGIN{exit !(d+0==0 || e+0==0)}'; then
   warn "ölçüm yapılamadı: yük limite dayanmadı (reddedilen: kayan=${slide_deny%%.*} sabit=${fixed_deny%%.*})."
   warn "Pencere sınırındaki taşma ancak yük sınırın ÜSTÜNDEYKEN görünür: PEAK=800 CONFIRM=1 make repro P=P08-04"
-  warn "Bu bir NOT-REPRODUCED değil, EKSİK ÖLÇÜMdür."
+  warn "Bu bir "sorun yok" sonucu değil, EKSİK ÖLÇÜMdür."
   exit 2
 fi
 awk -v f="$fixed" -v s="$slide" -v l="$LIM" 'BEGIN{exit !(f > s && f > l)}' \

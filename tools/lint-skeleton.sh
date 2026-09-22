@@ -222,5 +222,21 @@ for f in "$D"/problems/P*.sh; do
   done < <(grep -nE '^[a-z_]+=\$\(.*\| *grep' "$f" | grep -vE '\|\| *true|\|\| *echo|grep -c' || true)
 done
 
+# 16. HÜKÜM SÖZCÜĞÜNÜ AÇIKLAMA METNİNDE KULLANMA.
+# EN: the sweep decides a script's result by grepping its OUTPUT for REPRODUCED / NOT-REPRODUCED.
+#     A `warn` line that says "this is not a NOT-REPRODUCED, it is a missing measurement" contains
+#     the token, so the sweep reads the explanation as the verdict — the script exited 2 (SKIPPED)
+#     and was recorded as NOT-REPRODUCED. Explaining a word is not the same as saying it.
+# TR: tur, bir scriptin sonucunu ÇIKTISINDA REPRODUCED / NOT-REPRODUCED arayarak belirler.
+#     "Bu bir NOT-REPRODUCED değil, eksik ölçümdür" diyen bir `warn` satırı token'ı içerdiği için
+#     tur AÇIKLAMAYI hüküm sanar: script 2 ile çıkıp ATLANDI olması gerekirken NOT-REPRODUCED
+#     kaydedilir. Bir sözcüğü açıklamak, onu söylemekle aynı şey değildir.
+for f in "$D"/problems/P*.sh; do
+  [[ -e "$f" ]] || continue
+  if grep -qE '^[[:space:]]*(warn|note)[[:space:]]+".*(NOT-)?REPRODUCED' "$f"; then
+    err "$(basename "$f"): warn/note metni içinde REPRODUCED geçiyor — tur bunu hüküm sanar"
+  fi
+done
+
 [[ $fail == 0 ]] && echo "  ✔ $name iskelet OK"
 exit $fail

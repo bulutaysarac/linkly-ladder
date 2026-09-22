@@ -63,7 +63,7 @@ if awk -v t="$tight_thr_total" 'BEGIN{exit !(t+0==0)}' \
    && prom_absent "container_cpu_cfs_throttled_seconds_total{namespace=\"$NS\",pod=~\"redirect.*\"}"; then
   warn "ölçüm yapılamadı: bu kurulumda cAdvisor, pod'larımız için container_cpu_cfs_throttled_*"
   warn "serisini yayınlamıyor (kind + cgroup v1). Kısıtlama GERÇEKLEŞİYOR ama GÖRÜNMÜYOR."
-  warn "Bu bir NOT-REPRODUCED değil, EKSİK ÖLÇÜMdür: ölçemediğin şey hakkında hüküm verilmez."
+  warn "Bu bir "sorun yok" sonucu değil, EKSİK ÖLÇÜMdür: ölçemediğin şey hakkında hüküm verilmez."
   warn "Grafana'da dolaylı kanıt: 01 · Pods & Resources → CPU kullanımı limite dayanıp p99 fırlıyor."
   exit 2
 fi

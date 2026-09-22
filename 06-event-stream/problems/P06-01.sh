@@ -86,7 +86,7 @@ note "Dağıtık sistemlerde 'tam bir kez teslimat' yoktur; olan şey en-az-bir-
 if awk -v o="${ok%%.*}" 'BEGIN{exit !(o+0==0)}'; then
   warn "ölçüm yapılamadı: tüketici ${WIN}s'lik pencerede TEK KAYIT işlemedi (sayılan=$counted)."
   warn "Broker gecikmesi tüketiciyi yavaşlatmak yerine DURDURMUŞ olabilir; platform/chaos/redpanda-delay.yaml"
-  warn "içindeki latency'yi düşür ve tekrar dene. Bu bir NOT-REPRODUCED değil, EKSİK ÖLÇÜMdür."
+  warn "içindeki latency'yi düşür ve tekrar dene. Bu bir "sorun yok" sonucu değil, EKSİK ÖLÇÜMdür."
   exit 2
 fi
 awk -v d="${dup%%.*}" 'BEGIN{exit !(d>0)}' \
