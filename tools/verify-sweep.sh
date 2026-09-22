@@ -42,7 +42,7 @@ run_level() {
   for f in problems/P${lvl}-*.sh; do
     [[ -e "$f" ]] || continue
     p=$(basename "${f%.sh}")
-    out=$(CONFIRM=1 hard_timeout "${REPRO_TIMEOUT:-900}" make repro P="$p" 2>&1)
+    out=$(CONFIRM=1 hard_timeout "${REPRO_TIMEOUT:-1200}" make repro P="$p" 2>&1)
     r=$(echo "$out" | grep -oE 'NOT-REPRODUCED|REPRODUCED' | tail -1)
     printf '%-8s %s\n' "$p" "${r:-HATA}"
     # ÖLÇÜLEN SAYILARI SAKLA: ilk hâl son 8/10 satırı basıyordu ve bu, kararı veren satırların

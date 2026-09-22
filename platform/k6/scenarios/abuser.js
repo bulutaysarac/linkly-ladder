@@ -4,7 +4,7 @@ import { Trend } from 'k6/metrics';
 const normalLatency = new Trend('normal_client_latency', true);
 export const options = {
   scenarios: {
-    abuser: { executor: 'constant-vus', vus: parseInt(__ENV.ABUSER_VUS || '50', 10), duration: __ENV.DURATION || '60s', exec: 'abuser' },
+    abuser: { executor: 'constant-vus', vus: parseInt(__ENV.VUS || __ENV.ABUSER_VUS || '50', 10), duration: __ENV.DURATION || '60s', exec: 'abuser' },
     normal: { executor: 'constant-arrival-rate', rate: 20, timeUnit: '1s', duration: __ENV.DURATION || '60s', preAllocatedVUs: 10, exec: 'normal' },
   },
 };
