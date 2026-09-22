@@ -53,6 +53,22 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 6. Ölçemediğin bir sınırı, **sınırın kendisini** ölçerek göster (`redis-benchmark` ile tavan gibi).
 7. Deneyi **ölçeğe uydur**: ya veriyi büyüt ya sınırı küçült — ve neyi değiştirdiğini yaz.
 8. Metrik adının var olduğunu **varsayma**: yoksa `promq` sessizce `0` döner ve script "sorun yok" der.
+9. **Tuzağın koda bağlı olduğunu doğrula.** Config'de tanımlı ama hiçbir yerde okunmayan bir
+   `TRAP_*`, deneyi bir tiyatroya çevirir: bayrak açılır, sistem değişmez, script yine karar
+   basar. `tools/lint-skeleton.sh` bunu artık yakalıyor — ama önce sen yakala.
+10. **Düşemeyen bir deney, deney değildir.** Kararı yazdıktan sonra şu soruyu sor: *iddiam yanlış
+   olsaydı bu ölçü ne gösterirdi?* Cevap "aynı şeyi" ise ölçüyü değiştir. (P08-04 tuzağı hiç
+   açmıyordu; P11-08 "metriklerde görünmez" tezini metrik farkıyla sınıyordu.)
+11. **Cevabı kendi yapılandırmanla sabitlenmiş soruyu sorma.** Seviye `hot_standby_feedback=on`
+   diyorsa "çakışma oldu mu?" sorusunun cevabı zaten hayırdır; pazarlığın **ödenen** tarafını ölç
+   (P09-04).
+12. **Yavaşlatacağın süreci doğru seç.** Bir yarışın penceresi onu besleyen işlemin süresidir;
+   yanlış işlemi geciktirmek kusursuz koşan ama etkiyi gösteremeyen bir deney üretir (P06-01:
+   pencere offset commit'inde, veritabanı yazmasında değil).
+13. **Aracın kendi hatasını sustumadan bas.** `curl -f` gövdeyi atar ve geriye "curl 22" kalır;
+   Prometheus'un "parse error at char 61" mesajı kaybolur. Ölçüm aracının arızası da bir ölçümdür.
+14. **Yük üretecinin gerçekten koştuğunu doğrula.** `k6run ... || true` başarısız bir koşuyu yutar;
+   özet dosyası yoksa sayılar 0'dır ve "fark yok" diye okunur (`_k6q` bunu stderr'e yazar — oku).
 
 ### `SOLVES` kuralı: TRAP tabanlı sorunlar buraya YAZILMAZ
 
