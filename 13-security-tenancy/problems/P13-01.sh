@@ -12,8 +12,10 @@ on_cleanup "setenv "$(wl api)" TRAP_HEADER_TENANT-"
 AKEY=${AKEY:-$(ladder_api_key)}
 BKEY=${BKEY:-globex-key-3a71}
 step "acme kiracısı bir link oluşturuyor (kendi anahtarıyla)"
+# `|| true`: pipefail altında geçici bir curl hatası ATAMAYI sıfırdan farklı yapar ve set -e
+# scripti ölçüm yapmadan öldürür. Boşluk kontrolü bir satır aşağıda zaten var.
 code=$(curl -s -XPOST "$API_BASE/api/links" -H 'Content-Type: application/json' \
-        -H "Authorization: Bearer $AKEY" -d '{"url":"https://example.com/acme-gizli"}' | jq -r '.code // empty')
+        -H "Authorization: Bearer $AKEY" -d '{"url":"https://example.com/acme-gizli"}' | jq -r '.code // empty') || true
 note "kod: ${code:-<oluşturulamadı>}"
 [[ -z "$code" ]] && { warn "link oluşturulamadı — API_KEYS tanımlı mı?"; exit 2; }
 step "globex, HEADER ile acme gibi davranmayı deniyor"

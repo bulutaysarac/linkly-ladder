@@ -26,12 +26,19 @@ AKEY=${AKEY:-$(ladder_api_key)}
 stale_after_delete() {
   waitrollout; for _ in $(seq 1 25); do serving && break; sleep 2; done
   local code alive=0
+  # `|| true` ŞART: `set -o pipefail` altında, tuzağı açtıktan sonra rollout yeniden başlarken
+  # curl sonlanan bir pod'a denk gelip 52/56 ile düşebiliyor. O zaman ATAMANIN kendisi sıfırdan
+  # farklı döner ve `set -e` scripti ÖLÇÜM YAPMADAN öldürür — P14-02 tam olarak burada,
+  # 2. fazın ilk satırında öldü. Bir deneyin ortasında geçici bir ağ hatası, deneyin SONUCU
+  # değildir; onu yut ve boş kod kontrolüne bırak.
+  # EN: mandatory `|| true`: under pipefail a curl that hits a terminating pod during the rollout
+  # makes the ASSIGNMENT non-zero and `set -e` kills the script before it measures anything.
   code=$(curl -s -XPOST "$BASE_URL/api/links" -H 'Content-Type: application/json' \
-          -H "Authorization: Bearer $AKEY" -d '{"url":"https://example.com/inval"}' | jq -r '.code // empty')
+          -H "Authorization: Bearer $AKEY" -d '{"url":"https://example.com/inval"}' | jq -r '.code // empty') || true
   [[ -z "$code" ]] && { echo "-1"; return; }
   # Tüm pod'ların L1'ine girsin
   for i in $(seq 1 40); do status_of "$code" >/dev/null; done
-  curl -s -o /dev/null -XDELETE "$BASE_URL/api/links/$code" -H "Authorization: Bearer $AKEY"
+  curl -s -o /dev/null -XDELETE "$BASE_URL/api/links/$code" -H "Authorization: Bearer $AKEY" || true
   sleep 1
   for i in $(seq 1 40); do [[ "$(status_of "$code")" == 30* ]] && alive=$((alive+1)) || true; done
   echo "$alive"
