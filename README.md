@@ -143,6 +143,17 @@ listeye bak.
 | Aracın **kendi hatasını susturma** | `curl -f` gövdeyi atıyor, geriye "curl 22" kalıyor ve Prometheus'un gerçek mesajı kayboluyor |
 | Yük üretecinin **gerçekten koştuğunu** doğrula | `--duration`, senaryo tanımlı k6 dosyalarında koşuyu hiç başlatmıyor; `\|\| true` bunu yutuyor ve 0 istek "fark yok" diye okunuyordu |
 | **Belgelediğin aracı bağla** | README pprof komutu öneriyordu, `net/http/pprof` hiç kaydedilmemişti; okuyucu tekniğin çalışmadığı sonucuna varır |
+| Hata mesajı **neyin** başarısız olduğunu göstermeli | `promq` başarısız sorguyu `%.70s` ile kırpıyordu; iki farklı bozuk sorgu ekranda aynı görünüyor ve Prometheus'un verdiği sütun numarası işe yaramıyordu. Kırpmayı kaldırınca 26 dosyadaki hata bir bakışta çözüldü |
+| İç içe tırnaklı **komut ikamesi** argümanı bozar | `num "$(promq "…{a=\\"x\\",b=\\"y\\"}…")"` içinde iç tırnaklama erken biter, `{a,b}` bash'in süslü parantez genişletmesine girer ve **parantezler kaybolur**. 45 sorgu sessizce `parse error` alıp 0 döndü; deneyler sıfırları karşılaştırdı |
+| **Nil bir bağımlılığın** arkasındaki bayrak kapalı değil, görünmezdir | 07-14'te `api.SetRedis` hiç çağrılmıyordu; `TRAP_READY_CHECKS_REDIS` bayrağını okuyup nil görüyor ve hiçbir şey yapmıyordu. Hiçbir şey patlamaz, hiçbir şey loglanmaz — yalnızca deney anlamsızlaşır |
+| **Bayat** bir çıktı dosyası, bu koşunun çıktısı sanılır | `$K6_SUMMARY` koşular arasında diskte kalıyordu; k6 hiç başlamayınca önceki turun sayıları okundu ve 897 istekte 73710 adet 5xx raporlandı |
+| Sayaç deltası **kazıma aralığından hızlı** okunamaz | Tek bir list isteği "≈61 sorgu" çıktı (ölçülen, ondan önceki trafiğin artığıydı); araya rollout girince fark negatife inip 0'a kırpıldı → `settle_scrape` |
+| **Tabansız** bir tepe, tepe değildir | P04-07 "KEYS * gecikmeyi fırlattı" diyordu ama KEYS olmadan gecikmenin ne olduğunu hiç ölçmemişti |
+| **Reddedilen** çağrı, bağımlılığa giden çağrı değildir | Devre kesici açıkken 1663 "bağımlılık çağrısı"nın 1498'i hiç gitmemişti; üstelik iki fazın istek sayısı çok farklı olduğu için mutlak sayı değil **oran** karşılaştırılmalı (P10-04) |
+| Bekleme bütçesi, beklediğin şeyin **toparlanma süresinden** kısa olmamalı | CNPG replikası 2 dakikada dönmeyince sonraki script "ortam bozuk" dedi — ortamı değil önceki deneyi tarif eden bir hata |
+| Arızayı **kaldırmak**, etkisinin geçmesi demek değil | Chaos nesnesi silindi, CNPG replikayı yeniden başlatıyordu; bedelini bir sonraki script ödedi. Bekleyecek yer, bozan scriptin kendisi |
+| **ATLANDI** ile **HATA** aynı kovaya girmemeli | Ölçemediğini fark edip 2 ile çıkan script dürüst davranıyor; ikisini karıştıran rapor, ölçüm disiplinini cezalandırır |
+| `grep -c` sıfırda **"0" basar ve 1 ile çıkar** | Alışkanlıkla eklenen `\|\| echo 0` de çalışıp değişkeni `0\\n0` yapıyor; sonraki `(( ))` sözdizimi hatası veriyor ve bekleme döngüsü asla sağlanmayacak bir koşulu bekliyordu |
 | **Her zaman boş** bir panel, olmayan panelden kötüdür | Kyverno metrikleri hiç kazınmıyordu: "ihlal yok" gibi okunuyordu, "veri yok" değil |
 
 ## Sayılarla
