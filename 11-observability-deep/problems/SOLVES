@@ -1,1 +1,14 @@
-P10-03
+# 11, 10'un sorunlarından hiçbirini ÇÖZMÜYOR.
+# P10-03 (timeout hizasızlığı) bir zamanlar buradaydı ve yanlıştı: 11'in 10'a göre tek farkı
+# `internal/tracing` paketidir — timeout bütçesine, context iptaline ya da bulkhead'e dokunmaz.
+# Doğrulama turu bunu birebir gösterdi: P10-03, 11'de de REPRODUCED çıkıyor ve kontrat ✘ veriyor.
+# Bir seviyenin "çözdüm" dediği şey, kodunda o değişikliğin BULUNMASI demektir; niyet değil.
+#
+# EN: level 11 solves none of level 10's problems. P10-03 (timeout misalignment) used to be listed
+# here and it was wrong: the only difference between 10 and 11 is the `internal/tracing` package,
+# which does not touch timeout budgets, context cancellation or bulkheads. The verification round
+# showed it directly — P10-03 still reproduces at 11. What a level claims to solve must be present
+# in its code, not in its intent.
+#
+# 11'in getirdiği şey GÖRÜNÜRLÜKtür: exemplar → trace, Loki, burn-rate alarmı, pprof. Bunlar
+# P11 serisinin kendi sorunlarını açar ve kapatır.
