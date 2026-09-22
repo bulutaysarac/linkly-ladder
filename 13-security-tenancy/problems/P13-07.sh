@@ -7,20 +7,27 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 ensure_healthy
 step "Tanımlı politikalar"
 kubectl get clusterpolicy --no-headers 2>/dev/null | awk '{print "    " $1 " → " $2}' || note "    (Kyverno kurulu değil)"
+# REDDEDİLMEK BEKLENEN SONUÇTUR — ama kubectl bunu sıfırdan farklı bir çıkış koduyla söyler.
+# EN: `|| true` is not sloppiness here: a denied admission is exactly what this experiment wants
+#     to observe, and `set -e` was killing the script at the first success. An experiment must not
+#     treat its own expected outcome as a fatal error.
+# TR: buradaki `|| true` özensizlik değil: reddedilme, bu deneyin GÖRMEK İSTEDİĞİ şeydir ve
+#     `set -e` scripti ilk başarıda öldürüyordu. Bir deney, beklediği sonucu ölümcül hata
+#     olarak görmemeli.
 step "(1) :latest etiketli bir pod dağıtmayı dene"
 out1=$(kubectl -n "$NS" run policy-test-latest --image=busybox:latest --restart=Never \
         --overrides='{"spec":{"containers":[{"name":"c","image":"busybox:latest","command":["sleep","30"],"resources":{"limits":{"memory":"64Mi"}},"readinessProbe":{"exec":{"command":["true"]}}}]}}' \
-        --dry-run=server 2>&1 | tail -2)
+        --dry-run=server 2>&1 | tail -2) || true
 note "sonuç: $(echo "$out1" | head -c 220)"
 step "(2) Bellek limiti OLMAYAN bir pod dağıtmayı dene"
 out2=$(kubectl -n "$NS" run policy-test-nolimit --image=busybox:1.36 --restart=Never \
         --overrides='{"spec":{"containers":[{"name":"c","image":"busybox:1.36","command":["sleep","30"],"readinessProbe":{"exec":{"command":["true"]}}}]}}' \
-        --dry-run=server 2>&1 | tail -2)
+        --dry-run=server 2>&1 | tail -2) || true
 note "sonuç: $(echo "$out2" | head -c 220)"
 step "(3) readinessProbe OLMAYAN bir pod dağıtmayı dene"
 out3=$(kubectl -n "$NS" run policy-test-noprobe --image=busybox:1.36 --restart=Never \
         --overrides='{"spec":{"containers":[{"name":"c","image":"busybox:1.36","command":["sleep","30"],"resources":{"limits":{"memory":"64Mi"}}}]}}' \
-        --dry-run=server 2>&1 | tail -2)
+        --dry-run=server 2>&1 | tail -2) || true
 note "sonuç: $(echo "$out3" | head -c 220)"
 blocked=0
 for o in "$out1" "$out2" "$out3"; do echo "$o" | grep -qiE 'denied|blocked|violation|not allowed' && blocked=$((blocked+1)); done
