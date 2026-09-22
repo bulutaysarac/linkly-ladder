@@ -44,14 +44,25 @@ run_level() {
   for f in problems/P${lvl}-*.sh; do
     [[ -e "$f" ]] || continue
     p=$(basename "${f%.sh}")
-    out=$(CONFIRM=1 hard_timeout "${REPRO_TIMEOUT:-1200}" make repro P="$p" 2>&1)
+    rc=0
+    out=$(CONFIRM=1 hard_timeout "${REPRO_TIMEOUT:-1200}" make repro P="$p" 2>&1) || rc=$?
     r=$(echo "$out" | grep -oE 'NOT-REPRODUCED|REPRODUCED' | tail -1)
+    # ATLANDI ile HATA AYNI ŞEY DEĞİLDİR. Bir script, ölçmesi gereken şeyi ölçemediğini anlayıp
+    # (metrik yok, yük sınıra dayanmadı, deney elle koşulmalı) bilerek 2 ile çıkabilir; bu bir
+    # ÇÖKME değil, DÜRÜSTLÜKtür. İkisini tek kovaya atarsan rapor "8 script patladı" der ve
+    # gerçekte doğru davranan scriptler hata gibi görünür — yani ölçüm disiplinini cezalandırmış
+    # olursun. verify-prev tarafı bu ayrımı zaten yapıyordu; kendi sorunları tarafı yapmıyordu.
+    # EN: SKIPPED and ERROR are not the same. A script may deliberately exit 2 after discovering
+    # it cannot measure what it must (metric missing, load never reached the limit, experiment
+    # needs a human) — that is honesty, not a crash. Bucketing both makes the report say "8
+    # scripts blew up" and punishes exactly the scripts that behaved correctly.
+    if [[ -z "$r" && "$rc" == "2" ]]; then r=SKIPPED; fi
     printf '%-8s %s\n' "$p" "${r:-HATA}"
     # ÖLÇÜLEN SAYILARI SAKLA: ilk hâl son 8/10 satırı basıyordu ve bu, kararı veren satırların
     # (ölçülen değerler) tam olarak kesildiği yerdi — sonuçta "NOT-REPRODUCED" görünüyor ama
     # NEYİN ölçüldüğü görünmüyordu, yani rapor teşhis edilemiyordu. Bir tur kaydı, tekrar
     # koşmayı gerektirmeyecek kadar bilgi taşımalı.
-    if [[ -z "$r" ]]; then echo "$out" | sed 's/\x1b\[[0-9;]*m//g' | tail -20 | sed 's/^/         ! /'
+    if [[ "${r:-HATA}" == "HATA" || "${r:-}" == "SKIPPED" ]]; then echo "$out" | sed 's/\x1b\[[0-9;]*m//g' | tail -20 | sed 's/^/         ! /'
     else echo "$out" | sed 's/\x1b\[[0-9;]*m//g' | grep -E '^(  |▶)' | sed 's/^/         · /'; fi
   done
   echo "═══ $L · make down"; make down >/dev/null 2>&1
