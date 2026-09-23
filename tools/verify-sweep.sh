@@ -84,7 +84,13 @@ run_level() {
     p=$(basename "${f%.sh}")
     rc=0
     out=$(CONFIRM=1 hard_timeout "${REPRO_TIMEOUT:-1200}" make repro P="$p" 2>&1) || rc=$?
-    r=$(echo "$out" | grep -oE 'NOT-REPRODUCED|REPRODUCED' | tail -1)
+    # HÜKÜM, SATIR BAŞINDAKİ İŞARETTİR. Bu grep tüm çıktıyı tarıyordu; eksik ölçümü anlatan bir
+    # `warn` satırı ("bu bir NOT-REPRODUCED değil...") token'ı içerdiği için AÇIKLAMA hüküm
+    # sanılıyordu: script 2 ile çıkıp ATLANDI olması gerekirken NOT-REPRODUCED kaydedildi.
+    # Hüküm yardımcıları işareti SATIR BAŞINDA basar; ANSI'yi temizle ve oraya sabitle.
+    # EN: the verdict is the marker at the START of a line. Scanning the whole output let an
+    # explanatory `warn` line be read as the verdict. Strip ANSI and anchor.
+    r=$(echo "$out" | sed 's/\x1b\[[0-9;]*m//g' | grep -oE '^(NOT-REPRODUCED|REPRODUCED)' | tail -1)
     # ATLANDI ile HATA AYNI ŞEY DEĞİLDİR. Bir script, ölçmesi gereken şeyi ölçemediğini anlayıp
     # (metrik yok, yük sınıra dayanmadı, deney elle koşulmalı) bilerek 2 ile çıkabilir; bu bir
     # ÇÖKME değil, DÜRÜSTLÜKtür. İkisini tek kovaya atarsan rapor "8 script patladı" der ve
