@@ -23,6 +23,24 @@ waitrollout() { kubectl -n "$NS" rollout status rollout/redirect --timeout=240s 
 # Anahtar KÜMEDEN okunur (platform/lib/apikey.sh): manifest tek kaynak kalsın. Sabit yazarsak
 # Secret değiştiği gün script sessizce 401 alır ve "koruma çalışıyor" diye yanlış okunur.
 AKEY=${AKEY:-$(ladder_api_key)}
+# BAYATLIK PENCERESİ, ÖLÇÜM DÖNGÜSÜNDEN UZUN OLMALI.
+# L1_TTL bu seviyede 10 sn; oysa L1'i ısıtan 40 okuma + silme + 40 okuma bundan uzun sürüyor.
+# Sonuç: yayın KAPALIYKEN bile bayat cevap görünmüyor (ölçüldü: iki fazda da 0/40) — çünkü
+# pencere, biz bakmadan kapanıyor. Ölçülecek şey pencerenin VARLIĞIdır, uzunluğu değil; o hâlde
+# deney süresince TTL'i uzat ve sonunda geri al. Ayrıca en az iki replika şart: tek pod varsa
+# "her kopya bir kanal borçlanır" iddiasının kopyası yoktur.
+# EN: the L1 TTL (10s) is shorter than the measurement loop (40 warm reads + delete + 40 reads),
+# so the staleness window closes before we look — 0/40 in BOTH phases. What we measure is the
+# EXISTENCE of the window, not its length, so widen the TTL for the experiment and restore it.
+# At least two replicas are required too: with one pod there is no second copy to go stale.
+on_cleanup "setenv \"$(wl redirect)\" L1_TTL-"
+redirect_env L1_TTL="${L1_TTL_TEST:-90s}"
+orig_reps=$(kubectl -n "$NS" get "$(wl redirect)" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo 2)
+if (( ${orig_reps:-2} < 2 )); then
+  on_cleanup "kubectl -n \"$NS\" scale \"$(wl redirect)\" --replicas=$orig_reps"
+  kubectl -n "$NS" scale "$(wl redirect)" --replicas=2 >/dev/null 2>&1 || true
+fi
+note "deney için L1_TTL=${L1_TTL_TEST:-90s}, redirect replika=$(kubectl -n "$NS" get "$(wl redirect)" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo '?')"
 stale_after_delete() {
   waitrollout; for _ in $(seq 1 25); do serving && break; sleep 2; done
   local code alive=0
@@ -53,7 +71,7 @@ step "(2) TRAP_NO_INVALIDATION_PUBSUB: L1 var, yayın YOK (03'ün hâli)"
 redirect_env TRAP_NO_INVALIDATION_PUBSUB=true
 off_bad=$(stale_after_delete)
 note "yayın kapalı: 40 okumadan $off_bad tanesi hâlâ yönlendiriyor"
-l1ttl=$(kubectl -n "$NS" get rollout redirect -o jsonpath='{range .spec.template.spec.containers[0].env[?(@.name=="L1_TTL")]}{.value}{end}' 2>/dev/null) || true
+l1ttl=${L1_TTL_TEST:-90s}; : $(kubectl -n "$NS" get rollout redirect -o jsonpath='{range .spec.template.spec.containers[0].env[?(@.name=="L1_TTL")]}{.value}{end}' 2>/dev/null) || true
 grafana_hint "04 · Cache → 'hit ratio by pod' · yeni metrik: cache_invalidation_messages_total"
 note "L1_TTL=${l1ttl:-10s} — yayın kaçarsa bayatlık penceresi TAM OLARAK bu kadar."
 note "Pub/sub EN-İYİ-ÇABA'dır: Redis yeniden başlarsa, bir pod abone olamazsa ya da mesaj düşerse"
