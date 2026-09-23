@@ -121,9 +121,30 @@ security: ## cert-manager + sealed-secrets + Kyverno (13+)
 	@helm upgrade --install sealed-secrets sealed-secrets/sealed-secrets -n kube-system \
 	   --set resources.requests.cpu=20m --set resources.requests.memory=64Mi --wait --timeout 10m \
 	   || kubectl apply -f https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.27.1/controller.yaml
+	@# KYVERNO'NUN PROBE BÜTÇESİ BU KÜMEDE YETMİYOR — ve yetmemesi TÜM KÜMEYİ kilitliyor.
+	@# Varsayılan startup probe'u `timeout=1s period=6s failure=20`: yüklü bir kind kümesinde
+	@# Kyverno'nun HTTPS sağlık ucu 1 saniyede cevap veremiyor, kubelet konteyneri öldürüyor ve
+	@# admission controller CRASH LOOP'a giriyor. Kyverno'nun webhook'u `failurePolicy: Fail`
+	@# olduğu için bu yalnızca Kyverno'yu değil, KÜMEDEKİ HER YAZMAYI bozuyor: local-path
+	@# provisioner PVC oluşturamadı ("failed calling webhook validate.kyverno.svc-fail:
+	@# connection refused"), Postgres hiç kalkmadı ve 14. seviye AYAĞA KALKMADI. P14-05'in
+	@# "erişilebilirlik %4.37" sonucu buradan geliyordu: sistem çökmemişti, HİÇ KURULMAMIŞTI.
+	@# Ders (Prometheus WAL OOM'u ile aynı): bir bileşenin bütçesini KARARLI durumuna göre değil
+	@# EN KÖTÜ ANINA göre seç — hele ki o bileşen kümenin yazma yoluna zincirlenmişse.
+	@# EN: the default startup probe (timeout=1s) is not enough on a loaded kind cluster, so the
+	@# admission controller crash-loops; and because its webhook is `failurePolicy: Fail`, that
+	@# breaks EVERY write in the cluster, not just Kyverno's. The local-path provisioner could not
+	@# create the PVC, Postgres never initialised and level 14 never came up — which is where
+	@# P14-05's "4.37% availability" actually came from: the system had not collapsed, it had
+	@# never been built.
 	@helm upgrade --install kyverno kyverno/kyverno -n kyverno --create-namespace \
 	   --set admissionController.replicas=1 --set backgroundController.enabled=true \
 	   --set cleanupController.enabled=false --set reportsController.enabled=false \
+	   --set admissionController.startupProbe.timeoutSeconds=5 \
+	   --set admissionController.startupProbe.periodSeconds=10 \
+	   --set admissionController.startupProbe.failureThreshold=30 \
+	   --set admissionController.readinessProbe.timeoutSeconds=10 \
+	   --set admissionController.livenessProbe.timeoutSeconds=10 \
 	   --wait --timeout 15m
 	@echo "✔ cert-manager + sealed-secrets + kyverno"
 
