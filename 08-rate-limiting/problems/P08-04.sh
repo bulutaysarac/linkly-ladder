@@ -86,8 +86,12 @@ note "       koşu boyunca kabul=$slide_tot · reddedilen=${slide_deny%%.*} · �
 
 step "(2) TRAP_FIXED_WINDOW: sabit pencere sayacı"
 setenv "$(wl redirect)" TRAP_FIXED_WINDOW=true
-kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=180s >/dev/null 2>&1 || true
-for _ in $(seq 1 20); do serving && break; sleep 2; done
+# `rollout status` YENİ NESLİ BEKLEMEYEBİLİR (bkz. repro.sh → settle_rollout). Beklemezse
+# `measure_peak` ESKİ, sonlanmakta olan pod'u seçer, örnekleme "pod not found" ile delik deşik
+# olur ve faz "0 kabul" raporlar — ölçüldü: sabit pencere fazı 0 çıktı, oysa limiter çalışıyordu.
+# EN: without waiting for the new generation, `measure_peak` picks the OLD terminating pod, the
+# sampling fails and the phase reports "0 accepted" while the limiter was working fine.
+settle_rollout "$(wl redirect)"
 read -r fixed fixed_tot fixed_n <<< "$(measure_peak)"
 fixed_deny=$(denies)
 note "sabit: ${WIN_S} sn'lik en yoğun aralıkta kabul edilen istek = $fixed (limit $LIM)"
