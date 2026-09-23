@@ -253,10 +253,21 @@ wait_pid_quiet() { local p=$1; while kill -0 "$p" 2>/dev/null; do sleep 2; done;
 # Kural: bir ölçüm, dayandığı metriğin VARLIĞINI önce doğrulamalı.
 need_metric() {
   local m=$1 hint=${2:-}
-  if prom_absent "$m{namespace=\"$NS\"}" && prom_absent "$m"; then
-    warn "metrik YOK: $m — ölçüm anlamsız${hint:+ ($hint)}"
-    exit 2
-  fi
+  # HENÜZ GELMEMİŞ BİR METRİK, YOK OLAN BİR METRİK DEĞİLDİR.
+  # `make up` döndükten hemen sonra Prometheus yeni pod'ları daha kazımamış olur; üstelik bazı
+  # sayaçlar (örn. `ratelimit_decisions_total`) İLK İSTEK değerlendirilene kadar hiç oluşmaz.
+  # İlk hâl tek atışta bakıp `exit 2` veriyordu: P08-04, seviye ayağa kalktıktan 60 sn sonra
+  # "metrik YOK" deyip atlandı — oysa metrik birkaç saniye sonra oradaydı. Bekle; sonra karar ver.
+  # EN: right after `make up` Prometheus has not scraped the new pods yet, and some counters do
+  # not exist until the first request is evaluated. The old single-shot check exited 2 sixty
+  # seconds into a level that was about to have the metric. Wait, then decide.
+  local waited=0 budget=${METRIC_WAIT:-120}
+  while (( waited < budget )); do
+    prom_absent "$m{namespace=\"$NS\"}" && prom_absent "$m" || return 0
+    sleep 10; waited=$(( waited + 10 ))
+  done
+  warn "metrik YOK: $m — ${budget} sn beklendi, ölçüm anlamsız${hint:+ ($hint)}"
+  exit 2
 }
 
 # Chaos uygula ve temizliğini kaydet; UYGULANAMADIYSA scripti DURDUR.
