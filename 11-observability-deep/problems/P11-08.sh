@@ -35,22 +35,36 @@ note "istek başına CPU: $(awk -v c="$c2" -v r="$r2" 'BEGIN{printf "%.3f", (r>0
 # work, because the endpoint was never registered.
 step "PROFİLİ AL: sebebi yalnızca burada görünür"
 pod=$(kubectl -n "$NS" get pods -l "$APP_SELECTOR" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) || true
-prof=$(mktemp); top=""
+prof=$(mktemp); top=""; got_prof=0
 if [[ -n "${pod:-}" ]]; then
   ( k6run redirect --vus 30 --duration 30s >/dev/null 2>&1 || true ) &
   kpid=$!
   kubectl --request-timeout=60s -n "$NS" get --raw \
     "/api/v1/namespaces/$NS/pods/$pod:8080/proxy/debug/pprof/profile?seconds=20" > "$prof" 2>/dev/null || true
   wait_pid_quiet "$kpid"
+  # İLK SEKİZ DÜĞÜM YETMEZ. Tuzak istek başına CPU'yu %11 artırıyor (0.613 → 0.680 ms); bu,
+  # regexp karelerini `-top` sıralamasının ilk 8'ine sokmaya yetmiyor ve script "profil alınamadı
+  # ya da satır bulunamadı" deyip iki AYRI durumu tek cümlede birleştiriyordu. Düğüm sayısını
+  # artır, KÜMÜLATİF sıralamaya da bak ve iki durumu ayır: profil YOK mu, yoksa profil VAR ama
+  # regexp görünmüyor mu? İkincisi tezin çürütülmesidir; birincisi ölçümün yapılamamasıdır.
+  # EN: the trap raises per-request CPU by 11%, not enough to push regexp frames into the top 8;
+  # the script then merged two DIFFERENT outcomes into one sentence. Widen the node count, look at
+  # the cumulative ordering too, and separate "no profile" from "profile without regexp" — the
+  # latter refutes the thesis, the former means we could not measure.
   if [[ -s "$prof" ]] && command -v go >/dev/null; then
-    top=$(go tool pprof -top -nodecount=8 "$prof" 2>/dev/null | grep -iE 'regexp|onepass|syntax' | head -3) || true
+    got_prof=1
+    top=$( { go tool pprof -top -nodecount=40 "$prof" 2>/dev/null; go tool pprof -top -cum -nodecount=40 "$prof" 2>/dev/null; } \
+           | grep -iE 'regexp|onepass|syntax|Compile|MatchString' | head -3) || true
   fi
 fi
 if [[ -n "$top" ]]; then
   note "profilde regexp derlemesi GÖRÜNÜYOR:"
   echo "$top" | sed 's/^/      /'
+elif [[ "${got_prof:-0}" == "1" ]]; then
+  note "profil alındı ama ilk 40 düğümde regexp karesi YOK — bu ölçekte derleme maliyeti profilde baskın değil"
 else
-  note "profil alınamadı ya da regexp satırı bulunamadı (pprof ucu: /debug/pprof/profile)"
+  warn "profil ALINAMADI (pprof ucu: pods/$pod:8080/proxy/debug/pprof/profile)"
+  warn "go kurulu mu, iç port 8080'de mi ve kubectl raw isteği zaman aşımına mı uğradı?"
 fi
 rm -f "$prof"
 grafana_hint "01 · Pods & Resources → 'CPU kullanımı' · 02 · App RED → p99"
