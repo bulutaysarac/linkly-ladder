@@ -1,53 +1,51 @@
-# Devam notu — 23 Eylül 2026, 11:00
+# Devam notu — 23 Eylül 2026, 13:10
 
 Bu dosya geçicidir: kaldığımız yeri ve sıradaki adımı tutar. İş bitince silinebilir.
 
 ## Durum özeti
 
 Tam doğrulama turu (00→14) tamamlandı. 108 "kendi sorunu" scriptinden **86 REPRODUCED**,
-17 NOT-REPRODUCED, 4 ATLANDI, 1 HATA. Sonuç tablosu ve 78 bulgunun tamamı
+17 NOT-REPRODUCED, 4 ATLANDI, 1 HATA. Sonuç tablosu ve 84 bulgunun tamamı
 `docs/VERIFICATION.md`'de. Turda bulunan ölçüm hatalarının çoğu aynı tur içinde düzeltilip
 yeniden koşuldu; lint kuralları 12-16 bu sınıfların geri gelmesini engelliyor.
 
-Depo durumu: 15/15 lint temiz, gofmt temiz, çalışma ağacı temiz, tüm düzeltmeler commit'li.
+Depo durumu: 15/15 lint temiz, gofmt temiz, 08-14 `go test -race` temiz. 12:30 itibarıyla değişiklikler commit'lenmedi.
 
-## P14-05 — KÖK SEBEP BULUNDU (düzeltme commit'li, doğrulama YAPILMADI)
+## 23 Eylül öğleden sonra — ne değişti (ayrıntı: VERIFICATION 79-84)
 
-Rapor edilen sonuç "üç eşzamanlı arıza altında erişilebilirlik %4.37" idi. Sistem çökmemişti,
-**hiç kurulmamıştı**. Zincir:
+1. **P14-05'in %4.37'si limiter'lardı, Kyverno değil** (79). 08-14'e yük testi kimliği eklendi:
+   jetonlu, limitsiz `linkly-load` girişi; k6 varsayılan olarak onu kullanır, limiter'ı sınayan
+   scriptler `limits_enforced` çağırır (lint 17). Uçtan uca doğrulandı.
+2. **Game day artık sabit hızlı yük** (`steady.js`, 300 rps) (80); istemci/uygulama sayıları yan
+   yana; game day öncesi breaker durumu okunuyor (84); kontrol düzlemi yeniden başlarsa exit 2.
+3. **Canary analizi sağlıklı güncellemeleri geri alıyordu, `make wait` bunu "hazır" sayıyordu** (81).
+   Sorgular ve `make wait` düzeltildi, doğrulandı.
+4. **Ortam: kontrol düzlemi 170+ kez yeniden başlamış** (82). Lider kirası 60/45 sn, Kyverno
+   fail-open ve helm'e taşındı (83). Kalan sorun kapasitenin kendisi: Mac 8 çekirdek, host yükü 14;
+   Postgres primary'si probe zaman aşımıyla öldürülüp kendiliğinden failover yaptı.
 
-1. `profile.sh 14` Kyverno'yu park konumundan çıkarıyor ve **beklemeden dönüyor**.
-2. Kyverno admission controller'ın varsayılan startup probe'u `timeout=1s period=6s failure=20`.
-   Yüklü kümede HTTPS sağlık ucu 1 saniyede cevap veremiyor → kubelet öldürüyor → **crash loop**
-   (7 restart gözlendi, `StartError exit=128`).
-3. Kyverno webhook'u `failurePolicy: Fail`. Backend ayakta değilken **kümedeki her yazma**
-   reddediliyor — Kyverno'yla ilgisi olmayanlar dahil.
-4. local-path provisioner PVC'yi oluşturamıyor:
-   `failed calling webhook "validate.kyverno.svc-fail": connection refused`.
-5. `pg-1` PVC'si Pending → CNPG initdb Pending → **Postgres hiç kalkmıyor**.
-6. redirect servisinin **hazır endpoint sayısı 0**; ingress her isteğe anında 503 dönüyor,
-   k6 ~4300 rps dövüyor ve "646605 istek / 618336 adet 5xx" tablosu buradan çıkıyor.
-   Uygulamanın kendi `http_requests_total`'ı **0** — yani uygulama hiç istek görmedi.
+## 13:08 — yerel deneme sonuçları (VERIFICATION 85-87)
 
-Doğrulama kanıtı: `/tmp/observe.log` (her 3 sn'de hazır endpoint / app rps / breaker / shed).
-Tüm satırlarda `hazır=0` ve `app_rps=0`.
+- 300 rps'te küme çöktü: API sunucusu liveness'tan öldürüldü; script çıkınca k6 ölmüyordu (85, düzeltildi).
+- **100 rps'te P14-05 ilk kez geçerli ölçüldü: %97.72, REPRODUCED** (86). Ama arızalar önbellek
+  yüzünden istek yoluna neredeyse dokunmadı; korumaları sınamak için soğuk önbellek ya da
+  kapasiteye yakın yük gerekiyor → uzak sunucu.
+- Açık: `ensure_healthy` yanlış servisi yeniden başlatıyor (87).
 
-**Yapılan düzeltme (commit 3a4edfa):** `platform/Makefile` Kyverno'yu artık gevşek probe
-bütçesiyle kuruyor (startup timeout 5s, period 10s, failure 30; readiness/liveness timeout 10s).
-Canlı kümede aynı yama elle uygulandı ve Kyverno sağlıklı hâle geldi, PVC bağlandı.
+## Sıradaki adım
 
-### Sıradaki adım (tek cümle)
-Küme yeniden kurulduktan sonra **14. seviyeyi tam olarak ayağa kaldırıp P14-05'i bir kez koş**;
-bu kez `/tmp/observe.sh` ile birlikte koş ve şu iki soruyu ayrı ayrı cevapla:
-- (a) Ölçü temiz mi? `hazır` endpoint > 0 ve `app_rps` > 0 olmalı. Değilse yine ortam sorunudur.
-- (b) Korumalar devreye giriyor mu? `breaker`, `shed`, `degrade` sütunlarına bak.
+**P14-05 bu makinede temiz ölçülemiyor** — ortam, game day'in enjekte ettiği arızaları kendisi
+üretiyor. Kullanıcı uzak (ücretsiz) bir sunucu kiralamayı önerdi; orada:
+- P14-05'i `tools/observe-gameday.sh` ile koş: `GAMEDAY_RATE=300` ve bir kez de SOĞUK önbellekle
+  (game day başında Redis FLUSHALL + kısa L1_TTL), korumaların gerçekten devreye girdiği an görülsün.
+- `ensure_healthy`'yi düzelt (87): serving() hangi servisi sınıyorsa onu yeniden başlatsın; tam turla doğrula.
+- Muafiyetten etkilenen scriptleri yeniden koş: P09-02, P09-03, P10-02, P10-05, P11-04, P12-01,
+  P12-02 (+ limiter'ı sınayan P08-01..06 ve P13-06'nın `limits_enforced` ile hâlâ REPRODUCED olduğunu doğrula).
+- Tam tur. Not: ARM makinede imajlar ARM için derlenmeli; kurumsal TLS yoksa `trust-ca.sh` gereksiz.
 
-### (b) için bilinen risk
-Yük atma eşiği `SHED_MAX_INFLIGHT=200`. P10-06'da ölçüldü: in-flight ≈ rps × gecikme ve bu kümede
-gecikme milisaniyeler mertebesinde, yani in-flight 200'e **hiç ulaşmıyor**. Game day'de de yük
-atmanın hiç devreye girmemesinin muhtemel sebebi bu. Aynı zamanda breaker, yönlendirmeler
-önbellekten karşılandığı için veritabanı hatası görmüyor olabilir — P14-05 ölçüyü
-"uygulamanın kendi gördüğü istekler" üzerinden kurmalı, ingress'in 503 hızından değil.
+Yerelde devam edilecekse: ölçümden önce `docker stats` ile dört düğümün toplamına bak (kubectl top
+değil), ölçüm sırasında host'ta derleme/test koşma, CNPG `Cluster` fazının `Cluster in healthy state`
+olduğunu doğrula.
 
 ## Diğer açık maddeler
 
@@ -62,7 +60,7 @@ atmanın hiç devreye girmemesinin muhtemel sebebi bu. Aynı zamanda breaker, y�
 
 - Tur aracı: `tools/verify-sweep.sh <seviye> ...` (profil + up + verify-prev + kendi sorunları + down)
 - Tek seviye/tek script: `/tmp/rerun-level.sh <seviye> <PNN-XX> ...` (profil adımı dahil)
-- Game day gözlemcisi: `/tmp/observe.sh` → `/tmp/observe.log`
+- Game day gözlemcisi: `tools/observe-gameday.sh` → `/tmp/observe.log`
 - Son tur kayıtları: `/tmp/sweep-full.log`, `/tmp/rerun.log`, `/tmp/final.log`, `/tmp/last.log`
 - Açık madde listesi: `/tmp/RERUN-QUEUE.md`
 
