@@ -10,12 +10,21 @@ ensure_healthy
 step "Tanımlı alarmlar"
 curl -sG "$PROM_URL/api/v1/rules" 2>/dev/null \
   | jq -r '.data.groups[]?.rules[]? | select(.type=="alerting") | select(.name|test("Linkly")) | "    \(.name) [\(.labels.severity // "-")]"' 2>/dev/null | sort -u
-step "Kısa bir hata sıçraması üret (~30 sn)"
+# SIÇRAMA, NAIVE EŞİĞİ AŞACAK KADAR HATA ÜRETMELİ.
+# Naive kural `slo:sli_error:ratio_rate5m > 0.01` diyor ve `for:` yok — ama 35 sn'lik bir sıçrama
+# 5 dakikalık oranı %1'in üstüne çıkarmaya yetmedi: ölçüldü, yalnızca YAVAŞ burn kuralı pending'e
+# geçti, naive alarm hiç ateşlemedi ve script "naive daha gürültülü" iddiasını sınayamadı.
+# Sıçrama 90 sn'ye çıkarıldı (hâlâ 1s/6s burn pencerelerine göre KISA — anlatı bozulmuyor) ve
+# değerlendirme için kayıt kuralının birkaç aralığı beklenilir hâle getirildi.
+# EN: the naive rule has no `for:`, but a 35s spike did not push the 5-minute ratio above 1% —
+# only the SLOW burn rule went pending, so the claim could not be tested. 90s is still short
+# relative to the 1h/6h burn windows, so the narrative holds.
+step "Kısa bir hata sıçraması üret (~90 sn)"
 chaos_apply pg-loss-50
-( k6run mixed --vus 20 --duration 35s >/dev/null 2>&1 || true )
+( k6run mixed --vus 20 --duration "${SPIKE:-90}s" >/dev/null 2>&1 || true )
 "$LADDER_ROOT/platform/lib/chaos.sh" delete pg-loss-50 >/dev/null 2>&1 || true
 note "sıçrama bitti, alarmlar değerlendiriliyor..."
-sleep 45
+sleep 75
 step "Hangi alarm ateşledi?"
 curl -sG "$PROM_URL/api/v1/alerts" 2>/dev/null \
   | jq -r '.data.alerts[]? | select(.labels.alertname|test("Linkly")) | "    \(.labels.alertname) → \(.state) [\(.labels.severity // "-")]"' 2>/dev/null | sort -u
@@ -41,6 +50,14 @@ note "HIZIDIR, anlık hata oranı değil."
 #     oysa hüküm "naive daha gürültülü" diyor. Farkı iddia ediyorsan farkı ölç.
 # EN: ">=" is not enough either: when naive == burn-rate the two are equally noisy, yet the
 #     verdict claims naive is noisier. If you assert a difference, measure one.
+# HİÇBİR ALARM ATEŞLEMEDİYSE HÜKÜM YOK: karşılaştırılacak iki sayı da yoksa, "naive daha
+# gürültülü değilmiş" demek alarm kuralları hakkında değil SIÇRAMA hakkında bir cümledir.
+if awk -v n="${naive%%.*}" -v f="${fast%%.*}" 'BEGIN{exit !(n+0==0 && f+0==0)}'; then
+  warn "ölçüm yapılamadı: sıçrama hiçbir alarmı tetiklemedi (naive=${naive%%.*}, hızlı=${fast%%.*})."
+  warn "Hata oranı naive eşiğin (%1, 5 dk) altında kaldı; SPIKE'ı uzat: SPIKE=180 make repro P=P11-04"
+  warn "Bu bir hüküm değil, EKSİK ÖLÇÜMdür."
+  exit 2
+fi
 { awk -v n="${naive%%.*}" -v f="${fast%%.*}" 'BEGIN{exit !(n > 0 && n > f)}'; } \
   && reproduced "kısa sıçramada naive eşik (${naive%%.*}) burn-rate'ten (${fast%%.*}) daha gürültülü — alarm yorgunluğunun kaynağı"
 not_reproduced "alarm farkı ölçülemedi (kurallar yüklendi mi? kubectl -n $NS get prometheusrule)"
