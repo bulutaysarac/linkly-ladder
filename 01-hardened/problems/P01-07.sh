@@ -4,6 +4,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # "Tek middleware zinciri var, her şey oradan geçsin" çok yaygın bir karardır. Sonucu şudur:
 # trafik dalgası → probe hız sınırına takılır → kubelet pod'u ÖLDÜRÜR → yük kalan pod'a biner →
 # o da ölür. Yani yük artışı, kendi kendine bir KESİNTİYE dönüşür.
+limits_enforced   # bu script limiter'ı sınıyor — yük girişi ve muafiyet jetonu KULLANILMAZ
 ensure_healthy
 on_cleanup 'setenv "$(app_workload)" TRAP_LIVENESS_STRICT- RATE_LIMIT_PER_SEC=5000 RATE_LIMIT_BURST=10000'
 step "Tuzağı aç: sağlık uçları iş zincirine giriyor + limit düşük"

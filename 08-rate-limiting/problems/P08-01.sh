@@ -5,6 +5,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 #   fail-open  → koruma kalkar, tam da yükün en yüksek olduğu anda (çünkü Redis genelde yük altında düşer)
 #   fail-closed → önbellek kesintisi TAM KESİNTİYE dönüşür
 # Üçüncü seçenek "hiç düşünmemek"tir ve varsayılan davranış ne ise o olur — en kötüsü budur.
+limits_enforced   # bu script limiter'ı sınıyor — yük girişi ve muafiyet jetonu KULLANILMAZ
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
 on_cleanup "setenv "$(wl redirect)" RATE_LIMIT_FAIL_OPEN=true"

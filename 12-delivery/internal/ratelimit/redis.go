@@ -169,6 +169,10 @@ type Decision struct {
 	RetryAfter time.Duration
 }
 
+// Exempt — limiter'ı bilinçli olarak atlayan isteği say (httpapi.loadTestExempt). Sayılmayan bir
+// muafiyet, Grafana'da kapatılmış bir korumadan ayırt edilemez.
+func (d *Distributed) Exempt() { d.m.Decisions.WithLabelValues("exempt", "loadtest").Inc() }
+
 func (d *Distributed) Allow(ctx context.Context, keyType, key string, limit int) Decision {
 	if limit <= 0 {
 		return Decision{Allowed: true, KeyType: keyType, Limit: limit}

@@ -3,6 +3,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # P08-02 · Her istek için +1 Redis gidiş-gelişi (aslında iki: kiracı + IP)
 # Doğruluk için ödediğin gecikme. 07'de limit kontrolü bellekteki bir map'ti (~100ns);
 # şimdi iki ağ çağrısı. Sıcak yolda yapılan her "küçük" kontrol, p50'ye doğrudan eklenir.
+limits_enforced   # bu script limiter'ı sınıyor — yük girişi ve muafiyet jetonu KULLANILMAZ
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
 need_metric redis_commands_processed_total "redis ServiceMonitor deploy/servicemonitor.yaml'da mı?"

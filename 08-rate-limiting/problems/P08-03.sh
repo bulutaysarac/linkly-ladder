@@ -4,6 +4,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 #   (a) TRAP_IGNORE_XFF   → herkes ingress'in IP'sinde tek kovada: bir kötü client herkesi limitler
 #   (b) TRAP_TRUST_ANY_XFF → client kendi kovasını seçer: limit isteğe bağlı hâle gelir
 # Doğrusu: SAĞDAN, kendi proxy sayın kadar geri say. Bu, kendi topolojini bilmeni gerektirir.
+limits_enforced   # bu script limiter'ı sınıyor — yük girişi ve muafiyet jetonu KULLANILMAZ
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
 on_cleanup "setenv "$(wl redirect)" TRAP_IGNORE_XFF- TRAP_TRUST_ANY_XFF-"

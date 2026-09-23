@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"crypto/subtle"
 	"log/slog"
 	"net"
 	"net/http"
@@ -132,6 +133,11 @@ func timeout(next http.Handler, d time.Duration) http.Handler {
 //	P02-04/P01-05'in istediği tam olarak buydu.
 func rateLimitDistributed(next http.Handler, cfg config.Config, d *ratelimit.Distributed) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if loadTestExempt(r, cfg.LoadTestToken) {
+			d.Exempt()
+			next.ServeHTTP(w, r)
+			return
+		}
 		ctx, cancel := context.WithTimeout(r.Context(), 250*time.Millisecond)
 		defer cancel()
 
@@ -154,6 +160,38 @@ func rateLimitDistributed(next http.Handler, cfg config.Config, d *ratelimit.Dis
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// LoadTestHeader — yük testi kimliğinin taşındığı başlık (bkz. loadTestExempt).
+const LoadTestHeader = "X-Ladder-Loadtest"
+
+// loadTestExempt — bu istek hız sınırından muaf bir yük testi mi?
+//
+// EN: From level 08 on, every load experiment came from ONE client IP, and two limiters — the
+//
+//	ingress (400 rps, answering 503) and this one (300 per 10 s per IP = 30 rps) — silently
+//	capped what reached the application. P14-05's game day reported "4.37% availability"
+//	while the application itself had returned almost no errors: it had measured the limiters,
+//	not the system. Real load tests do not pretend to be the public; they carry an identity the
+//	limiter recognises. The token comes from a Secret, an EMPTY token exempts nobody (otherwise
+//	every client without the header would match), and every exemption is COUNTED as
+//	decision="exempt" — an exemption you cannot see is indistinguishable from a protection that
+//	was switched off.
+//
+// TR: 08'den itibaren her yük deneyi TEK bir istemci IP'sinden geldi ve iki limiter — ingress
+//
+//	(400 rps, 503 döner) ve bu (IP başına 10 sn'de 300 = 30 rps) — uygulamaya ulaşanı sessizce
+//	kıstı. P14-05'in game day'i "%4.37 erişilebilirlik" raporladı; uygulamanın kendisi neredeyse
+//	hiç hata dönmemişti: sistemi değil limiter'ları ölçmüştü. Gerçek yük testleri kamuymuş gibi
+//	davranmaz, limiter'ın tanıdığı bir kimlik taşır. Jeton bir Secret'tan gelir, BOŞ jeton
+//	kimseyi muaf tutmaz (yoksa başlığı olmayan herkes eşleşirdi) ve her muafiyet
+//	decision="exempt" olarak SAYILIR — göremediğin bir muafiyet, kapatılmış bir korumadan ayırt
+//	edilemez.
+func loadTestExempt(r *http.Request, token string) bool {
+	if token == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(r.Header.Get(LoadTestHeader)), []byte(token)) == 1
 }
 
 // reject — 429 + Retry-After. Bir client'a "ne zaman tekrar dene" demeyen bir limit,

@@ -11,6 +11,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # Redis anahtarı ise on binlerce yazmayı rahatça kaldırır. Yani sorun YOKTU demiyorduk — sorunun
 # göründüğü YÜKE hiç çıkmamıştık. Sıcak anahtarın arızası bir yavaşlama değil, bir TAVAN'dır:
 # tek anahtar tek çekirdektir ve o tavanı ancak tavanı DOĞRUDAN ölçerek gösterebilirsin.
+limits_enforced   # bu script limiter'ı sınıyor — yük girişi ve muafiyet jetonu KULLANILMAZ
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
 rpod=$(dep_pod app.kubernetes.io/name=redis) || exit 2

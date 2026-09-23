@@ -27,9 +27,14 @@ const URL_SIZE = parseInt(__ENV.URL_SIZE || '0', 10);
 // Kiracıyı artık ANAHTAR belirler — X-Tenant-ID yalnızca 13 öncesinde (ve P13-01'in tuzağında)
 // dikkate alınır. İkisini de göndermek bilinçli: merdiven aynı senaryoyu 00'dan 14'e koşturuyor.
 export const API_KEY = __ENV.API_KEY || '';
+// 08'den itibaren yük testi kimliği: limiter bu jetonu taşıyan isteği saymaz (bkz. <seviye>/deploy/
+// loadtest.yaml). Jetonu k6run.sh kümeden okur; limiter'ı SINAYAN scriptlerde (limits_enforced)
+// boş gelir ve başlık hiç gönderilmez — o scriptler herkese açık bir istemci gibi davranmalı.
+export const LOADTEST_TOKEN = __ENV.LOADTEST_TOKEN || '';
+export const LOADTEST_HDR = LOADTEST_TOKEN ? { 'X-Ladder-Loadtest': LOADTEST_TOKEN } : {};
 export function headers(extra = {}) {
   const auth = API_KEY ? { Authorization: `Bearer ${API_KEY}` } : {};
-  return { 'Content-Type': 'application/json', 'X-Tenant-ID': TENANT, ...auth, ...extra };
+  return { 'Content-Type': 'application/json', 'X-Tenant-ID': TENANT, ...auth, ...LOADTEST_HDR, ...extra };
 }
 
 let seq = 0;
@@ -53,7 +58,7 @@ export function createLink(url = targetUrl(), extraHeaders = {}) {
 // Redirect'i takip ETME: 30x'in kendisini ölçüyoruz.
 export function redirect(code, extraHeaders = {}) {
   const res = http.get(`${BASE}/${code}`, {
-    redirects: 0, headers: extraHeaders, tags: { name: 'GET /{code}' },
+    redirects: 0, headers: { ...LOADTEST_HDR, ...extraHeaders }, tags: { name: 'GET /{code}' },
   });
   check(classify(res), { 'redirect 30x': (r) => r.status >= 300 && r.status < 400 });
   return res;

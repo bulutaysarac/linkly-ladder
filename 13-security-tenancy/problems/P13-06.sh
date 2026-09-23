@@ -4,6 +4,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # Kısa kodlar rastgele ve 7 karakter (01'de öyle yapmıştık) — yani tahmin edilemez. Ama tarama
 # yine de bir MALİYETTİR: her 404 bir önbellek ıskası, bir DB sorgusu ya da en azından bir
 # limit kontrolü demektir. Ve yeterince tarama, var olan kodları da ortaya çıkarır.
+limits_enforced   # bu script limiter'ı sınıyor — yük girişi ve muafiyet jetonu KULLANILMAZ
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
 step "Kod uzayı ne kadar büyük?"

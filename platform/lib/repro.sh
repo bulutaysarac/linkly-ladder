@@ -116,6 +116,17 @@ AUTH_HDR=(); _k=$(ladder_api_key 2>/dev/null || true)
 [[ -n "${_k:-}" ]] && AUTH_HDR=(-H "Authorization: Bearer $_k")
 unset _k
 
+# limits_enforced — bu deney hız sınırlayıcıları SINIYOR: k6 herkese açık girişten, jetonsuz gitsin.
+# Varsayılan tersidir (loadtest.sh): 08'den itibaren limiter'ı sınamayan deneyler yük girişinden ve
+# jetonla koşar, yoksa tek IP'lik k6 sistemi değil limiter'ları ölçer (P14-05: %4.37 "erişilebilirlik",
+# uygulamanın kendi 5xx sayısı ≈0). Limiter'ı sınayıp bunu çağırmayan script ise ters yönde yanılır:
+# limiter'ı hiç görmez ve "limit çalışmıyor" der. Lint kuralı 17 bu çağrıyı zorunlu tutar.
+# EN: this experiment TESTS the limiters, so k6 must use the public entrance without the token.
+limits_enforced() {
+  export LIMITS_ENFORCED=1
+  note "hız sınırları bu deneyde UYGULANIYOR: k6 herkese açık girişten, muafiyet jetonu olmadan"
+}
+
 # create_link: BAŞARISIZLIK NORMALDİR. Bir üst seviye aynı isteği bilerek reddedebilir (01'de
 # javascript: → 400). `curl -f` böyle bir durumda 22 ile çıkıp `set -e` yüzünden scripti öldürüyordu;
 # o zaman script "NOT-REPRODUCED" diyemiyor, ERROR veriyordu. Artık kod yoksa BOŞ döner.
@@ -439,6 +450,13 @@ CLEANUP_CMDS=()
 on_cleanup() { CLEANUP_CMDS+=("$1"); }
 run_cleanup() {
   local c
+  # ARKA PLANDA BAŞLATILAN YÜK ÜRETECİ SCRIPTLE BİRLİKTE ÖLMEZ. 19 script k6'yı `( k6run ... ) &`
+  # ile başlatıyor; script erken çıkarsa (chaos uygulanamadı → exit 2) k6 dakikalarca kümeyi dövmeye
+  # devam ediyordu: P14-05 "ATLANDI" dedi, ama 300 rps'lik yükü sürdü ve API sunucusu cevap veremez
+  # hâle geldi — bir SONRAKİ deney bozuk bir kümede başlardı. k6run her süreci bu scriptin PID'iyle
+  # işaretler (LADDER_OWNER, metrik etiketi DEĞİL); temizlik ilk iş onları öldürür.
+  # EN: a background load generator does not die with the script that started it; kill ours first.
+  pkill -f "LADDER_OWNER=$$ " 2>/dev/null || true
   for (( i=${#CLEANUP_CMDS[@]}-1 ; i>=0 ; i-- )); do
     c="${CLEANUP_CMDS[i]}"
     eval "$c" >/dev/null 2>&1 || true
@@ -805,7 +823,7 @@ k6run() {
   # sonradan "o sayı nereden geldi?" diye bakacak hiçbir şey kalmıyordu.
   K6_RUN_SEQ=$(( ${K6_RUN_SEQ:-0} + 1 ))
   local rc=0
-  with_timeout $(( secs + 240 )) "$LADDER_ROOT/platform/lib/k6run.sh" "$s" --summary-export "$K6_SUMMARY" ${args[@]+"${args[@]}"} || rc=$?
+  K6_OWNER=$$ with_timeout $(( secs + 240 )) "$LADDER_ROOT/platform/lib/k6run.sh" "$s" --summary-export "$K6_SUMMARY" ${args[@]+"${args[@]}"} || rc=$?
   if [[ -s "$K6_SUMMARY" ]]; then cp "$K6_SUMMARY" "${K6_SUMMARY%.json}.$K6_RUN_SEQ.json" 2>/dev/null || true; fi
   return $rc
 }

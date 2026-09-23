@@ -1,0 +1,45 @@
+# Yük testi kimliği: jeton + hız sınırı OLMAYAN ikinci giriş.
+#
+# EN: Every load experiment in this ladder comes from ONE client IP. Through the public ingress
+#     it meets two limiters built in level 08 — nginx's 400 rps (rejecting with 503) and the
+#     application's 30 rps per IP — and what gets measured is the limiters, not the system:
+#     P14-05's game day reported 4.37% availability while the application had returned almost no
+#     errors. Real load tests are run the same way as here: against the origin, not the edge, and
+#     with an identity the application's limiter recognises. Scripts that TEST the limiters call
+#     `limits_enforced` and go through the public host without the token.
+#     Like api-keys.yaml, this is a plain Secret; in production the token would be sealed and the
+#     load entrance would not be reachable from the internet.
+# TR: Bu merdivendeki her yük deneyi TEK bir istemci IP'sinden gelir. Herkese açık ingress'ten
+#     geçerken 08'de kurulan iki limiter'a çarpar — nginx'in 400 rps'i (503 ile reddeder) ve
+#     uygulamanın IP başına 30 rps'i — ve ölçülen şey sistem değil limiter'lar olur: P14-05'in
+#     game day'i %4.37 erişilebilirlik raporladı, uygulama ise neredeyse hiç hata dönmemişti.
+#     Gerçek yük testleri de böyle koşulur: kenara (edge) değil kaynağa (origin), uygulamanın
+#     limiter'ının tanıdığı bir kimlikle. Limiter'ları SINAYAN scriptler `limits_enforced` çağırır
+#     ve herkese açık host'tan jetonsuz gelir.
+#     api-keys.yaml gibi bu da düz bir Secret; üretimde jeton mühürlenir ve yük girişi
+#     internetten erişilebilir olmaz.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: linkly-loadtest
+type: Opaque
+stringData:
+  LOADTEST_TOKEN: "ladder-loadtest-7c41e9"
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: linkly-load
+  # BİLİNÇLİ OLARAK limit-rps YOK: bu girişin varlık sebebi o.
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: lvl08-load.localtest.me
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend: { service: { name: api, port: { name: http } } }
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: redirect, port: { name: http } } }

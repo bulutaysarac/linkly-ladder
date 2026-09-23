@@ -129,6 +129,7 @@ spec:
             - { name: AUTH_REQUIRED, value: "false" }
             - { name: TIER_LIMITS, value: "free=100,pro=1000,enterprise=5000" }
             - { name: RESOLVE_DNS, value: "true" }
+            - { name: LOADTEST_TOKEN, valueFrom: { secretKeyRef: { name: linkly-loadtest, key: LOADTEST_TOKEN, optional: true } } }
             - { name: NOT_FOUND_LIMIT, value: "50" }
             - { name: DEP_TIMEOUT, value: "2s" }
             - { name: DEP_MAX_CONCURRENT, value: "24" }

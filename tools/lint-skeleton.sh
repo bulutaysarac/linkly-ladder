@@ -238,5 +238,26 @@ for f in "$D"/problems/P*.sh; do
   fi
 done
 
+# 17. LİMİTER'I SINAYAN SCRIPT `limits_enforced` ÇAĞIRMALI.
+# EN: from level 08 on, k6 goes through a load entrance with an exemption token by default
+#     (platform/lib/loadtest.sh), because a single-IP load generator through the public entrance
+#     measured the limiters instead of the system (P14-05: "4.37% availability", the app's own
+#     5xx ≈ 0). The default cuts both ways: a script that TESTS a limiter and forgets to opt out
+#     never meets the limiter and concludes "the limit does not work". Signals of a limiter test:
+#     the abuser scenario, k6_429, RATE_LIMIT_*, X-RateLimit headers, or living in
+#     08-rate-limiting. NOT ratelimit_* metrics: reading decision="exempt" to PROVE the exemption
+#     worked (P14-05) is the opposite of testing the limiter.
+# TR: 08'den itibaren k6 varsayılan olarak yük girişinden ve muafiyet jetonuyla gider, çünkü tek
+#     IP'li bir yük üreteci herkese açık girişte sistemi değil limiter'ları ölçtü (P14-05). Bu
+#     varsayılan iki yönlü keser: limiter'ı SINAYAN ve muafiyetten çıkmayı unutan bir script
+#     limiter'ı hiç görmez ve "limit çalışmıyor" der.
+for f in "$D"/problems/P*.sh; do
+  [[ -e "$f" ]] || continue
+  if { [[ "$name" == 08-* ]] || grep -qE 'k6run abuser|k6_429|RATE_LIMIT|X-RateLimit' "$f"; } \
+     && ! grep -qE '^limits_enforced\b' "$f"; then
+    err "$(basename "$f"): limiter'ı sınıyor ama limits_enforced çağırmıyor — k6 muafiyet jetonuyla gider ve limiter'ı hiç görmez"
+  fi
+done
+
 [[ $fail == 0 ]] && echo "  ✔ $name iskelet OK"
 exit $fail

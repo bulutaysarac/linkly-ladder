@@ -129,6 +129,7 @@ spec:
             - { name: AUTH_REQUIRED, value: "false" }
             - { name: TIER_LIMITS, value: "free=100,pro=1000,enterprise=5000" }
             - { name: RESOLVE_DNS, value: "true" }
+            - { name: LOADTEST_TOKEN, valueFrom: { secretKeyRef: { name: linkly-loadtest, key: LOADTEST_TOKEN, optional: true } } }
             - { name: NOT_FOUND_LIMIT, value: "50" }
             # L1+L2: en sıcak anahtarlar pod belleğinde. TTL kısa ve bu BİLİNÇLİ —
             # pub/sub yayını kaçarsa bayatlık penceresi tam olarak bu kadar (P14-02).

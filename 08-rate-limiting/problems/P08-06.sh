@@ -3,6 +3,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # P08-06 · Gürültülü komşu: kötü client, normal client'ın p99'unu bozuyor mu?
 # Hız sınırının ASIL AMACI bu: kapasiteyi korumak değil, ADALETİ korumak. Sınır işe yarıyorsa,
 # bir client'ın kötü davranışı diğerlerinin gecikmesine yansımamalı.
+limits_enforced   # bu script limiter'ı sınıyor — yük girişi ve muafiyet jetonu KULLANILMAZ
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
 step "Kötü client (tek IP, açgözlü) + normal client'lar (dağıtık IP) aynı anda"

@@ -129,6 +129,7 @@ spec:
             limits: { memory: 256Mi }
           readinessProbe:
             httpGet: { path: /readyz, port: http }
+            - { name: LOADTEST_TOKEN, valueFrom: { secretKeyRef: { name: linkly-loadtest, key: LOADTEST_TOKEN, optional: true } } }
             periodSeconds: 2
             failureThreshold: 2
           livenessProbe:

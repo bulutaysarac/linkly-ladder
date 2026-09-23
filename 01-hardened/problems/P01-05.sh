@@ -2,6 +2,7 @@
 source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.sh"
 # P01-05 · Süreç İÇİ hız sınırı: N replikada limit N katına çıkar
 # Limiter her pod'un belleğinde. "200 rps" yazdın; 3 pod ile client 600 rps geçirir.
+limits_enforced   # bu script limiter'ı sınıyor — yük girişi ve muafiyet jetonu KULLANILMAZ
 ensure_healthy
 need_confirm "limit düşürülüp replica 3'e çıkacak (deney sonunda geri alınır)"
 orig=$(replicas_of)

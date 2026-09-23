@@ -58,6 +58,7 @@ spec:
             - { name: RATE_LIMIT_WINDOW, value: "10s" }
             - { name: RATE_LIMIT_PER_IP, value: "300" }
             - { name: RATE_LIMIT_PER_TENANT, value: "2000" }
+            - { name: LOADTEST_TOKEN, valueFrom: { secretKeyRef: { name: linkly-loadtest, key: LOADTEST_TOKEN, optional: true } } }
             # Redis düşerse İZİN VER ve alarm üret: korumayı kaybetmek telafi edilebilir,
             # hizmeti kaybetmek edilemez (P08-01 iki tarafı da ölçüyor).
             - { name: RATE_LIMIT_FAIL_OPEN, value: "true" }

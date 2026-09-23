@@ -9,6 +9,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # diye bir NOT basıyordu. Tuzak da config'de tanımlı ama kodda okunmuyordu — yani iddia iki
 # taraftan birden sınanamaz durumdaydı ve script düşemezdi. Düşemeyen bir deney, deney değildir.
 # Artık iki pencere de GERÇEKTEN koşuluyor ve tepe kabul hızı KARŞILAŞTIRILIYOR.
+limits_enforced   # bu script limiter'ı sınıyor — yük girişi ve muafiyet jetonu KULLANILMAZ
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
 need_metric ratelimit_decisions_total "limiter Redis'e bağlı mı? (08 deploy/redirect-svc.yaml)"

@@ -3,6 +3,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # P02-04 · Süreç içi hız sınırı 3 replikada 3 katı (P01-05'in 02'deki hâli)
 # 01'de bunu ölçmek için replika sayısını elle artırmak gerekiyordu; 02'de zaten 3 replika VAR,
 # yani bu artık teorik bir uyarı değil, üretimdeki mevcut durum.
+limits_enforced   # bu script limiter'ı sınıyor — yük girişi ve muafiyet jetonu KULLANILMAZ
 ensure_healthy
 LIMIT=${LIMIT:-40}
 orig=$(replicas_of)

@@ -40,6 +40,7 @@ type Config struct {
 	RateLimitPerTenant int
 	RateLimitFailOpen  bool
 	TrustedProxyHops   int
+	LoadTestToken      string // X-Ladder-Loadtest ile gelen bu jeton limiter'dan muaf; boşsa kimse muaf değil
 
 	DatabaseURL   string
 	DatabaseURLRO string
@@ -136,6 +137,7 @@ func Load() Config {
 		RateLimitPerTenant: envInt("RATE_LIMIT_PER_TENANT", 2000),
 		RateLimitFailOpen:  envBool("RATE_LIMIT_FAIL_OPEN", true), // bilinçli seçim — P08-01
 		TrustedProxyHops:   envInt("TRUSTED_PROXY_HOPS", 1),       // yalnızca ingress-nginx
+		LoadTestToken:      env("LOADTEST_TOKEN", ""),             // httpapi.loadTestExempt
 
 		DatabaseURL: env("DATABASE_URL", "postgres://linkly:linkly@pg-pooler-rw:5432/linkly?sslmode=disable"),
 		// Boşsa okuma/yazma ayrımı KAPALI: her şey primary'den. Bu, 09'un tüm sorunlarını

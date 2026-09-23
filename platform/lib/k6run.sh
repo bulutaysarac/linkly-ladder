@@ -7,6 +7,17 @@ PROM_URL=${PROM_URL:-http://prometheus.localtest.me}
 source "$LADDER_ROOT/platform/lib/apikey.sh"
 # API_KEY boşsa ladder.js Authorization başlığını HİÇ göndermez (13 öncesi davranış korunur).
 API_KEY=$(ladder_api_key || true)
+# Yük hangi girişten gidiyor? Limiter'ı sınamayan her deney yük girişinden, jetonla (loadtest.sh).
+# Seçim hem ekrana hem k6 metriklerine (entry=load|public) yazılır: sonradan "bu sayı limiter'dan mı
+# geçti?" sorusu cevapsız kalmasın.
+source "$LADDER_ROOT/platform/lib/loadtest.sh"
+LOADTEST_TOKEN=""; K6_BASE_URL=$BASE_URL; ENTRY=public
+if [[ "${LIMITS_ENFORCED:-0}" != 1 ]]; then
+  LOADTEST_TOKEN=$(ladder_loadtest_token)
+  load_url=$(ladder_load_url)
+  if [[ -n "$LOADTEST_TOKEN" && -n "$load_url" ]]; then K6_BASE_URL=$load_url; ENTRY=load; fi
+fi
+echo "k6 girişi: $ENTRY ($K6_BASE_URL)" >&2
 S=$1; shift
 export K6_PROMETHEUS_RW_SERVER_URL=${K6_PROMETHEUS_RW_SERVER_URL:-$PROM_URL/api/v1/write}
 export K6_PROMETHEUS_RW_TREND_STATS=${K6_PROMETHEUS_RW_TREND_STATS:-p(50),p(95),p(99),avg,max}
@@ -41,4 +52,5 @@ if grep -q 'scenarios:' "$SCEN_FILE" 2>/dev/null; then
   # bash 3.2 — so every argument-less k6 run against a scenarios file failed to start at all.
   set -- ${conv[@]+"${conv[@]}"}
 fi
-exec k6 run --tag "level=$NS" -e "BASE_URL=$BASE_URL" -e "LEVEL=$NS" -e "API_KEY=${API_KEY:-}" -o experimental-prometheus-rw "$@" "$LADDER_ROOT/platform/k6/scenarios/$S.js"
+exec k6 run --tag "level=$NS" --tag "entry=$ENTRY" -e "BASE_URL=$K6_BASE_URL" -e "LEVEL=$NS" -e "API_KEY=${API_KEY:-}" \
+  -e "LOADTEST_TOKEN=$LOADTEST_TOKEN" -e "LADDER_OWNER=${K6_OWNER:-none} " -o experimental-prometheus-rw "$@" "$LADDER_ROOT/platform/k6/scenarios/$S.js"
