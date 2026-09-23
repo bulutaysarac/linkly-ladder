@@ -15,6 +15,41 @@ Aşağıdaki liste ikinci türden bulunan hataları içeriyor. Hepsi "çalışı
 
 ## Bulunan sessiz yanlışlar
 
+
+## Tam doğrulama turu — 22-23 Eylül 2026
+
+Tüm düzeltmelerle 00→14 kesintisiz tur. Sayılar seviyenin **kendi** sorunlarıdır
+(`verify-prev` sonuçları ayrıca temizdi: 108 kontrattan 2'si ✘ verdi ve ikisi de düzeltildi).
+
+| Seviye | Toplam | REPRODUCED | NOT-REPRODUCED | ATLANDI | HATA |
+|---|---|---|---|---|---|
+| 00 | 10 | 9 | 0 | 0 | 1 (P00-04, düzeltildi) |
+| 01 | 8 | 8 | 0 | 0 | 0 |
+| 02 | 10 | 10 | 0 | 0 | 0 |
+| 03 | 7 | 6 | 1 | 0 | 0 |
+| 04 | 7 | 6 | 1 | 0 | 0 |
+| 05 | 6 | 3 | 3 | 0 | 0 |
+| 06 | 7 | 4 | 3 | 0 | 0 |
+| 07 | 8 | 6 | 0 | 2 | 0 |
+| 08 | 6 | 5 | 0 | 1 | 0 |
+| 09 | 6 | 4 | 1 | 1 | 0 |
+| 10 | 6 | 5 | 1 | 0 | 0 |
+| 11 | 8 | 5 | 3 | 0 | 0 |
+| 12 | 6 | 5 | 1 | 0 | 0 |
+| 13 | 8 | 8 | 0 | 0 | 0 |
+| 14 | 5 | 2 | 3 | 0 | 0 |
+| **Toplam** | **108** | **86** | **17** | **4** | **1** |
+
+**ATLANDI dürüst bir sonuçtur:** script ölçemediğini fark edip hüküm vermiyor.
+P07-07 tasarımca elle koşulur (node donduruyor); P07-04'te cAdvisor throttling serisini bu
+kurulumda yayınlamıyor; P08-04 ve P09-03 ölçüm koşulu oluşmadığı için atladı ve ikisi de
+sonradan düzeltildi.
+
+**NOT-REPRODUCED'ların çoğu bu turda BULUNAN hatalardır** ve tur sırasında düzeltildi:
+P03-06, P05-03, P05-05, P05-06, P06-01, P06-06, P06-07, P10-06, P11-04, P11-05, P11-08,
+P14-01, P14-02. Dürüst hayırlar: P04-07 (bu ölçekte KEYS 1-2 ms), P12-04 (`:latest` yok),
+P09-04 (`hot_standby_feedback=on` iken cevap zaten sabit).
+
 | # | Nerede | Ne oluyordu | Neden görünmüyordu |
 |---|--------|-------------|--------------------|
 | 1 | `kubectl set env` (98 çağrı, 12+ seviyeleri) | İstemci tarafı **tipli** komut; Argo Rollout'ta `no kind "Rollout" is registered` ile patlar. 12'den itibaren `redirect` bir Rollout. | Her TRAP anahtarı ve her temizlik 12/13/14'te öldü; `verify-prev` **değişmemiş** bir sistemi ölçüyordu ama yine karar basıyordu. |
