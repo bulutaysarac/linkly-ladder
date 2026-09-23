@@ -182,8 +182,12 @@ brew install kind helm k6 kustomize jq
 cd platform && make minimal          # 00-05 için yeterli
 make keda cnpg chaos                 # 06-10
 make tempo argo security             # 11-14
-make stop / make start               # kümeyi silmeden durdur / geri getir (Docker Desktop'ta "linkly" grubu)
+make stop                            # kümeyi silmeden durdur
+make start                           # durdurulmuş kümeyi geri getir
 ```
+
+Docker Desktop'ta küme `linkly` grubu altında görünür. **Grubun "sil" düğmesi tüm kümeyi
+siler** (tüm seviyelerin verisi dahil) — durdurmak için `make stop`, silmek için `make destroy`.
 
 Her seviye kendi bileşenlerini `deploy/` içinde taşır; platform yalnızca **operatörleri ve
 gözlemlenebilirlik yığınını** kurar.

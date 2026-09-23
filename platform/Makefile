@@ -7,6 +7,11 @@
 KIND_NAME := linkly
 REG_NAME  := linkly-registry
 export KIND_NAME REG_NAME
+# ESKİ ADLAR (23 Eylül 2026 öncesi). `make cluster` bunları görürse durur, `make destroy` siler:
+# ad değişikliği bir geçiş yolu gerektirir, yoksa eski küme hiçbir hedefin ulaşamadığı yerde kalır
+# ve yenisi 80/443 portlarında onunla çakışır.
+LEGACY_KIND_NAME := ladder
+LEGACY_REG_NAME  := kind-registry
 # kind/shim/docker kind'ın `docker run`larına Compose etiketi ekler (Docker Desktop gruplaması).
 REAL_DOCKER := $(shell command -v docker)
 CALICO_VER := v3.29.3
@@ -20,8 +25,11 @@ help: ## Hedefler
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
 cluster: ## kind cluster (1 cp + 3 worker) + Calico + local registry
+	@if kind get clusters 2>/dev/null | grep -qx $(LEGACY_KIND_NAME); then \
+	  echo "✘ eski '$(LEGACY_KIND_NAME)' kümesi hâlâ var ve 80/443 portlarını tutuyor. Önce: make destroy"; exit 1; fi
+	@# --name, cluster.yaml'daki `name:`i ezer: küme adının TEK kaynağı bu Makefile.
 	@kind get clusters 2>/dev/null | grep -qx $(KIND_NAME) || \
-	  PATH="$(CURDIR)/kind/shim:$$PATH" LADDER_REAL_DOCKER="$(REAL_DOCKER)" kind create cluster --config kind/cluster.yaml
+	  PATH="$(CURDIR)/kind/shim:$$PATH" LADDER_REAL_DOCKER="$(REAL_DOCKER)" kind create cluster --name $(KIND_NAME) --config kind/cluster.yaml
 	@kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/$(CALICO_VER)/manifests/calico.yaml >/dev/null
 	@kubectl -n kube-system rollout status ds/calico-node --timeout=300s
 	@kubectl wait --for=condition=Ready nodes --all --timeout=300s
@@ -86,17 +94,36 @@ status: ## Ne kurulu?
 	@kubectl get nodes; echo; helm list -A; echo; kubectl get ingress -A
 
 stop: ## Kümeyi ve registry'yi DURDUR (silmez; `make start` ile geri gelir)
-	@docker stop $(REG_NAME) $$(kind get nodes --name $(KIND_NAME)) >/dev/null && echo "✔ durduruldu"
+	@# ÖNCE containerd'yi düğümün İÇİNDE durdur: `docker stop` bir systemd makinesine SIGKILL
+	@# gönderirse containerd'nin meta veri deposu yazma ortasında kalabilir. ÖLÇÜLDÜ: control-plane'in
+	@# kendi systemd kapanışı `-t 60` ile bile bitmiyor (60 sn bekleyip yine 137) — süreyi uzatmak
+	@# koruma değil bekleme; containerd'yi kapatmak ise anlık ve deposunu temiz bırakıyor.
+	@nodes=$$(kind get nodes --name $(KIND_NAME) 2>/dev/null); \
+	  [ -n "$$nodes" ] || { echo "✘ '$(KIND_NAME)' kümesi yok"; exit 1; }; \
+	  for n in $$nodes; do docker exec $$n systemctl stop kubelet containerd >/dev/null 2>&1 || true; done; \
+	  docker stop $$nodes >/dev/null && echo "✔ düğümler durduruldu"
+	@docker stop $(REG_NAME) >/dev/null 2>&1 && echo "✔ registry durduruldu" || echo "  (registry yok ya da zaten durmuş)"
 
 start: ## Durdurulmuş kümeyi ve registry'yi başlat, düğümler Ready olana kadar bekle
-	@docker start $(REG_NAME) $$(kind get nodes --name $(KIND_NAME)) >/dev/null
+	@nodes=$$(kind get nodes --name $(KIND_NAME) 2>/dev/null); \
+	  [ -n "$$nodes" ] || { echo "✘ '$(KIND_NAME)' kümesi yok — önce: make cluster"; exit 1; }; \
+	  docker start $$nodes >/dev/null
+	@docker start $(REG_NAME) >/dev/null 2>&1 || echo "  (registry yok — imajlar için: make registry)"
 	@# Açılışın ilk saniyelerinde API sunucusu RBAC önbelleği dolmadan "Forbidden" döner ve
-	@# `kubectl wait` bunu kalıcı hata sayıp hemen düşer. Önce /readyz'i bekle.
-	@for i in $$(seq 1 120); do kubectl get --raw /readyz >/dev/null 2>&1 && break; sleep 5; done
+	@# `kubectl wait` bunu kalıcı hata sayıp hemen düşer. Önce /readyz'i bekle — ve bekleme
+	@# biterse bunu SÖYLE: sessiz bir zaman aşımı, sonraki adımın hatasını yanlış sebebe bağlatır.
+	@kubectl config use-context kind-$(KIND_NAME) >/dev/null
+	@for i in $$(seq 1 120); do \
+	  kubectl get --raw /readyz >/dev/null 2>&1 && break; \
+	  [ $$i = 1 ] && echo "  API sunucusu bekleniyor (en fazla 10 dk)..."; \
+	  [ $$i = 120 ] && { echo "✘ API sunucusu 10 dk'da hazır olmadı: docker logs $(KIND_NAME)-control-plane"; exit 1; }; \
+	  sleep 5; \
+	done
 	@kubectl wait --for=condition=Ready nodes --all --timeout=600s >/dev/null && echo "✔ başladı"
 
-destroy: ## Cluster'ı ve registry'yi sil
+destroy: ## Cluster'ı ve registry'yi sil (eski adlarla kalmış olanlar dahil)
 	kind delete cluster --name $(KIND_NAME); docker rm -f $(REG_NAME) 2>/dev/null || true
+	@kind delete cluster --name $(LEGACY_KIND_NAME) 2>/dev/null || true; docker rm -f $(LEGACY_REG_NAME) 2>/dev/null || true
 
 cnpg: ## CloudNativePG operatörü + MinIO (09+)
 	@helm repo add cnpg https://cloudnative-pg.github.io/charts >/dev/null 2>&1 || true

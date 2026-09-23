@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # kind local registry (resmi tarif): localhost:5001 host'tan, <REG_NAME>:5000 node'lardan.
 set -euo pipefail
-REG_NAME=${REG_NAME:-linkly-registry}; KIND_NAME=${KIND_NAME:-linkly}; REG_PORT=5001
+# Adlar platform/Makefile'dan gelir (tek kaynak); doğrudan çalıştırırsan: make registry
+REG_NAME=${REG_NAME:?make registry ile çalıştır}; KIND_NAME=${KIND_NAME:?make registry ile çalıştır}; REG_PORT=5001
 if [ "$(docker inspect -f '{{.State.Running}}' $REG_NAME 2>/dev/null || true)" != 'true' ]; then
   # Compose etiketleri: Docker Desktop registry'yi kümenin düğümleriyle AYNI grupta göstersin (kind/shim/docker).
   docker run -d --restart=always -p "127.0.0.1:${REG_PORT}:5000" --network bridge --name $REG_NAME \
