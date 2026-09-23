@@ -151,7 +151,7 @@ has() { kubectl get ns "$1" >/dev/null 2>&1; }
 (( n >= 2 ))  && ! has chaos-mesh    && missing+=(chaos)
 (( n >= 7 ))  && ! has keda          && missing+=(keda)
 (( n >= 9 ))  && ! has cnpg-system   && missing+=(cnpg)
-(( n >= 11 )) && ! kubectl -n monitoring get statefulset tempo >/dev/null 2>&1 && missing+=(tempo)
+(( n == 11 )) && ! kubectl -n monitoring get statefulset tempo >/dev/null 2>&1 && missing+=(tempo)   # yalnızca 11 açar (yukarı bak)
 (( n >= 12 )) && ! has argo-rollouts && missing+=(argo)
 (( n >= 13 )) && ! has kyverno       && missing+=(security)
 if (( ${#missing[@]} > 0 )); then

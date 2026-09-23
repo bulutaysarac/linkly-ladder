@@ -3,6 +3,9 @@
 # Kullanım: tools/verify-sweep.sh 08-rate-limiting 09-database-scaling ...
 set -uo pipefail
 R=$(cd "$(dirname "$0")/.." && pwd)
+# Otomatik tur: panele bakan yok. EXPORT et: `make up` profili KENDİSİ de çalıştırıyor ve bir önek
+# ataması (GRAFANA=0 komut) ona ulaşmaz — Grafana turun geri kalanında yeniden açık kalıyordu.
+export GRAFANA=0
 
 # Bir adım asılırsa bütün tur kaybolmasın: süreç AĞACINI öldüren sert zaman sınırı.
 # (macOS'ta `timeout` yok; alt kabuğa TERM göndermek, o kabuk ön plandaki çocuğunu
@@ -60,7 +63,7 @@ wait_platform() {
 
 run_level() {
   local L=$1 lvl=${1%%-*}
-  GRAFANA=0 "$R/platform/lib/profile.sh" "$lvl"   # otomatik tur: panele bakan yok
+  "$R/platform/lib/profile.sh" "$lvl"
   cd "$R/$L" || return 1
   wait_platform || return 1
   echo "═══ $L · make up"
