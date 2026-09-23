@@ -256,6 +256,14 @@ durumlardan biri.
   self-signed olurdu ve tarayıcı uyarısı dersi gölgelerdi.*
 - **Audit log yok**: kim neyi sildi kaydı tutulmuyor (erişim log'u var, **eylem** log'u yok).
 - **İmaj tarama/imza yok** (P13-08).
+- **Kyverno fail-OPEN** (`forceFailurePolicyIgnore`, `platform/Makefile`): Kyverno ayakta değilken
+  politikalar uygulanmaz. Varsayılan `failurePolicy: Fail` bu kümede her yeniden başlatmada **tüm
+  kümenin yazmalarını** reddetti (PVC oluşmadı, `make up` düştü). P08-01'deki limiter seçiminin
+  aynısı: korumayı kaybetmek telafi edilebilir, hizmeti kaybetmek edilemez. Üretimde karşılığı
+  Kyverno'yu 3 replika + PodDisruptionBudget ile çalıştırıp Fail'de tutmaktır.
+- **Yük testi muafiyeti** (`deploy/loadtest.yaml`, 08'den beri): jetonlu, hız sınırı olmayan ikinci
+  giriş. Tek IP'li yük üreteci herkese açık girişte sistemi değil limiter'ları ölçüyordu. Üretimde
+  bu giriş internetten erişilemez ve jeton mühürlü olur.
 
 ## 10. `make diff-prev` okuma rehberi
 

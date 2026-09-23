@@ -83,8 +83,12 @@ cnpg: ## CloudNativePG operatörü + MinIO (09+)
 	@helm repo add cnpg https://cloudnative-pg.github.io/charts >/dev/null 2>&1 || true
 	@helm repo add minio https://charts.min.io/ >/dev/null 2>&1 || true
 	@helm repo update >/dev/null
+	@# Lider kirası 15/10 sn yerine 60/45 sn: paylaşılan VM'de lease yazması 25 sn'ye çıkıyor ve
+	@# operatör saatte birkaç kez kirayı kaybedip yeniden başlıyordu (23 restart). Gerekçe:
+	@# kind/cluster.yaml'daki controller-manager notu.
 	@helm upgrade --install cnpg cnpg/cloudnative-pg -n cnpg-system --create-namespace \
-	   --set resources.requests.cpu=50m --set resources.requests.memory=100Mi --wait --timeout 10m
+	   --set resources.requests.cpu=50m --set resources.requests.memory=100Mi \
+	   --set 'additionalArgs={--leader-lease-duration=60,--leader-renew-deadline=45}' --wait --timeout 10m
 	@echo "✔ cnpg"
 
 tempo: ## Grafana Tempo (trace) + Alloy OTLP alıcısı (11+)
@@ -105,7 +109,9 @@ argo: ## Argo CD + Argo Rollouts + Gitea (cluster içi git) — 12+
 	   -f helm/argocd.values.yaml --wait --timeout 15m
 	@helm upgrade --install rollouts argo/argo-rollouts -n argo-rollouts --create-namespace \
 	   --set controller.resources.requests.cpu=50m --set controller.resources.requests.memory=100Mi \
-	   --set dashboard.enabled=false --wait --timeout 10m
+	   --set dashboard.enabled=false \
+	   --set 'controller.extraArgs={--leader-election-lease-duration=60s,--leader-election-renew-deadline=45s,--leader-election-retry-period=5s}' \
+	   --wait --timeout 10m
 	@echo "✔ argocd + rollouts → http://argocd.localtest.me (admin / $$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' 2>/dev/null | base64 -d))"
 
 security: ## cert-manager + sealed-secrets + Kyverno (13+)
@@ -137,6 +143,16 @@ security: ## cert-manager + sealed-secrets + Kyverno (13+)
 	@# create the PVC, Postgres never initialised and level 14 never came up — which is where
 	@# P14-05's "4.37% availability" actually came from: the system had not collapsed, it had
 	@# never been built.
+	@# FAIL-OPEN (forceFailurePolicyIgnore): probe bütçesi yetmedi. Kyverno'nun kirası kodda sabit
+	@# (15/10 sn) ve API sunucusu yavaşladığında kirayı kaybedip yeniden başlıyor; bu sürede
+	@# failurePolicy: Fail webhook'u kümedeki HER yazmayı reddediyor — `make up` üç denemede de
+	@# "failed calling webhook ... connection refused" ile düştü. P08-01'in limiter seçiminin aynısı:
+	@# Kyverno düşükken politika uygulanmaz (koruma kaybolur, telafi edilebilir), ama küme kilitlenmez
+	@# (hizmet kaybolmaz). Bedeli: o pencerede kuralsız bir pod kabul edilebilir; Kyverno'nun arka
+	@# plan taraması onu sonradan raporlar. KAPSAMI: yalnızca KAYNAK webhook'u (pod, PVC, ...)
+	@# Ignore olur; Kyverno'nun kendi nesnelerini (ClusterPolicy, exception) doğrulayan webhook'lar
+	@# Fail kalır — Kyverno düşükken seviyenin ClusterPolicy'si yazılamaz, `make deploy` yeniden dener.
+	@# EN: fail-open — while Kyverno is down, policies are not enforced, but the cluster keeps working.
 	@helm upgrade --install kyverno kyverno/kyverno -n kyverno --create-namespace \
 	   --set admissionController.replicas=1 --set backgroundController.enabled=true \
 	   --set cleanupController.enabled=false --set reportsController.enabled=false \
@@ -145,6 +161,7 @@ security: ## cert-manager + sealed-secrets + Kyverno (13+)
 	   --set admissionController.startupProbe.failureThreshold=30 \
 	   --set admissionController.readinessProbe.timeoutSeconds=10 \
 	   --set admissionController.livenessProbe.timeoutSeconds=10 \
+	   --set features.forceFailurePolicyIgnore.enabled=true \
 	   --wait --timeout 15m
 	@echo "✔ cert-manager + sealed-secrets + kyverno"
 
