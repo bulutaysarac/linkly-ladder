@@ -21,12 +21,17 @@ run_overload() {
   kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=180s >/dev/null 2>&1 || true
   for _ in $(seq 1 20); do serving && break; sleep 2; done
   settle_rollout "$(wl redirect)"
+  # FAZ BAŞINA PENCERE. Sabit `[2m]` / `[4m]` pencereleri iki fazın ortasından geçiyordu: yük atma
+  # KAPALIYKEN bile "atılan=5393" göründü (birinci fazın atılanları) ve p99'lar birbirine karıştı.
+  # EN: the fixed windows straddled both phases — 5393 requests appeared "shed" with shedding
+  # DISABLED, because those were phase 1's.
+  local t0 dur p99 shed
+  t0=$(date +%s)
   k6run stairs >/dev/null 2>&1 || true
-  sleep 10
-  # Kabul edilen isteklerin p99'u (503'ler hariç) — asıl bakılacak sayı bu.
-  local p99 shed
-  p99=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",code!=\"503\"}[2m])) by (le))")
-  shed=$(promq "sum(increase(load_shed_total{namespace=\"$NS\"}[4m]))")
+  sleep 20
+  dur=$(( $(date +%s) - t0 ))
+  p99=$(promq "max_over_time(histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",code!=\"503\"}[30s])) by (le))[${dur}s:15s])")
+  shed=$(promq "sum(increase(load_shed_total{namespace=\"$NS\"}[${dur}s]))")
   echo "$p99 ${shed%%.*}"
 }
 step "(1) Yük atma AÇIK (in-flight > ${SHED_TEST:-40} → hızlı 503)"
