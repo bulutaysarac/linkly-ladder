@@ -46,15 +46,18 @@ YOLLARI da birbirinden ayrıldı. Çözülmüş bir sorunu tekrar sahiplenmek, m
 
 ## 4. Ayağa kaldırma
 
-Platform bir kere kurulur (`cd platform && make minimal && make keda`). Sonra bu klasörde:
+İlk kez mi? Önce kök README'deki [Sıfırdan başlangıç](../README.md#sıfırdan-başlangıç) — platform bir kez kurulur (`cd platform && make full`).
+Bu seviyenin platformdan istediği: **temel yığın (kind, ingress, Prometheus, Grafana) + Chaos Mesh, KEDA**. `make up` ilk adımda (profil) bunları açar ve kullanılmayanları kapatır; bir bileşen kurulu değilse hangi komutla kurulacağını söyleyip durur.
 
 ```bash
-make up            # build → push → deploy → rollout wait → smoke
-curl -s -XPOST http://lvl07.localtest.me/api/links -H 'Content-Type: application/json' -d '{"url":"https://example.com"}'
-curl -I http://lvl07.localtest.me/<code>
-make grafana       # Ladder klasörü, level=lvl07
+make up            # profil → build → push → deploy → rollout wait → smoke
+code=$(curl -s -XPOST http://lvl07.localtest.me/api/links -H 'Content-Type: application/json' -d '{"url":"https://example.com"}' | jq -r .code); echo "$code"
+curl -s -o /dev/null -w '%{http_code} → %{redirect_url}\n' http://lvl07.localtest.me/$code   # 302 → https://example.com
+make grafana       # Ladder klasörü, level=lvl07 — giriş: admin / ladder
 make load S=mixed  # aynı senaryolar her seviyede: create redirect mixed hot-key burst abuser read-your-writes stairs scan
-make down
+make repro P=P07-01   # §6'daki bir sorunu otomatik üret → REPRODUCED / NOT-REPRODUCED
+make env           # açık ayar/tuzaklar · değiştir: make set E="KEY=değer" · hepsini geri al: make reset (§7)
+make down          # seviyeyi kaldır · kümeyi durdurmak için: make -C ../platform stop
 ```
 
 Ölçeklemeyi izlemek için:
@@ -221,6 +224,8 @@ kullanmak (kapanışta hayır diyemez — 01'de ayırmıştık) · readiness'a b
 Hepsi **probe'un ne sorduğunu tanımlamamaktan** doğuyor.
 
 ## 7. Seviye içi alıştırmalar (TRAP_ bayrakları)
+
+> **Nasıl uygulanır:** aç `make set E="TRAP_X=true"` · ne açık? `make env` · hepsini geri al `make reset` (ortamı `deploy/`'daki hâline döndürür; `make unset E=TRAP_X` yalnızca siler). Tablodaki diğer ayarlar da aynı yolla (`make set E="CACHE_TTL=1h"`). Pod'lar yeni değerle yeniden başlar; komut hazır olunca döner. Varsayılan olarak seviyenin TÜM uygulama servislerine uygulanır (tek servis: `W=redirect`); 12'den itibaren Argo Rollout'larda da çalışır — `kubectl set env` orada çalışmaz. `make repro` scriptleri tuzağı KENDİLERİ açıp kapatır ve bitince ortamı eski hâline getirir (senin açtıkların dahil): elle alıştırma için `make set` + `make load`, otomatik ölçüm için `make repro`. Bitirince `make reset`: açık kalan bir tuzak sonraki deneyi sessizce bozar.
 
 | Bayrak | Ne yapar | Reproduce | Düzeltme |
 |---|---|---|---|

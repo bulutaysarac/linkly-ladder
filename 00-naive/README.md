@@ -25,15 +25,18 @@ Yok — bu ilk basamak. `problems/SOLVES` boş.
 
 ## 4. Ayağa kaldırma
 
-Platform bir kere kurulur (`cd platform && make minimal`). Sonra bu klasörde:
+İlk kez mi? Önce kök README'deki [Sıfırdan başlangıç](../README.md#sıfırdan-başlangıç) — platform bir kez kurulur (`cd platform && make full`).
+Bu seviyenin platformdan istediği: **yalnızca temel yığın (kind, ingress, Prometheus, Grafana)**. `make up` ilk adımda (profil) bunları açar ve kullanılmayanları kapatır; bir bileşen kurulu değilse hangi komutla kurulacağını söyleyip durur.
 
 ```bash
-make up            # build → push → deploy → rollout wait → smoke
-curl -s -XPOST http://lvl00.localtest.me/api/links -H 'Content-Type: application/json' -d '{"url":"https://example.com"}'
-curl -I http://lvl00.localtest.me/<code>
-make grafana       # Ladder klasörü, level=lvl00
+make up            # profil → build → push → deploy → rollout wait → smoke
+code=$(curl -s -XPOST http://lvl00.localtest.me/api/links -H 'Content-Type: application/json' -d '{"url":"https://example.com"}' | jq -r .code); echo "$code"
+curl -s -o /dev/null -w '%{http_code} → %{redirect_url}\n' http://lvl00.localtest.me/$code   # 301 → https://example.com (01'den itibaren 302 — neden: P00-10)
+make grafana       # Ladder klasörü, level=lvl00 — giriş: admin / ladder
 make load S=mixed  # aynı senaryolar her seviyede: create redirect mixed hot-key burst abuser read-your-writes stairs scan
-make down
+make repro P=P00-01   # §6'daki bir sorunu otomatik üret → REPRODUCED / NOT-REPRODUCED
+make env           # açık ayar/tuzaklar · değiştir: make set E="KEY=değer" · hepsini geri al: make reset (§7)
+make down          # seviyeyi kaldır · kümeyi durdurmak için: make -C ../platform stop
 ```
 
 ## 5. API
@@ -296,6 +299,8 @@ uğramıyor). 05'te bu, analitiklerin neden eksik saydığının kökü olarak g
 **Nerede çözülüyor:** 01 (`302` + `Cache-Control: no-store`).
 
 ## 7. Seviye içi alıştırmalar (TRAP_ bayrakları)
+
+> **Nasıl uygulanır:** aç `make set E="TRAP_X=true"` · ne açık? `make env` · hepsini geri al `make reset` (ortamı `deploy/`'daki hâline döndürür; `make unset E=TRAP_X` yalnızca siler). Tablodaki diğer ayarlar da aynı yolla (`make set E="CACHE_TTL=1h"`). Pod'lar yeni değerle yeniden başlar; komut hazır olunca döner. Varsayılan olarak seviyenin TÜM uygulama servislerine uygulanır (tek servis: `W=redirect`); 12'den itibaren Argo Rollout'larda da çalışır — `kubectl set env` orada çalışmaz. `make repro` scriptleri tuzağı KENDİLERİ açıp kapatır ve bitince ortamı eski hâline getirir (senin açtıkların dahil): elle alıştırma için `make set` + `make load`, otomatik ölçüm için `make repro`. Bitirince `make reset`: açık kalan bir tuzak sonraki deneyi sessizce bozar.
 
 Bu seviyede TRAP bayrağı **yok**: 00'ın tamamı zaten bir tuzak. İlk `TRAP_*` bayrakları 01'de gelir
 (`TRAP_METRIC_LABEL_CODE`, `TRAP_LIVENESS_STRICT`).

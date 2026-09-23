@@ -15,11 +15,14 @@ Bir mimari kararı ezberlemekle, o kararı doğuran acıyı yaşamak aynı şey 
 olarak gelir. README'de "hangi sorunu çözüyor" satırı boşsa o parça eklenmez.
 
 ```bash
-cd platform && make minimal      # kind + ingress + Prometheus/Grafana/Loki  (bir kere)
-cd ../00-naive && make up        # seviye ayağa kalkar
+cd platform && make full         # küme + tüm operatörler + Prometheus/Grafana  (bir kere, ~20-25 dk)
+cd ../00-naive && make up        # seviye ayağa kalkar (platform profili dahil)
 make repro P=P00-01              # sorunu kendi gözünle gör
-make grafana                     # aynı sorunu panelde gör
+make grafana                     # aynı sorunu panelde gör (admin / ladder)
 ```
+
+İlk kez mi? **[Sıfırdan başlangıç](#sıfırdan-başlangıç)** — kurulumdan ilk soruna, seviye geçişinden
+temizliğe kadar adım adım.
 
 ## Tekdüzelik (en önemli kural)
 
@@ -55,15 +58,177 @@ Bir seviyeyi öğrendiysen hepsini öğrendin. `tools/lint-skeleton.sh` sapmayı
 | 13 | [`13-security-tenancy`](13-security-tenancy) | Kim, neye, ne kadar | JWT, RLS, NetworkPolicy, Kyverno | Operasyonel sürtünme |
 | 14 | [`14-modern`](14-modern) | Son hal | Redis HA, L1+L2, gRPC, kapasite modeli | "Yolun devamı" listesi |
 
+## Sıfırdan başlangıç
+
+Bu bölüm, projeyi hiç görmemiş biri için baştan sona yazıldı. Sırayla git; her adımın sonunda
+"ne görmelisin" satırı var. Bir yerde takılırsan en alttaki **Takılırsan** tablosuna bak.
+
+### 0. Neye ihtiyacın var
+
+| Gereken | Neden / not |
+|---|---|
+| **Docker Desktop**, Settings → Resources: **en az 6 CPU / 10 GB**, mümkünse 8 CPU / 12 GB | Her şey bir kind kümesinde (Docker içinde 4 Kubernetes düğümü) koşar. 6 CPU ile 00–12 rahat; 13–14 zorlanır (bkz. `docs/VERIFICATION.md` 82) |
+| `brew install kind kubectl helm k6 jq` | kind: küme · kubectl/helm: kurulum · k6: yük üretici · jq: script'ler |
+| `git`, `python3`, `make` | macOS'ta hazır gelir (`xcode-select --install`) |
+| Go 1.26+ (**isteğe bağlı**) | Yalnızca `make test`/`make lint` için; imajlar Docker içinde derlenir |
+| Boş portlar: **80, 443, 5001** | 80/443 ingress'e, 5001 yerel imaj registry'sine gider |
+| İnternet | İmajlar ve helm chart'ları indirilir. `*.localtest.me` adresleri genel DNS'te 127.0.0.1'e çözülür |
+
+macOS'ta geliştirildi ve denendi; Linux'ta çalışması beklenir ama denenmedi.
+Kurumsal ağdaysan (Zscaler, Cloudflare Gateway gibi TLS araya girmesi) ek bir şey yapma: kurulum,
+kök sertifikayı düğümlere kendisi kurar (`platform/kind/trust-ca.sh`).
+
+### 1. Platformu kur (bir kez, ~20–25 dk)
+
+```bash
+git clone https://github.com/bulutaysarac/linkly-ladder.git
+cd linkly-ladder/platform
+make full
+```
+
+`make full`: kind kümesi (1 control-plane + 3 worker, adı `linkly`) + Calico + yerel registry +
+ingress + Prometheus/Grafana/Loki + Chaos Mesh + KEDA + CloudNativePG + Tempo + Argo CD/Rollouts +
+cert-manager/Kyverno. Hepsini bir kez kurarsın; her seviye yalnızca kendi ihtiyacını açık tutar
+(profil), gerisi kapalı durur.
+
+**Ne görmelisin:** son satırlarda `✔ cert-manager + sealed-secrets + kyverno`. `make status` dört
+düğümü `Ready` gösterir. Docker Desktop'ta konteynerler **`linkly`** grubu altındadır.
+(Makine dar ise önce `make minimal` — yalnızca 00–01 için — ya da `make standard` — 02–10.)
+
+| Adres | Ne | Giriş |
+|---|---|---|
+| http://grafana.localtest.me | Paneller (`Ladder` klasörü, üstte `level` seçici) | admin / ladder |
+| http://prometheus.localtest.me | Ham metrikler, PromQL | — |
+| http://lvlNN.localtest.me | NN. seviyenin kendisi (örn. `lvl00`) | 13+: API anahtarı |
+
+### 2. İlk seviye: 00-naive (~10 dk)
+
+```bash
+cd ../00-naive
+make up
+```
+
+`make up` sırasıyla: seviyenin platform profilini uygular → servisleri Docker'da derler →
+registry'ye iter → Kubernetes'e kurar → hazır olmasını bekler → bir link oluşturup açarak dener.
+**Ne görmelisin:** `smoke ✔ POST /api/links → <kod>, GET /<kod> → 301` ve `✔ lvl00 ayakta` (~1 dk; ilk
+derlemede daha uzun).
+
+Şimdi uygulamayı elle dene:
+
+```bash
+code=$(curl -s -XPOST http://lvl00.localtest.me/api/links -H 'Content-Type: application/json' -d '{"url":"https://example.com"}' | jq -r .code); echo "$code"
+curl -s -o /dev/null -w '%{http_code} → %{redirect_url}\n' http://lvl00.localtest.me/$code   # 301 → https://example.com
+make grafana                                          # tarayıcıda Ladder panelleri (admin / ladder)
+```
+
+301 mi? Evet — ve bu 00'ın sorunlarından biri (P00-10: tarayıcı kalıcı yönlendirmeyi önbellekler, tıklama
+sayılmaz). 01'den itibaren 302 döner. Merdivende "garip" görünen her davranışın README'de bir karşılığı vardır.
+
+### 3. Bir sorunu yaşa
+
+Her seviyenin README'si aynı 10 başlığa sahiptir. Bir seviyede **şu sırayla** oku:
+
+| Bölüm | Neden oku |
+|---|---|
+| §1 Bu seviye ne? · §2 Mimari | Ne kuruldu, neden |
+| §3 Önceki seviyeden çözülenler | Bir önceki seviyede yaşadığın hangi acıya cevap |
+| **§6 Reproduce edilebilir sorunlar** | **Asıl ders.** Her sorun: belirti, neden, adım adım elle üretme, Grafana'da nerede görüneceği, hangi seviyede çözüldüğü |
+| §7 Alıştırmalar | Bir çözümü bilerek bozup sorunun geri geldiğini görmek |
+| §8 Gözlemlenebilirlik · §9 Bilerek bırakılanlar · §10 `make diff-prev` | Paneller, kapsam dışı kalanlar, kod farkının okuma rehberi |
+
+Örnek — 00'ın ilk sorunu (**P00-01**, eşzamanlı yazma süreci öldürür). §6'daki adımlar:
+
+```bash
+kubectl -n lvl00 get pods -w                           # İKİNCİ terminalde açık bırak
+make load S=create K6_ARGS="--vus 50 --duration 30s"  # 50 eşzamanlı kullanıcı
+```
+
+**Ne görmelisin:** birkaç saniye içinde ikinci terminalde `RESTARTS` artar;
+`kubectl -n lvl00 logs -l app.kubernetes.io/name=linkly --previous | head` →
+`fatal error: concurrent map writes`. Grafana → `01 · Pods & Resources` → "Restart sayısı".
+
+Aynı deneyi tek komutla da koşabilirsin — script ölçer ve hükmünü basar:
+
+```bash
+make repro P=P00-01      # → REPRODUCED (sorun var) / NOT-REPRODUCED (yok) / SKIPPED (ölçülemedi)
+```
+
+Yıkıcı adımı olan scriptler (düğüm dondurma, pod öldürme…) onay ister: `CONFIRM=1 make repro P=…`.
+Bir seviyedeki tüm sorunları sırayla koşmak 20–60 dk sürer; önce birkaçını **elle** yaşa.
+
+### 4. Alıştırmalar (bir çözümü bilerek boz)
+
+Her README'nin §7'si, bir çözümü kapatan `TRAP_*` bayraklarını ve "elle denemeye değer" ayarları
+listeler. Örnek — 03'ün önbelleğini çalışma kümesinden küçült:
+
+```bash
+cd ../03-local-cache && make up
+make load S=mixed K6_ARGS="--duration 30s"   # normal: Grafana → 04 · Cache → isabet oranı ~%100
+make set E="CACHE_CAPACITY=100"              # pod'lar yeni değerle yeniden başlar, hazır olunca döner
+make load S=mixed K6_ARGS="--duration 30s"   # isabet ~%20'ye çöker, atılan kayıt 0 → ~2000/s, DB'ye yığılan istekler 5xx üretir
+make env                                     # şu an ne ayarlı? → CACHE_CAPACITY=100
+make reset                                   # HER ŞEYİ deploy/'daki hâline döndür (CACHE_CAPACITY=50000)
+```
+
+`make unset E=X` bir değişkeni yalnızca siler; manifest'te tanımlı bir ayarı eski değerine döndürmek
+için `make reset` kullan. `make repro` scriptleri tuzakları **kendileri** açıp kapatır ve bitince ortamı
+eski hâline getirir — elle alıştırma için `make set` + `make load`, otomatik ölçüm için `make repro`.
+
+### 5. Sonraki seviyeye geç
+
+```bash
+make down                  # bu seviyeyi kaldır (namespace silinir)
+cd ../01-hardened
+make diff-prev | less      # 00 → 01 kod farkı: çözümün KENDİSİ (uzun; §10 nasıl okunacağını anlatır)
+make up
+make verify-prev           # 00'ın sorunlarını burada tekrar koşar
+```
+
+`verify-prev` çıktısı: `BEKLENEN` sütununda `NOT-REPRODUCED` yazan satırlar bu seviyenin çözdüğünü
+iddia ettikleridir (`problems/SOLVES`) — sonuç uyuşmazsa satır `✘` alır. `(açık kalabilir)` yazanlar
+bilerek sonraki seviyelere bırakılmıştır. **Aynı anda tek seviye çalıştır**: makine buna göre ayarlı.
+
+### 6. Günün sonunda
+
+```bash
+make down                        # açık seviyeyi kaldır
+make -C ../platform stop         # kümeyi DURDUR (silmez) — yarın: make -C platform start
+```
+
+Docker Desktop'ta `linkly` grubunun **sil** düğmesi tüm kümeyi siler; durdurmak için `make stop`
+kullan. Her şeyi kaldırmak: `make -C platform destroy`.
+
+### Takılırsan
+
+| Belirti | Sebep | Ne yap |
+|---|---|---|
+| `make up`: `✘ seviye NN şu platform bileşenlerini istiyor ama kurulu değil: …` | O seviyenin operatörü kurulmamış | Mesajdaki komut, ya da `make -C platform full` |
+| `failed calling webhook … connection refused` | Bir operatör (CNPG, Kyverno) yeniden başlıyor | `make up` kendisi 3 kez dener; yine olursa 1 dk bekleyip tekrar `make up` |
+| `lvlNN siliniyor, bitmesi bekleniyor…` uzun sürüyor | Önceki `make down` henüz bitmedi | Bekle; 5 dk'yı geçerse `kubectl get ns lvlNN -o yaml` → `status.conditions` |
+| `Forbidden` / `TLS handshake timeout` / komutlar çok yavaş | VM doygun, API sunucusu yavaş (en sık sebep) | Mac'te ağır işleri kapat; `docker stats` ile `linkly-*` toplamına bak (`kubectl top` yanıltır); gerekirse `make -C platform stop && make -C platform start` |
+| `make grafana` boş sayfa / 502 | Grafana kapalı (otomatik turlar `GRAFANA=0` ile kapatır) | `make profile` (Grafana'yı açar) |
+| `lvlNN.localtest.me` açılmıyor | DNS filtreleniyor ya da seviye ayakta değil | `dig lvl00.localtest.me` → 127.0.0.1 olmalı; değilse `/etc/hosts`'a `127.0.0.1 lvl00.localtest.me grafana.localtest.me prometheus.localtest.me` ekle |
+| `port is already allocated` (80/443/5001) | Portu başka bir şey tutuyor — ya da eski adlı (`ladder`) bir küme | `lsof -i :80`; eski küme ise `make -C platform destroy` |
+| 13+'da POST `401` | Yönetim uçları API anahtarı ister | README §4'teki `Authorization: Bearer …` başlıklı komutu kullan |
+| Script `SKIPPED` dedi | Ölçüm yapılamadı (ortam hazır değil) — sahte hüküm vermek yerine durdu | Script çıktısındaki sarı uyarıyı oku; genelde `make up` ile düzelir |
+| Her şey tuhaf | — | `make status` (seviye), `make -C platform status` (platform), `make logs` |
+
+Daha derini: [docs/VERIFICATION.md](docs/VERIFICATION.md) — merdiveni doğrularken bulunan sessiz
+yanlışların her biri: ne gizlediği ve nasıl düzeltildiği. Kendi deneyini yazacaksan:
+[docs/PROBLEM-TEMPLATE.md](docs/PROBLEM-TEMPLATE.md).
+
 ## Her seviyede aynı komutlar
 
 ```
-make up        # build → push → deploy → rollout → smoke
+make up        # profil → build → push → deploy → rollout → smoke
 make down      # namespace sil
+make status    # pod/servis durumu        ·  make logs  # uygulama logları
 make load S=   # create redirect mixed hot-key burst abuser read-your-writes stairs scan
-make repro P=  # PNN-XX sorununu reproduce et  → REPRODUCED / NOT-REPRODUCED
+make repro P=  # PNN-XX sorununu reproduce et  → REPRODUCED / NOT-REPRODUCED / SKIPPED
 make chaos C=  # pg-delay-2s redis-kill consumer-kill-30s … (make unchaos ile kaldır)
+make set E=    # alıştırma: "TRAP_X=true CACHE_TTL=1h"  ·  make env  ·  make reset (hepsini geri al)
 make grafana   # Ladder klasörü, level=lvlNN
+make profile   # bu seviyenin platform bileşenlerini aç/kapat (make up zaten yapar)
 make diff-prev # bir önceki seviyeyle fark — merdivenin asıl ders materyali
 make verify-prev  # önceki seviyenin sorunları burada çözülmüş mü?
 ```
@@ -76,8 +241,8 @@ make verify-prev  # önceki seviyenin sorunları burada çözülmüş mü?
 | `ladder.mk`, `tools/lint-skeleton.sh`, `tools/newlevel.sh`, `tools/ladder-matrix` | ✅ |
 | `docs/` (API kontratı, seviye şablonu, sorun şablonu, ADR'ler) | ✅ |
 | 15 seviyenin tamamı (`00-naive` … `14-modern`) | ✅ kod + deploy + README + reproduce scriptleri yazıldı |
-| Doğrulama (`make repro`, `make verify-prev`) | 🔄 00-05 doğrulandı (03: 6/7), 06+ sürüyor |
-| `platform/lib/profile.sh` (seviyeye göre bileşen aç/kapat) | ✅ **seviyeden önce koş** — küme 6 CPU |
+| Doğrulama (`make repro`, `make verify-prev`) | ✅ tam tur 00→14 koşuldu (108 scriptten 86 REPRODUCED) — ayrıntı ve bulgular: [docs/VERIFICATION.md](docs/VERIFICATION.md); açık maddeler: [docs/DEVAM.md](docs/DEVAM.md) |
+| `platform/lib/profile.sh` (seviyeye göre bileşen aç/kapat) | ✅ `make up`'ın ilk adımı; eksik bileşeni söyler |
 
 ## Faz A ölçüm sonuçları
 
@@ -172,25 +337,4 @@ listeye bak.
 | Go satırı (yorumlar dahil) | ~58 000 |
 | Türkçe README | ~4 800 satır |
 | Paylaşılan Grafana dashboard'u | 16 (`$level` dropdown'lı, tek set) |
-| k6 senaryosu · chaos şablonu | 9 · 10 |
-
-## Kurulum
-
-```bash
-brew install kind helm k6 kustomize jq
-# Docker Desktop: 6 CPU / 10 GB (Settings → Resources)
-cd platform && make minimal          # 00-05 için yeterli
-make keda cnpg chaos                 # 06-10
-make tempo argo security             # 11-14
-make stop                            # kümeyi silmeden durdur
-make start                           # durdurulmuş kümeyi geri getir
-```
-
-Docker Desktop'ta küme `linkly` grubu altında görünür. **Grubun "sil" düğmesi tüm kümeyi
-siler** (tüm seviyelerin verisi dahil) — durdurmak için `make stop`, silmek için `make destroy`.
-
-Her seviye kendi bileşenlerini `deploy/` içinde taşır; platform yalnızca **operatörleri ve
-gözlemlenebilirlik yığınını** kurar.
-
-Kurumsal ağdaysan (Cloudflare Gateway / Zscaler gibi TLS araya girmesi) `make cluster` adımı kök CA'yı
-otomatik olarak node'lara kurar (`platform/kind/trust-ca.sh`); olmadan image çekilemez.
+| k6 senaryosu · chaos şablonu | 10 · 12 |

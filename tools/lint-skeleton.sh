@@ -44,8 +44,11 @@ for h in "${heads[@]}"; do
   [[ -n "$n" ]] || { err "README başlık eksik: $h"; continue; }
   (( n > prev )) || err "README başlık sırası bozuk: $h"; prev=$n
 done
-grep -q 'make up            # build → push → deploy → rollout wait → smoke' "$D/README.md" || err "README §4 sabit metin değişmiş"
+grep -q 'make up            # profil → build → push → deploy → rollout wait → smoke' "$D/README.md" || err "README §4 sabit metin değişmiş"
 grep -q 'Her seviyede aynı: \[docs/API.md\]' "$D/README.md" || err "README §5 sabit metin değişmiş"
+# 6b. Yabancı biri için giriş kapısı: §4 kök rehbere bağlanmalı, §7 alıştırmaların NASIL uygulanacağını söylemeli.
+grep -q 'README.md#sıfırdan-başlangıç' "$D/README.md" || err "README §4: Sıfırdan başlangıç bağlantısı yok"
+grep -q '\*\*Nasıl uygulanır:\*\* aç .make set' "$D/README.md" || err "README §7: 'Nasıl uygulanır' (make set/unset) notu yok"
 
 # 7. Her problems/P*.sh README'de "### PNN-XX" bölümüne sahip mi, ve tersi
 for f in "$D"/problems/P*.sh; do id=$(basename "${f%.sh}"); grep -q "^### $id" "$D/README.md" || err "README'de bölüm yok: ### $id"; done
