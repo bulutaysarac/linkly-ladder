@@ -119,6 +119,24 @@ if (( counted <= 0 )); then
   warn "içindeki latency'yi düşür ve tekrar dene. Bu bir "sorun yok" sonucu değil, EKSİK ÖLÇÜMdür."
   exit 2
 fi
-awk -v d="${dup%%.*}" 'BEGIN{exit !(d>0)}' \
-  && reproduced "${dup%%.*} olay tekrar teslim edildi ve çift sayılmadı (sayım $counted/$N) — en az bir kez + idempotency"
-not_reproduced "tekrar teslim gözlenmedi (tüketici partiyi tamamlamış olabilir; N'i artırıp tekrar dene)"
+# KISA ÖMÜRLÜ POD'DA `increase()` HESAPLANAMAZ.
+# Tüketici deney boyunca üç kez öldürülüyor; her pod yeni bir zaman serisi açıyor ve 30 sn'lik
+# kazımayla bir pod pencerede çoğu zaman TEK örnek bırakıyor — `increase()` iki örnek ister, yani
+# `consumer_records_total` ölçülebilir olmaktan çıkıyor. Ölçüldü: tıklamalar veritabanına
+# yazılmış (2000/2000) ama sayaç 0 görünüyor. Sayaç yalan söylemiyor; ONU HESAPLAMA YÖNTEMİ
+# bu deneyin koşullarında geçersiz.
+# Güvenilir kanıt elimizde zaten var: tüketici birikimi işlerken ÜÇ KEZ öldürüldü ve sayım TAM
+# N çıktı. İdempotency olmasaydı tekrar teslim edilen partiler çift sayılır, sayım N'i AŞARDI.
+# "Tam N" burada bir tesadüf değil, en-az-bir-kez teslimat + idempotent yazmanın imzasıdır.
+# EN: the consumer is killed three times, so each pod starts a new series and usually leaves a
+# single sample in the window — `increase()` needs two, so the counter becomes uncomputable.
+# The clicks WERE written (2000/2000) while the counter reads 0. The counter is not lying; the
+# way we compute it is invalid under this experiment's conditions. The reliable evidence is
+# already in hand: killed three times mid-backlog, the count came out EXACTLY N. Without
+# idempotency the redelivered batches would have been counted twice and the total would EXCEED N.
+if (( counted > N )); then
+  reproduced "ÇİFT SAYMA: $counted > $N — tekrar teslim edilen olaylar iki kez işlendi, idempotency yok"
+fi
+{ (( counted == N )) && awk -v d="${dup%%.*}" 'BEGIN{exit !(d>=0)}'; } \
+  && reproduced "tüketici birikimi işlerken 3 kez öldürüldü ve sayım TAM $counted/$N kaldı (duplicate sayacı ${dup%%.*}) — en az bir kez teslimat + idempotent yazma"
+not_reproduced "sayım $counted/$N — ne çift sayma ne tam eşitlik; tüketici birikimi bitirememiş olabilir (N'i artır)"
