@@ -100,6 +100,17 @@ func (a *API) handleRedirect(w http.ResponseWriter, r *http.Request) {
 	defer span.End()
 	r = r.WithContext(ctx0)
 	code := r.PathValue("code")
+	// İSTEK BAŞINA DEBUG LOGU — "geliştirici debug seviyesini üretimde unuttu" senaryosu.
+	// EN: P11-05 measures what debug logging costs, but the level had ZERO `.Debug()` calls on any
+	//     path, so `LOG_LEVEL=debug` changed nothing and the experiment measured run-to-run noise
+	//     (151650 vs 144136 bytes/s). A trap that no code honours is not a trap. slog itself skips
+	//     the call when the level is above debug, so this costs nothing at info.
+	// TR: P11-05 debug loglamanın bedelini ölçüyor ama seviyede HİÇBİR yolda `.Debug()` çağrısı
+	//     yoktu; `LOG_LEVEL=debug` hiçbir şeyi değiştirmiyor ve deney iki koşunun gürültüsünü
+	//     ölçüyordu (151650 vs 144136 bayt/s). Hiçbir kodun uymadığı bir tuzak, tuzak değildir.
+	//     slog seviye debug'ın üstündeyse çağrıyı zaten atlar, yani info'da bedeli yoktur.
+	a.log.Debug("redirect isteği", "code", code, "ua", r.UserAgent(),
+		"ip", r.Header.Get("X-Forwarded-For"), "referer", r.Referer(), "proto", r.Proto)
 
 	// "Kötü sürüm" simülasyonu (P12-01). Canary analizinin görevi bunu %10 trafikte YAKALAYIP
 	// ilerlemeyi durdurmaktır — yani hatanın %100'e ulaşmasını engellemek.
