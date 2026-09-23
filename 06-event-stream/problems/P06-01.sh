@@ -62,9 +62,16 @@ kubectl -n "$NS" scale "$(wl $CONSUMER)" --replicas=1 >/dev/null
 # Öldürmeden ÖNCE işlemeye zaman ver: sert öldürülen tüketicinin grubu yeniden dengelemesi
 # saniyeler sürüyor; hemen öldürürsen ortada commit edilmemiş parti değil, hiç başlamamış bir
 # tüketici olur ve tekrar teslim GÖZLENMEZ. Ölçmek istediğin durumu deneyin kendisi üretmeli.
-# Daha çok ve daha sık öldür: her öldürme, commit edilmemiş bir partiyi yakalama şansıdır.
-for i in 1 2 3 4 5; do
-  sleep 6
+# ÖLDÜRME TEMPOSU, KAZIMA ARALIĞINDAN SEYREK OLMALI.
+# 6 saniyede bir öldürdüğümüzde tüketici pod'ları Prometheus'un 30 sn'lik kazımasından ÖNCE
+# ölüyor: iş yapılıyor (tıklamalar sayıldı, 2000/2000) ama `consumer_records_total` hiç kazınmadığı
+# için ok=0 ve duplicate=0 görünüyor — yani ölçüm, ölçtüğü şeyi öldürüyordu. Öldürmeler arası
+# süre kazıma aralığını aşmalı ki her pod en az bir kez kazınsın.
+# EN: killing every 6s destroys the consumer pods before Prometheus's 30s scrape, so the work
+# happens (2000/2000 clicks counted) while `consumer_records_total` stays at 0 — the measurement
+# was killing the thing it measured. Space the kills beyond the scrape interval.
+for i in 1 2 3; do
+  sleep 35
   kubectl -n "$NS" delete pod -l app.kubernetes.io/name=$CONSUMER --force --grace-period=0 >/dev/null 2>&1 || true
 done
 kubectl -n "$NS" rollout status "$(wl $CONSUMER)" --timeout=120s >/dev/null 2>&1 || true
@@ -98,8 +105,16 @@ note "Dağıtık sistemlerde 'tam bir kez teslimat' yoktur; olan şey en-az-bir-
 #     NOT-REPRODUCED demek "sistem sağlam" diye okunur, oysa gerçek "deneyi hiç koşmadık".
 #     Yüksek sesle hata ver; EKSİK ÖLÇÜM yeşil bir sonuç değildir. (2 sn'lik gecikme tam olarak
 #     böyle saklanmıştı: tüketiciyi tamamen durdurmuştu, script de buna temiz koşu demişti.)
-if awk -v o="${ok%%.*}" 'BEGIN{exit !(o+0==0)}'; then
-  warn "ölçüm yapılamadı: tüketici ${WIN}s'lik pencerede TEK KAYIT işlemedi (sayılan=$counted)."
+# "DENEY KOŞTU MU?" SORUSUNU, GÖRÜLEBİLEN EN SAĞLAM KANITA SOR.
+# Bu kontrol `consumer_records_total`a bakıyordu; oysa o sayaç yalnızca pod KAZINDIYSA vardır.
+# Tıklama sayımı ise veritabanından okunur ve pod'un ömründen bağımsızdır — deneyin gerçekten
+# koşup koşmadığının sağlam kanıtı odur. Sayaç, DUPLICATE'i görmek için hâlâ gerekli; ama
+# "hiç çalışmadı" hükmünü ona bağlamak, ölçüm aracının yokluğunu sistemin sessizliği sanmaktır.
+# EN: this checked `consumer_records_total`, which only exists if the pod was scraped. The click
+# count comes from the database and does not depend on pod lifetime — that is the robust evidence
+# that the experiment ran. Mistaking the absence of an instrument for the silence of the system.
+if (( counted <= 0 )); then
+  warn "ölçüm yapılamadı: tüketici hiçbir tıklama yazmadı (sayılan=$counted, ok=${ok%%.*})."
   warn "Broker gecikmesi tüketiciyi yavaşlatmak yerine DURDURMUŞ olabilir; platform/chaos/redpanda-delay.yaml"
   warn "içindeki latency'yi düşür ve tekrar dene. Bu bir "sorun yok" sonucu değil, EKSİK ÖLÇÜMdür."
   exit 2
