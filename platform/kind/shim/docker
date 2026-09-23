@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# kind'ın `docker run` çağrılarına Docker Compose etiketleri ekleyen İNCE sarmalayıcı.
+#
+# EN: Docker Desktop groups containers into a collapsible project only by the Compose label
+#     `com.docker.compose.project`. kind creates each node with its own `docker run` and offers no
+#     way to add container labels, so the cluster showed up as five unrelated rows. `make cluster`
+#     puts this directory first on PATH while kind runs: `docker run` gets the labels, every other
+#     subcommand goes to the real docker untouched. Labels can only be set at creation, which is why
+#     this lives in the create step and not anywhere later.
+#     Side effect worth knowing: Docker Desktop's "delete" on the group removes the whole cluster,
+#     and `docker compose -p linkly down` would too. Use `make destroy` / `make stop` instead.
+# TR: Docker Desktop konteynerleri açılır-kapanır bir proje altında YALNIZCA Compose etiketine
+#     (`com.docker.compose.project`) göre gruplar. kind her düğümü ayrı bir `docker run` ile yaratır
+#     ve konteyner etiketi eklemenin bir yolunu sunmaz; küme birbiriyle ilgisiz beş satır olarak
+#     görünüyordu. `make cluster`, kind çalışırken bu klasörü PATH'in başına koyar: `docker run`
+#     etiketleri alır, diğer her alt komut gerçek docker'a olduğu gibi gider. Etiket yalnızca
+#     oluşturma anında verilebildiği için bu iş sonradan değil, kurulum adımında yapılır.
+#     Bilinmesi gereken yan etki: Docker Desktop'ta grubun "sil" düğmesi tüm kümeyi siler;
+#     `docker compose -p linkly down` da öyle. Bunun yerine `make destroy` / `make stop`.
+set -euo pipefail
+real=${LADDER_REAL_DOCKER:?gerçek docker yolu verilmedi (platform/Makefile)}
+if [[ "${1:-}" == run ]]; then
+  shift
+  name=""; args=("$@")
+  for (( i=0; i<${#args[@]}; i++ )); do
+    case "${args[i]}" in
+      --name)   name=${args[i+1]:-} ;;
+      --name=*) name=${args[i]#--name=} ;;
+    esac
+  done
+  project=${KIND_NAME:?}
+  svc=${name#"$project"-}
+  exec "$real" run \
+    --label "com.docker.compose.project=$project" \
+    --label "com.docker.compose.service=${svc:-node}" \
+    --label "com.docker.compose.container-number=1" \
+    --label "com.docker.compose.oneoff=False" \
+    "$@"
+fi
+exec "$real" "$@"

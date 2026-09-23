@@ -1,18 +1,27 @@
 # platform/Makefile — paylaşılan altyapı. Sıra: make cluster → make core → make obs → make dashboards
 # ya da tek seferde: make minimal | standard | full
-KIND_NAME := ladder
+# İSİM: Docker Desktop yalnızca Compose projelerini gruplar; kind düğümleri ve registry ayrı
+# `docker run`'lardır ve gruplanamaz. Ortak ön ek (linkly-*) onları listede yan yana tutar.
+# kind'da küme adı sonradan DEĞİŞTİRİLEMEZ: değiştirirsen `make destroy` + yeniden kurulum.
+# kind/cluster.yaml'daki `name:` bununla aynı olmalı.
+KIND_NAME := linkly
+REG_NAME  := linkly-registry
+export KIND_NAME REG_NAME
+# kind/shim/docker kind'ın `docker run`larına Compose etiketi ekler (Docker Desktop gruplaması).
+REAL_DOCKER := $(shell command -v docker)
 CALICO_VER := v3.29.3
 INGRESS_URL := https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
 METRICS_URL := https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
 SHELL := /bin/bash
 
-.PHONY: help cluster registry trust-ca core cnpg tempo argo security obs dashboards minimal standard full chaos keda destroy status
+.PHONY: help stop start cluster registry trust-ca core cnpg tempo argo security obs dashboards minimal standard full chaos keda destroy status
 
 help: ## Hedefler
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
 cluster: ## kind cluster (1 cp + 3 worker) + Calico + local registry
-	@kind get clusters 2>/dev/null | grep -qx $(KIND_NAME) || kind create cluster --config kind/cluster.yaml
+	@kind get clusters 2>/dev/null | grep -qx $(KIND_NAME) || \
+	  PATH="$(CURDIR)/kind/shim:$$PATH" LADDER_REAL_DOCKER="$(REAL_DOCKER)" kind create cluster --config kind/cluster.yaml
 	@kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/$(CALICO_VER)/manifests/calico.yaml >/dev/null
 	@kubectl -n kube-system rollout status ds/calico-node --timeout=300s
 	@kubectl wait --for=condition=Ready nodes --all --timeout=300s
@@ -76,8 +85,18 @@ full: standard ## Profil: 11–14 (+tempo, argo… hedefleri 11/12'de eklenecek)
 status: ## Ne kurulu?
 	@kubectl get nodes; echo; helm list -A; echo; kubectl get ingress -A
 
+stop: ## Kümeyi ve registry'yi DURDUR (silmez; `make start` ile geri gelir)
+	@docker stop $(REG_NAME) $$(kind get nodes --name $(KIND_NAME)) >/dev/null && echo "✔ durduruldu"
+
+start: ## Durdurulmuş kümeyi ve registry'yi başlat, düğümler Ready olana kadar bekle
+	@docker start $(REG_NAME) $$(kind get nodes --name $(KIND_NAME)) >/dev/null
+	@# Açılışın ilk saniyelerinde API sunucusu RBAC önbelleği dolmadan "Forbidden" döner ve
+	@# `kubectl wait` bunu kalıcı hata sayıp hemen düşer. Önce /readyz'i bekle.
+	@for i in $$(seq 1 120); do kubectl get --raw /readyz >/dev/null 2>&1 && break; sleep 5; done
+	@kubectl wait --for=condition=Ready nodes --all --timeout=600s >/dev/null && echo "✔ başladı"
+
 destroy: ## Cluster'ı ve registry'yi sil
-	kind delete cluster --name $(KIND_NAME); docker rm -f kind-registry 2>/dev/null || true
+	kind delete cluster --name $(KIND_NAME); docker rm -f $(REG_NAME) 2>/dev/null || true
 
 cnpg: ## CloudNativePG operatörü + MinIO (09+)
 	@helm repo add cnpg https://cloudnative-pg.github.io/charts >/dev/null 2>&1 || true

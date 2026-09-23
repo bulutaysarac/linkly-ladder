@@ -2,7 +2,7 @@
 # CNI kapalı → Calico kurulur (13'te NetworkPolicy için cluster'ı yeniden kurmamak).
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
-name: ladder
+name: linkly   # platform/Makefile KIND_NAME ile aynı olmalı
 networking:
   disableDefaultCNI: true
   podSubnet: 192.168.0.0/16

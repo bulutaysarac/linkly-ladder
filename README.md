@@ -182,6 +182,7 @@ brew install kind helm k6 kustomize jq
 cd platform && make minimal          # 00-05 için yeterli
 make keda cnpg chaos                 # 06-10
 make tempo argo security             # 11-14
+make stop / make start               # kümeyi silmeden durdur / geri getir (Docker Desktop'ta "linkly" grubu)
 ```
 
 Her seviye kendi bileşenlerini `deploy/` içinde taşır; platform yalnızca **operatörleri ve

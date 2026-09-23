@@ -4,7 +4,7 @@
 # Bu script canlı el sıkışmadan kök CA'yı çıkarır, her node'un güven deposuna koyar ve containerd'yi yeniler.
 # Kurumsal ağ dışındaysan zararsız: zincir zaten public CA ise hiçbir şey eklemez.
 set -euo pipefail
-CLUSTER=${CLUSTER:-ladder}
+CLUSTER=${CLUSTER:-${KIND_NAME:-linkly}}
 # Birden çok hedef dene: proxy bazı adlarda cevap vermeyebilir.
 PROBES=${PROBES:-"europe-west8-docker.pkg.dev registry.k8s.io ghcr.io docker.io"}
 CA=$(mktemp -d)/corp-ca.crt
