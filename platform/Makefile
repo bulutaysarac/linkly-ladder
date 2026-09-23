@@ -1,9 +1,9 @@
-# platform/Makefile — paylaşılan altyapı. Sıra: make cluster → make core → make obs → make dashboards
-# ya da tek seferde: make minimal | standard | full
+# platform/Makefile — paylaşılan altyapı. Tek seferde: make full (önerilen) | standard | minimal
+# Adım adım: make cluster → core → obs → chaos keda cnpg → tempo argo security
 # İSİM: Docker Desktop yalnızca Compose projelerini gruplar; kind düğümleri ve registry ayrı
 # `docker run`'lardır ve gruplanamaz. Ortak ön ek (linkly-*) onları listede yan yana tutar.
 # kind'da küme adı sonradan DEĞİŞTİRİLEMEZ: değiştirirsen `make destroy` + yeniden kurulum.
-# kind/cluster.yaml'daki `name:` bununla aynı olmalı.
+# Tek kaynak burası: `make cluster` kind/cluster.yaml'daki `name:`i --name ile ezer.
 KIND_NAME := linkly
 REG_NAME  := linkly-registry
 export KIND_NAME REG_NAME
@@ -86,9 +86,11 @@ keda: ## KEDA (07+)
 	@helm upgrade --install keda kedacore/keda -n keda --create-namespace --wait --timeout 10m
 	@echo "✔ keda"
 
-minimal: cluster core obs ## Profil: 00–05
-standard: minimal chaos keda ## Profil: 06–10 (+redpanda, cnpg hedefleri 06/09'da eklenecek)
-full: standard ## Profil: 11–14 (+tempo, argo… hedefleri 11/12'de eklenecek)
+# Hangi seviye neyi istiyor (platform/lib/profile.sh bunları açar/kapatır, eksikse SÖYLER):
+#   00-01 temel · 02+ chaos · 07+ keda · 09+ cnpg · 11 tempo · 12+ argo · 13+ security
+minimal: cluster core obs ## Seviye 00-01 için yeterli (~10 dk)
+standard: minimal chaos keda cnpg ## Seviye 02-10 (~15 dk)
+full: standard tempo argo security ## HER ŞEY — önerilen; profil kullanılmayanları kapatır (~20-25 dk)
 
 status: ## Ne kurulu?
 	@kubectl get nodes; echo; helm list -A; echo; kubectl get ingress -A

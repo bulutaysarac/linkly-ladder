@@ -121,10 +121,11 @@ if (( n == 11 )); then kubectl -n monitoring scale statefulset tempo --replicas=
 if (( n >= 12 )); then on argocd with-sts; on argo-rollouts; else off argocd; off argo-rollouts; fi
 # cert-manager: 13'ten itibaren
 if (( n >= 13 )); then on cert-manager; else off cert-manager; fi
-# Grafana: otomatik doğrulama turunda gerekmiyor (dashboard'lara insan bakar), ~200 MB.
-# 11+ açık kalsın ki gözlemlenebilirlik seviyeleri elle de incelenebilsin.
-if (( n == 11 )); then kubectl -n monitoring scale deploy kps-grafana --replicas=1 >/dev/null 2>&1
-else                   kubectl -n monitoring scale deploy kps-grafana --replicas=0 >/dev/null 2>&1; fi
+# Grafana: VARSAYILAN AÇIK — merdivenin amacı sorunu panelde GÖRMEK. Eskiden 11 dışında kapatılıyordu
+# (~200 MB) ve `make grafana` her seviyede boş bir sayfa açıyordu: doğrulama turunun tasarrufu,
+# öğrenen için yolun ortasında bir engeldi. İnsan bakmayan otomatik turlar GRAFANA=0 verir.
+if [[ "${GRAFANA:-1}" == 1 ]]; then kubectl -n monitoring scale deploy kps-grafana --replicas=1 >/dev/null 2>&1
+else                                kubectl -n monitoring scale deploy kps-grafana --replicas=0 >/dev/null 2>&1; fi
 # Kyverno: 13'ten önce KAPALI (ölçüldü: ~90 MB × 2 controller ve bu VM'de yer yok).
 # Politika YOKKEN Kyverno webhook'larını kendisi kaldırır, yani replikayı 0'a çekmek güvenli.
 # 13 politikaları uyguladıktan SONRA kapatma: webhook ortada kalır ve failurePolicy=Fail
@@ -135,4 +136,26 @@ else                   kubectl -n monitoring scale deploy kps-grafana --replicas
 # zaten hiçbir şey yapmaz (13'ten önce `platform && make security` çalıştırılmamış olur).
 if (( n >= 13 )); then on kyverno; else kubectl -n kyverno scale deploy --all --replicas=0 >/dev/null 2>&1; fi
 
-echo "profil: seviye $L → chaos=$(( n>=2 )) keda=1(hep) cnpg=$(( n>=9 )) log=$(( n==11 )) tempo=$(( n==11 )) argo=$(( n>=12 )) güvenlik=$(( n>=13 ))"
+echo "profil: seviye $L → chaos=$(( n>=2 )) keda=1(hep) cnpg=$(( n>=9 )) log=$(( n==11 )) tempo=$(( n==11 )) argo=$(( n>=12 )) güvenlik=$(( n>=13 )) grafana=${GRAFANA:-1}"
+
+# KURULU OLMAYAN BİLEŞEN SESSİZCE "AÇILMAZ" — SÖYLE.
+# EN: `on` scales whatever exists; a component that was never installed makes it a silent no-op.
+#     Someone who installed only `make minimal` and moved to level 02 got chaos experiments that
+#     reported SKIPPED with no hint that Chaos Mesh was simply not there. Say what is missing and
+#     the exact command, and fail — a level cannot be experienced without its platform.
+# TR: `on` var olanı ölçekler; hiç kurulmamış bir bileşende sessizce hiçbir şey yapmaz. Yalnızca
+#     `make minimal` kurup 02'ye geçen biri, chaos deneylerinin neden ATLANDI dediğini bilemezdi.
+#     Neyin eksik olduğunu ve tam komutu söyle, ve dur: seviye platformu olmadan yaşanamaz.
+missing=()
+has() { kubectl get ns "$1" >/dev/null 2>&1; }
+(( n >= 2 ))  && ! has chaos-mesh    && missing+=(chaos)
+(( n >= 7 ))  && ! has keda          && missing+=(keda)
+(( n >= 9 ))  && ! has cnpg-system   && missing+=(cnpg)
+(( n >= 11 )) && ! kubectl -n monitoring get statefulset tempo >/dev/null 2>&1 && missing+=(tempo)
+(( n >= 12 )) && ! has argo-rollouts && missing+=(argo)
+(( n >= 13 )) && ! has kyverno       && missing+=(security)
+if (( ${#missing[@]} > 0 )); then
+  echo "✘ seviye $L şu platform bileşenlerini istiyor ama kurulu değil: ${missing[*]}"
+  echo "  kur: cd \"$(cd "$(dirname "$0")/.." && pwd)\" && make ${missing[*]}      (ya da hepsi: make full)"
+  exit 1
+fi

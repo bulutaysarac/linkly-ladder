@@ -31,7 +31,7 @@ SERVICES    := $(notdir $(wildcard cmd/*))
 PREV        := $(shell ls -d $(ROOT)/[0-9][0-9]-*/ | sort | awk -v cur="$(ROOT)/$(LEVEL)-$(NAME)/" '$$0==cur{print prev; exit}{prev=$$0}')
 EXPORT_ENV  := NS=$(NS) LEVEL=$(LEVEL) BASE_URL=$(BASE_URL) PROM_URL=$(PROM_URL) GRAFANA_URL=$(GRAFANA_URL) LADDER_ROOT=$(ROOT)
 
-.PHONY: help build push deploy wait smoke up down status load repro chaos unchaos grafana logs diff-prev verify-prev test lint
+.PHONY: help build push deploy wait smoke profile up down status load repro chaos unchaos grafana set unset env reset logs diff-prev verify-prev test lint
 
 help: ## Hedefler
 	@echo "Seviye $(LEVEL) ($(NAME))  namespace=$(NS)  url=$(BASE_URL)  servisler=$(SERVICES)"
@@ -146,7 +146,13 @@ wait: ## Deployment/StatefulSet + (varsa) Argo Rollout hazır olana kadar bekle
 smoke: ## POST + GET 30x
 	@$(EXPORT_ENV) $(PLATFORM)/lib/smoke.sh
 
-up: push deploy wait smoke ## build → push → deploy → wait → smoke
+# PROFİL `make up`'IN İLK ADIMI. Eskiden turu koşan araç uyguluyordu ve README'lerin hiçbiri
+# söylemiyordu: elle çalışan biri onu atlıyor, 6 çekirdekli VM'de her operatör birden açık kalıyor
+# ve küme deneyden önce çöküyordu. Eksik bir platform bileşenini de burada, seviye kurulmadan söyler.
+profile: ## Bu seviyenin platform bileşenlerini aç, gerisini kapat (make up bunu kendisi yapar)
+	@$(PLATFORM)/lib/profile.sh $(LEVEL)
+
+up: profile push deploy wait smoke ## profil → build → push → deploy → wait → smoke
 	@echo; echo "✔ $(NS) ayakta → $(BASE_URL)"; echo "  Grafana: $(GRAFANA_URL)/dashboards?query=Ladder  (level=$(NS))"
 
 down: ## Namespace'i sil
@@ -190,6 +196,18 @@ unchaos: ## Chaos'u kaldır: make unchaos C=pg-delay-2s (C boşsa hepsini)
 
 grafana: ## Grafana'yı bu seviye seçili aç
 	@echo "$(GRAFANA_URL)/dashboards?query=Ladder   (admin / ladder)"; open "$(GRAFANA_URL)/dashboards?query=Ladder" 2>/dev/null || true
+
+set: ## Alıştırma: ortam değişkeni ver — make set E="TRAP_X=true CACHE_TTL=1h" [W=redirect]
+	@$(EXPORT_ENV) E='$(E)' W='$(W)' $(PLATFORM)/lib/setenv.sh set
+
+unset: ## Alıştırmayı geri al — make unset E="TRAP_X CACHE_TTL" [W=redirect]
+	@$(EXPORT_ENV) E='$(E)' W='$(W)' $(PLATFORM)/lib/setenv.sh unset
+
+env: ## Uygulama iş yüklerinde şu an hangi ayarlar/tuzaklar açık?
+	@$(EXPORT_ENV) W='$(W)' $(PLATFORM)/lib/setenv.sh env
+
+reset: ## Tüm alıştırmaları geri al: ortamı deploy/'daki hâline döndür (unset'ten farkı: değiştirilmiş ayarları da düzeltir)
+	@$(EXPORT_ENV) W='$(W)' $(PLATFORM)/lib/setenv.sh reset
 
 logs: ## Uygulama logları
 	kubectl -n $(NS) logs -l app.kubernetes.io/part-of=linkly-ladder --all-containers --tail=200 -f

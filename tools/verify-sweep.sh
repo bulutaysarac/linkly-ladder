@@ -60,7 +60,7 @@ wait_platform() {
 
 run_level() {
   local L=$1 lvl=${1%%-*}
-  "$R/platform/lib/profile.sh" "$lvl"
+  GRAFANA=0 "$R/platform/lib/profile.sh" "$lvl"   # otomatik tur: panele bakan yok
   cd "$R/$L" || return 1
   wait_platform || return 1
   echo "═══ $L · make up"
