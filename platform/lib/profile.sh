@@ -123,8 +123,10 @@ if (( n >= 12 )); then on argocd with-sts; on argo-rollouts; else off argocd; of
 if (( n >= 13 )); then on cert-manager; else off cert-manager; fi
 # Grafana: VARSAYILAN AÇIK — merdivenin amacı sorunu panelde GÖRMEK. Eskiden 11 dışında kapatılıyordu
 # (~200 MB) ve `make grafana` her seviyede boş bir sayfa açıyordu: doğrulama turunun tasarrufu,
-# öğrenen için yolun ortasında bir engeldi. İnsan bakmayan otomatik turlar GRAFANA=0 verir.
-if [[ "${GRAFANA:-1}" == 1 ]]; then kubectl -n monitoring scale deploy kps-grafana --replicas=1 >/dev/null 2>&1
+# öğrenen için yolun ortasında bir engeldi. İnsan bakmayan otomatik turlar GRAFANA=0 verir —
+# 11 HARİÇ: P11-07 Grafana'nın API'sini ölçüyor; kapalı bir Grafana ona boş cevap verir ve boş
+# cevaptan hüküm çıkar (inceleme bulgusu). Bir seviyenin deneyinin ölçtüğü bileşen kapatılamaz.
+if [[ "${GRAFANA:-1}" == 1 ]] || (( n == 11 )); then kubectl -n monitoring scale deploy kps-grafana --replicas=1 >/dev/null 2>&1
 else                                kubectl -n monitoring scale deploy kps-grafana --replicas=0 >/dev/null 2>&1; fi
 # Kyverno: 13'ten önce KAPALI (ölçüldü: ~90 MB × 2 controller ve bu VM'de yer yok).
 # Politika YOKKEN Kyverno webhook'larını kendisi kaldırır, yani replikayı 0'a çekmek güvenli.

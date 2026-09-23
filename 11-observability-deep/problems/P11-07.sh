@@ -7,6 +7,14 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 ensure_healthy
 GRAFANA_USER=${GRAFANA_USER:-admin}
 GRAFANA_PASS=${GRAFANA_PASS:-ladder}
+# ÖLÇTÜĞÜN ŞEY AYAKTA MI? Grafana kapalıysa aşağıdaki her curl boş döner, `editable` ve başlıklar
+# boş kalır ve script yine de hüküm basardı — ölçüm yokken NOT-REPRODUCED. Ulaşamıyorsan söyle ve dur.
+# EN: if Grafana is unreachable every query below is empty and the verdict has nothing behind it.
+g=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -u "$GRAFANA_USER:$GRAFANA_PASS" "$GRAFANA_URL/api/health" 2>/dev/null) || true
+if [[ "$g" != 200 ]]; then
+  warn "Grafana'ya ulaşılamadı (HTTP ${g:-yok}) — ölçüm yapılamaz. Aç: make profile (ya da GRAFANA=1)"
+  exit 2
+fi
 step "Dashboard'lar nereden geliyor?"
 note "kaynak: platform/dashboards/gen.py → out/*.json → ConfigMap (grafana_dashboard=1) → sidecar"
 cm=$(kubectl -n monitoring get configmap ladder-dashboards -o jsonpath='{.metadata.resourceVersion}' 2>/dev/null) || true
