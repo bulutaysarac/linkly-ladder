@@ -42,10 +42,17 @@ spec:
           #     eşiği geçemeyen bir analiz AYNI rollout durumunu üretir; ikisini yalnızca mesaj
           #     ayırır. Bir koruma devreye girdiğinde, neyi değerlendirdiğini sor.
           address: http://kps-prometheus.monitoring.svc.cluster.local:9090
+          # İYİ HABER ANALİZİ ÖLDÜRÜYORDU. Hiç 5xx görülmemiş bir namespace'te pay serisi YOKTUR,
+          # sorgu boş döner, Argo bunu "no data" hatası sayar ve 5 hatadan sonra canary'yi İPTAL
+          # EDER: sağlıklı her güncelleme geri alındı ve `make wait` "3/3 hazır" dediği için kimse
+          # fark etmedi — pod'lar eski sürümdeydi. Turlarda önceki deneyler 5xx serisi bıraktığı
+          # için görünmüyordu. 5xx yoksa oran 0'dır; `or vector(0)` bunu SÖYLER.
+          # EN: with no 5xx ever recorded the numerator series does not exist, the query is empty,
+          #     Argo counts "no data" as an error and aborts — every HEALTHY update was rolled back.
           query: |
-            sum(rate(http_requests_total{namespace="{{args.namespace}}",route="/{code}",code=~"5.."}[1m]))
+            (sum(rate(http_requests_total{namespace="{{args.namespace}}",route="/{code}",code=~"5.."}[1m])) or vector(0))
             /
-            clamp_min(sum(rate(http_requests_total{namespace="{{args.namespace}}",route="/{code}"}[1m])), 0.001)
+            clamp_min(sum(rate(http_requests_total{namespace="{{args.namespace}}",route="/{code}"}[1m])) or vector(0), 0.001)
     - name: latency-p99
       initialDelay: 30s
       interval: 20s
@@ -55,8 +62,12 @@ spec:
       provider:
         prometheus:
           address: http://kps-prometheus.monitoring.svc.cluster.local:9090
+          # Trafik yoksa histogram_quantile NaN döner ve `NaN <= 0.3` YANLIŞTIR: aynı hata, ikinci
+          # metrik. `> 0` NaN'ı eler (PromQL'de NaN ile her karşılaştırma yanlış), `or vector(0)`
+          # boşluğu 0 yapar. Bedeli: trafiksiz bir canary gecikme analizinden GEÇER — analiz ancak
+          # yük altında bir şey söyler (P12-01 bu yüzden yükü canary boyunca sürdürür).
           query: |
-            histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace="{{args.namespace}}",route="/{code}"}[2m])) by (le))
+            (histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace="{{args.namespace}}",route="/{code}"}[2m])) by (le)) > 0) or vector(0)
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: Rollout
@@ -118,6 +129,7 @@ spec:
             - { name: RATE_LIMIT_WINDOW, value: "10s" }
             - { name: RATE_LIMIT_PER_IP, value: "300" }
             - { name: RATE_LIMIT_PER_TENANT, value: "2000" }
+            - { name: LOADTEST_TOKEN, valueFrom: { secretKeyRef: { name: linkly-loadtest, key: LOADTEST_TOKEN, optional: true } } }
             - { name: TRUSTED_PROXY_HOPS, value: "1" }
             # API anahtarları: üretimde bir sır yöneticisinden ya da veritabanından gelir.
             # Burada Secret'tan — ve o Secret artık SealedSecret ile şifreli git'te (P13-04).
@@ -129,7 +141,6 @@ spec:
             - { name: AUTH_REQUIRED, value: "false" }
             - { name: TIER_LIMITS, value: "free=100,pro=1000,enterprise=5000" }
             - { name: RESOLVE_DNS, value: "true" }
-            - { name: LOADTEST_TOKEN, valueFrom: { secretKeyRef: { name: linkly-loadtest, key: LOADTEST_TOKEN, optional: true } } }
             - { name: NOT_FOUND_LIMIT, value: "50" }
             - { name: DEP_TIMEOUT, value: "2s" }
             - { name: DEP_MAX_CONCURRENT, value: "24" }

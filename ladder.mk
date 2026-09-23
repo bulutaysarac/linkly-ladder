@@ -120,6 +120,28 @@ wait: ## Deployment/StatefulSet + (varsa) Argo Rollout hazır olana kadar bekle
 	  done; \
 	  echo "  $$r hazır: $${got:-0}/$${want:-1}"; \
 	done
+	@# "HAZIR" İLE "İSTENEN SÜRÜM HAZIR" AYNI ŞEY DEĞİL. Canary analizi güncellemeyi İPTAL edip
+	@# eski sürüme dönünce hazır replika sayısı yine 3/3'tür: yukarıdaki döngü ve smoke GEÇTİ,
+	@# pod'lar ise eski imajdaydı — yeni kod hiç çalışmadı ve üstüne koşulan her deney eski kodu
+	@# ölçtü. Rollout'un kendi hükmünü oku: Healthy + stable == current. İptal (Degraded) HATADIR.
+	@# EN: ready replicas are 3/3 after an ABORTED canary too (it rolled back); only the Rollout's
+	@# own phase says whether the NEW revision is what is running.
+	@for r in $$(kubectl -n $(NS) get rollout -o name 2>/dev/null); do \
+	  for i in $$(seq 1 240); do \
+	    ph=$$(kubectl -n $(NS) get $$r -o jsonpath='{.status.phase}' 2>/dev/null); \
+	    st=$$(kubectl -n $(NS) get $$r -o jsonpath='{.status.stableRS}' 2>/dev/null); \
+	    cu=$$(kubectl -n $(NS) get $$r -o jsonpath='{.status.currentPodHash}' 2>/dev/null); \
+	    if [ "$$ph" = Healthy ] && [ -n "$$st" ] && [ "$$st" = "$$cu" ]; then echo "  $$r sürüm tamam: $$cu"; break; fi; \
+	    if [ "$$ph" = Degraded ]; then \
+	      echo "  ✘ $$r güncellemesi İPTAL: $$(kubectl -n $(NS) get $$r -o jsonpath='{.status.message}')"; \
+	      echo "    pod'lar ESKİ sürümde ($$st). Yeniden denemek için: kubectl -n $(NS) patch $$r --subresource status --type merge -p '{\"status\":{\"abort\":false}}'"; \
+	      exit 1; \
+	    fi; \
+	    [ $$i = 1 ] && echo "  $$r canary adımları sürüyor ($$ph)..."; \
+	    [ $$i = 240 ] && { echo "  ✘ $$r 8 dk içinde Healthy olmadı ($$ph)"; exit 1; }; \
+	    sleep 2; \
+	  done; \
+	done
 
 smoke: ## POST + GET 30x
 	@$(EXPORT_ENV) $(PLATFORM)/lib/smoke.sh
