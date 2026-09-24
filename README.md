@@ -21,7 +21,7 @@ make repro P=P00-01              # sorunu kendi gözünle gör
 make grafana                     # aynı sorunu panelde gör (admin / ladder)
 ```
 
-İlk kez mi? **[Sıfırdan başlangıç](#sıfırdan-başlangıç)** — kurulumdan ilk soruna, seviye geçişinden
+İlk kez mi? **[Sıfırdan başlangıç](#sıfırdan-başlangıç)** · Bütün seviyeler: **[Seviye rehberleri](#seviye-rehberleri)** — kurulumdan ilk soruna, seviye geçişinden
 temizliğe kadar adım adım. Önce aşağıdaki iki tabloya göz at: projede adı geçen her araç ve her kavram
 orada tek cümleyle anlatılıyor.
 
@@ -263,6 +263,30 @@ sızdırır, herhangi bir pod veritabanına bağlanabilir.
 3 partition, `allkeys-lru`) ve yeni bedellerini; bu kümede ölçülmüş bir kapasite modeli; bütün
 korumaları aynı anda sınayan game day.
 *Olmasa:* korumalar tek tek sınanmış olur ama birlikte hiç; sistemin gerçek tavanı tahmin olarak kalır.
+
+## Seviye rehberleri
+
+Her seviyenin README'si kendi başına yeter: **Rehber** baştan sona komut sırasını verir (önceki seviyeyi kapat,
+kur, önceki sorunları koş, sorunları sırayla yaşa, temizle); **sorunlar** bölümünde her deney `make fresh` ile
+başlayan yapıştırılabilir komutlar, "Terminalde ne görmelisin" ve Grafana'da hangi panelde ne göreceğinle gelir.
+
+| # | README | Slogan | Komut sırası | Deneyler |
+|---|---|---|---|---|
+| 00 | [00-naive](00-naive/README.md) | Tek dosya, tek pod, bellek | [Rehber (§4)](00-naive/README.md#4-ayağa-kaldırma) | [10 sorun (§6)](00-naive/README.md#6-reproduce-edilebilir-sorunlar) |
+| 01 | [01-hardened](01-hardened/README.md) | Tek süreç ama düzgün | [Rehber (§4)](01-hardened/README.md#4-ayağa-kaldırma) | [8 sorun (§6)](01-hardened/README.md#6-reproduce-edilebilir-sorunlar) |
+| 02 | [02-postgres](02-postgres/README.md) | Kalıcılık ve yatay ölçek | [Rehber (§4)](02-postgres/README.md#4-ayağa-kaldırma) | [10 sorun (§6)](02-postgres/README.md#6-reproduce-edilebilir-sorunlar) |
+| 03 | [03-local-cache](03-local-cache/README.md) | Süreç içi önbellek | [Rehber (§4)](03-local-cache/README.md#4-ayağa-kaldırma) | [7 sorun (§6)](03-local-cache/README.md#6-reproduce-edilebilir-sorunlar) |
+| 04 | [04-redis-cache](04-redis-cache/README.md) | Paylaşılan önbellek | [Rehber (§4)](04-redis-cache/README.md#4-ayağa-kaldırma) | [7 sorun (§6)](04-redis-cache/README.md#6-reproduce-edilebilir-sorunlar) |
+| 05 | [05-async-analytics](05-async-analytics/README.md) | Yazmayı okuma yolundan çıkar | [Rehber (§4)](05-async-analytics/README.md#4-ayağa-kaldırma) | [6 sorun (§6)](05-async-analytics/README.md#6-reproduce-edilebilir-sorunlar) |
+| 06 | [06-event-stream](06-event-stream/README.md) | Olay akışı, ayrı tüketici | [Rehber (§4)](06-event-stream/README.md#4-ayağa-kaldırma) | [7 sorun (§6)](06-event-stream/README.md#6-reproduce-edilebilir-sorunlar) |
+| 07 | [07-services-autoscaling](07-services-autoscaling/README.md) | Servisleri ayır, otomatik ölçekle | [Rehber (§4)](07-services-autoscaling/README.md#4-ayağa-kaldırma) | [8 sorun (§6)](07-services-autoscaling/README.md#6-reproduce-edilebilir-sorunlar) |
+| 08 | [08-rate-limiting](08-rate-limiting/README.md) | Gürültülü komşu | [Rehber (§4)](08-rate-limiting/README.md#4-ayağa-kaldırma) | [6 sorun (§6)](08-rate-limiting/README.md#6-reproduce-edilebilir-sorunlar) |
+| 09 | [09-database-scaling](09-database-scaling/README.md) | Veritabanı darboğazı | [Rehber (§4)](09-database-scaling/README.md#4-ayağa-kaldırma) | [6 sorun (§6)](09-database-scaling/README.md#6-reproduce-edilebilir-sorunlar) |
+| 10 | [10-resilience](10-resilience/README.md) | Hata izolasyonu | [Rehber (§4)](10-resilience/README.md#4-ayağa-kaldırma) | [6 sorun (§6)](10-resilience/README.md#6-reproduce-edilebilir-sorunlar) |
+| 11 | [11-observability-deep](11-observability-deep/README.md) | Neden yavaş? | [Rehber (§4)](11-observability-deep/README.md#4-ayağa-kaldırma) | [8 sorun (§6)](11-observability-deep/README.md#6-reproduce-edilebilir-sorunlar) |
+| 12 | [12-delivery](12-delivery/README.md) | Güvenli dağıtım | [Rehber (§4)](12-delivery/README.md#4-ayağa-kaldırma) | [6 sorun (§6)](12-delivery/README.md#6-reproduce-edilebilir-sorunlar) |
+| 13 | [13-security-tenancy](13-security-tenancy/README.md) | Kim, neye, ne kadar | [Rehber (§4)](13-security-tenancy/README.md#4-ayağa-kaldırma) | [8 sorun (§6)](13-security-tenancy/README.md#6-reproduce-edilebilir-sorunlar) |
+| 14 | [14-modern](14-modern/README.md) | Son hal | [Rehber (§4)](14-modern/README.md#4-ayağa-kaldırma) | [5 sorun (§6)](14-modern/README.md#6-reproduce-edilebilir-sorunlar) |
 
 ## Tekdüzelik (en önemli kural)
 
