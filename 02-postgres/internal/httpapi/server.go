@@ -57,7 +57,7 @@ func (a *API) Handler(rl *ratelimit.Limiter) http.Handler {
 		// yük → o da ölür. Yük artışı kendini KESİNTİYE çevirir. README §7.
 		business.HandleFunc("GET /healthz", a.handleHealthz)
 		business.HandleFunc("GET /readyz", a.handleReadyz)
-		root.Handle("/", Chain(business, a.log, a.met, rl, a.cfg.HandlerTimeout))
+		root.Handle("/", TrapChain(business, a.log, a.met, rl, a.cfg.HandlerTimeout))
 		root.Handle("GET /metrics", a.met.Handler())
 		return root
 	}

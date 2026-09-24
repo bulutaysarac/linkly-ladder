@@ -2,11 +2,23 @@
 **Belirti:** Kullanıcının/operatörün gördüğü şey. Bir cümle.
 **Neden:** Kök neden. Sistem tasarımı konusuyla bağla: [Topic · Konu: …]
 **Reproduce (adım adım):**
-  1. `make up` (başlangıç durumu)
-  2. İkinci terminalde: `make load S=…`
-  3. Tetikleyici: `kubectl …` / `make chaos C=…` / `TRAP_… =1`
-  4. Gözlem: ne göreceksin, kaç saniye içinde
-  5. `make repro P=PNN-XX` aynı adımları otomatik koşar; son satır REPRODUCED / NOT-REPRODUCED
+
+Otomatik — ölçer ve hüküm basar: `make repro P=PNN-XX` (yıkıcı adım varsa `CONFIRM=1` ile; scriptin ne yaptığı, tek cümle).
+
+Elle — sırayla yapıştır (bloklarda yorum YOK: varsayılan zsh `#`'i komutun argümanı yapar; açıklama adım metninde):
+
+1. <adımın açıklaması>:
+```bash
+make fresh
+<komutlar — host açık: http://lvlNN.localtest.me; değişkenler bu sorunun bloklarında tanımlı>
+```
+2. <açıklama; ayar/tuzak açıldıysa son adım geri alır: make reset · replika geri · make unchaos · kubectl uncordon>:
+```bash
+<komutlar>
+```
+
+**Terminalde ne görmelisin:** <her adımın çıktısında görülecek somut dizeler/sayılar: HTTP kodları, `k6 lvlNN: reqs=… 5xx=… 404=… 429=… p99=…`, kubectl çıktısı>
+(tools/lint-guide.py: Otomatik + Elle + ilk komut `make fresh` + "Terminalde ne görmelisin", yorumsuz ve `bash -n`/`zsh -n` temiz bloklar)
 **Grafana'da gör:** [`<NN · dashboard>`](http://grafana.localtest.me/d/<uid>?var-level=lvlNN&from=now-15m&to=now&refresh=10s) — <ne zaman aç> (giriş: admin / ladder)
 - "<panelin TAM başlığı>" → <okuyucu ne görecek: yön/şekil/değer ve ne anlama geldiği>
 - Explore'da: `<promql>` → <ne göreceksin>   (yalnızca hiçbir panel göstermiyorsa)

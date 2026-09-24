@@ -55,7 +55,7 @@ Tek madde, ama etkisi büyük: `links.clicks` sütunu emekliye ayrıldı, yerine
 Bu seviyenin platformdan istediği: **temel yığın (kind, ingress, Prometheus, Grafana) + Chaos Mesh**. `make up` ilk adımda (profil) bunları açar ve kullanılmayanları kapatır; bir bileşen kurulu değilse hangi komutla kurulacağını söyleyip durur.
 
 ```bash
-make up            # profil → build → push → deploy → rollout wait → smoke
+make up            # profil → Grafana'yı temizle → build → push → deploy → rollout wait → smoke
 code=$(curl -s -XPOST http://lvl05.localtest.me/api/links -H 'Content-Type: application/json' -d '{"url":"https://example.com"}' | jq -r .code); echo "$code"
 curl -s -o /dev/null -w '%{http_code} → %{redirect_url}\n' http://lvl05.localtest.me/$code   # 302 → https://example.com
 make grafana       # Ladder klasörü, level=lvl05 — giriş: admin / ladder
@@ -63,6 +63,31 @@ make load S=mixed  # aynı senaryolar her seviyede: create redirect mixed hot-ke
 make repro P=P05-01   # §6'daki bir sorunu otomatik üret → REPRODUCED / NOT-REPRODUCED
 make env           # açık ayar/tuzaklar · değiştir: make set E="KEY=değer" · hepsini geri al: make reset (§7)
 make down          # seviyeyi kaldır · kümeyi durdurmak için: make -C ../platform stop
+```
+
+**Rehber — bu seviyeyi baştan sona, sırayla.** Komut bloklarında açıklama yok; her bloğu olduğu gibi yapıştırabilirsin.
+
+1. Önceki seviye açıksa kapat (aynı anda tek seviye çalışır), bu seviyeyi kur. `make up` Grafana'yı da temizler:
+```bash
+make -C ../04-redis-cache down
+make up
+```
+2. 04'ün sorunlarını bu seviyede koş. Uzun sürer: 04'ün yedi scripti art arda koşar. Koşarken başka komut çalıştırma:
+   aynı pod'lara dokunurlar. `CONFIRM=1`, Redis pod'unu silen P04-01'in de koşmasını sağlar (onaysız `SKIPPED` yazar).
+   `BEKLENEN` sütunu burada hep `(açık kalabilir)` der: 05 04'ün önbellek sorunlarını değil tıklama yazımını (P02-08)
+   değiştiriyor; `SONUÇ` sütunu 04'ün sorunlarından hangilerinin burada da sürdüğünü gösterir:
+```bash
+CONFIRM=1 make verify-prev
+```
+3. §6'daki sorunları sırayla yaşa (P05-01 → P05-06). Her sorunda aynı düzen:
+   **Elle** bloklarını sırayla yapıştır (ilk komut `make fresh`: Grafana bu deneye boş başlar) →
+   **Terminalde ne görmelisin** ile karşılaştır → **Grafana'da gör** linklerini aç, her madde hangi panelde neyi
+   göreceğini söyler. İstersen aynı deneyi `make repro P=…` ile otomatik koş (yıkıcı olanlar `CONFIRM=1` ister):
+   ölçer ve hükmünü basar.
+4. Bitince açık kalan ayarları geri al ve seviyeyi kapat:
+```bash
+make reset
+make down
 ```
 
 ## 5. API
@@ -95,9 +120,50 @@ kapanışta (rollout) kayıp olmaz.
 boşaltacak kimse kalmaz. [Topic · Konu: Teslimat garantisi, dayanıklılık]
 
 **Reproduce (adım adım):**
-1. `CONFIRM=1 make repro P=P05-01` — flush aralığını 15 sn'ye açar (tampon görünür olsun), bilinen
-   sayıda tıklama üretir, önce `--force` ile öldürür, sonra aynı senaryoyu `rollout restart` ile
-   tekrarlar ve iki kaybı karşılaştırır
+
+Otomatik — ölçer ve hüküm basar: `CONFIRM=1 make repro P=P05-01` (flush aralığını 15 sn'ye açar ki tampon görünür
+olsun, bir linke 400 tıklama üretir ve pod'ları `--force` ile öldürür; aynı senaryoyu `rollout restart` ile tekrarlar
+ve iki kaybı karşılaştırır. Hüküm: sert ölümde kayıp %10'un üstünde — altı "uçuştaki istek", üstü "tampon kaybı").
+
+Elle — `05-async-analytics` klasöründe, sırayla yapıştır:
+
+1. Grafana'yı temizle, tamponu görünür yap: flush aralığı 15 sn, parti 5000 (erken flush olmasın). Pod'lar yeniden
+   başlar; eski pod'lar birkaç saniye daha cevap verebildiği için 10 sn bekle:
+```bash
+make fresh
+make set E="ANALYTICS_FLUSH_INTERVAL=15s ANALYTICS_BATCH_SIZE=5000"
+sleep 10
+```
+2. **Yıkıcı adım:** bir link oluştur, 400 kez aç ve kuyruk boşalmadan bütün uygulama pod'larını **sert** öldür
+   (`--force`: graceful kapanış yok; yeni pod'lar gelene kadar birkaç saniyelik kesinti). Yeni pod'lar hazır olunca
+   sayaca bak:
+```bash
+code=$(curl -s -XPOST http://lvl05.localtest.me/api/links -H 'Content-Type: application/json' -d '{"url":"https://example.com/atmostonce"}' | jq -r .code); echo "kod: $code"
+for i in $(seq 1 400); do curl -s -o /dev/null http://lvl05.localtest.me/$code; done
+kubectl -n lvl05 delete pod -l app.kubernetes.io/name=linkly --force --grace-period=0
+sleep 5
+kubectl -n lvl05 wait --for=condition=Ready pod -l app.kubernetes.io/name=linkly --timeout=90s
+sleep 6
+curl -s http://lvl05.localtest.me/api/links/$code/stats | jq .clicks
+```
+3. Karşılaştırma: aynı senaryo graceful kapanışla (`rollout restart`: her pod önce kuyruğunu boşaltır, sonra çıkar):
+```bash
+code2=$(curl -s -XPOST http://lvl05.localtest.me/api/links -H 'Content-Type: application/json' -d '{"url":"https://example.com/graceful"}' | jq -r .code); echo "kod: $code2"
+for i in $(seq 1 400); do curl -s -o /dev/null http://lvl05.localtest.me/$code2; done
+kubectl -n lvl05 rollout restart deploy/linkly
+kubectl -n lvl05 rollout status deploy/linkly --timeout=180s
+sleep 8
+curl -s http://lvl05.localtest.me/api/links/$code2/stats | jq .clicks
+```
+4. Ayarları geri al:
+```bash
+make reset
+```
+
+**Terminalde ne görmelisin:** 2. adımın sonunda 400'ün belirgin biçimde altında bir sayı (scriptin hükmü: kayıp
+%10'dan fazla) ve bir dakika sonra tekrar sorsan da yükselmez: son flush'tan sonraki tıklamalar öldürülen pod'ların
+belleğindeydi. 3. adımın sonunda `400` ya da ona çok yakın: kapanan her pod kuyruğunu yazıp çıktı. Drain planlı
+kapanışı kurtarır, plansız ölümü kurtaramaz.
 
 **Ölçüm notu:** Kaybedebileceğin şey, o an **tamponda olandır**. Varsayılan `ANALYTICS_FLUSH_INTERVAL=1s`
 ile tampon en fazla 1 saniyelik tıklama tutar; yavaş üreten bir döngüyle öldürdüğünde tamponu çoğu
@@ -124,17 +190,65 @@ redirect'i yine DB'ye bağlardı — görünmez biçimde, yalnızca yük altınd
 [Topic · Konu: Back pressure, bounded queue]
 
 **Reproduce (adım adım):**
-1. `make repro P=P05-02` — kuyruğu 500'e küçültür, **önce ısıtır**, sonra Postgres'e 2 sn gecikme
-   enjekte eder ve yük verir
-2. Alternatifi gör: `kubectl -n lvl05 set env deploy/linkly TRAP_UNBOUNDED_QUEUE=true` → düşürme
-   sıfırlanır, working set tırmanır, sonunda **OOMKilled** ve tampondaki her şey gider
+
+Otomatik — ölçer ve hüküm basar: `make repro P=P05-02` (kuyruğu 500'e küçültür, **önce ısıtır**, sonra Postgres'e 2 sn
+gecikme enjekte eder ve 80 kullanıcıyla 45 sn tek linke yük verir; düşürülen tıklamaları, tepe kuyruk derinliğini ve
+redirect p99'unu basar. Hüküm: düşürülen > 0).
+
+Elle — sırayla yapıştır:
+
+1. Grafana'yı temizle, kuyruğu 500'e küçült (pod'lar yeniden başlar) ve gecikme yokken ısıt:
+```bash
+make fresh
+make set E="ANALYTICS_QUEUE_SIZE=500"
+make load S=hot-key K6_ARGS="--vus 20 --duration 20s"
+```
+2. Postgres'e giden trafiğe 2 sn gecikme enjekte et (yazıcı yetişemeyecek), sonra yoğun tıklama yükü ver. `SEED=1`:
+   gecikme altında her link oluşturma 2 sn sürdüğü için k6 kurulumda tek link oluştursun; `HOT_SHARE=1`: bütün
+   tıklamalar o linke. Sonra düşürülen ve kuyruğa alınan tıklamaları, tepe kuyruk derinliğini (üç pod'un toplamı) ve
+   redirect p99'unu (ms) oku:
+```bash
+make chaos C=pg-delay-2s
+SEED=1 HOT_SHARE=1 make load S=hot-key K6_ARGS="--vus 80 --duration 45s"
+sleep 10
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum(increase(analytics_events_total{namespace="lvl05",result="dropped"}[5m]))' | jq -r '.data.result[0].value[1]'
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum(increase(analytics_events_total{namespace="lvl05",result="enqueued"}[5m]))' | jq -r '.data.result[0].value[1]'
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=max_over_time(sum(analytics_queue_depth{namespace="lvl05"})[5m:15s])' | jq -r '.data.result[0].value[1]'
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=1000 * histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace="lvl05",route="/{code}"}[2m])) by (le))' | jq -r '.data.result[0].value[1]'
+```
+3. Gecikmeyi kaldır, kuyruk boyunu geri al:
+```bash
+make unchaos C=pg-delay-2s
+make reset
+```
+4. İstersen alternatifi gör: aynı kuyruk ayarıyla kuyruğu sınırsız yap (`TRAP_UNBOUNDED_QUEUE=true`; pod'lar yeniden
+   başlar), aynı gecikme ve yükle. Düşürme yerine bekleyen tıklamalar pod belleğinde birikir; sınırsız bir kuyruğun sonu OOMKilled'dir ve o
+   an tampondaki her şey gider. Düşürme hızına, kuyruk derinliğine ve pod belleğine bak, sonra gecikmeyi ve ayarları
+   geri al:
+```bash
+make set E="ANALYTICS_QUEUE_SIZE=500 TRAP_UNBOUNDED_QUEUE=true"
+make chaos C=pg-delay-2s
+SEED=1 HOT_SHARE=1 make load S=hot-key K6_ARGS="--vus 80 --duration 45s"
+sleep 10
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum(rate(analytics_events_total{namespace="lvl05",result="dropped"}[30s]))' | jq -r '.data.result[0].value[1]'
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=max_over_time(max(analytics_queue_depth{namespace="lvl05"})[1m:5s])' | jq -r '.data.result[0].value[1]'
+kubectl -n lvl05 top pod -l app.kubernetes.io/name=linkly
+make unchaos C=pg-delay-2s
+make reset
+```
+
+**Terminalde ne görmelisin:** 2. adımda k6 çıktısının sonundaki özet satırında `5xx=0`; düşürülen tıklama sıfırdan
+büyük, kuyruğa alınan binlerle ölçülür, tepe derinlik kapasiteye dayanır (pod başına 500, toplam en fazla 1500) ve
+redirect p99'u düşük kalır: yazıcı boğulurken okuma yolu etkilenmedi — tasarımın vaadi. 4. adımda düşürme hızı `0`
+(sınırsız modda düşürme yolu yok) ve pod başına derinlik 500'de durmaz; fazlası pod belleğinde bekliyor
+(`kubectl top pod`, sınır 256 MiB).
 
 **Grafana'da gör:** [`07 · Analytics`](http://grafana.localtest.me/d/ladder-analytics?var-level=lvl05&from=now-15m&to=now&refresh=10s), [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl05&from=now-15m&to=now&refresh=10s) ve [`01 · Pods & Resources`](http://grafana.localtest.me/d/ladder-pods?var-level=lvl05&from=now-15m&to=now&refresh=10s) — script önce ısıtır, sonra Postgres'i yavaşlatıp 45 sn yük verir; bitince aç (giriş: admin / ladder)
-- "Kuyruk doluluğu (pod'a göre)" → `capacity` çizgisi deney süresince 20 000'den **500**'e iner (script kuyruğu küçültüyor) ve pod çizgileri ona dayanıp tavanda gezinir: kuyruk dolu. Eksen 20 000'e göre çizildiği için lejantta bir pod'a tıkla — eksen yeniden ölçeklenir.
+- "Kuyruk doluluğu (pod'a göre)" → `kapasite` çizgisi deney süresince 20 000'den **500**'e iner (script kuyruğu küçültüyor) ve pod çizgileri ona dayanıp tavanda gezinir: kuyruk dolu. Eksen 20 000'e göre çizildiği için lejantta bir pod'a tıkla — eksen yeniden ölçeklenir.
 - "Tıklama olayları (sonuca göre)" → `dropped` serisi belirir ve yük boyunca sürer; `written` yükle birlikte artmaz, yazıcının hızında (her parti ~2 sn) takılı kalır.
 - "p99 süre (uç noktaya göre)" (App RED) → `/{code}` çizgisi düşük kalır: yazıcı boğulurken okuma yolu etkilenmedi — tasarımın vaadi. `/api/links` (link oluşturma) ise yükselir: yükün başında oluşturulan link DB'ye 2 sn gecikmeyle yazılıyor.
-- "Bellek kullanımı" (Pods) → yalnızca 2. adımda (`TRAP_UNBOUNDED_QUEUE=true`, yazıcı yine yavaşken): düşürme yerine bellek büyür ve limit çizgisine tırmanır.
-- "Son sonlanma nedeni" (Pods) → 2. adımın sonunda `OOMKilled`: tampondaki her şey gitti.
+- "Bellek kullanımı" ve "Bellek: sınırın yüzde kaçı" (Pods) → yalnızca 4. adımda (`TRAP_UNBOUNDED_QUEUE=true`, yazıcı yine yavaşken): düşürme yerine bekleyen tıklamalar bellekte birikir ve yüzde çizgisi yükselir; %100'e değen konteyner öldürülür.
+- "Son sonlanma nedeni" (Pods) → 4. adımda konteyner bellek sınırına çarparsa `OOMKilled` (kırmızı): tampondaki her şey gider.
 
 **Ölçüm dersi — deneyin SIRASI da bir değişkendir:** Gecikme yükten önce enjekte edilirse k6'nın
 `setup()` aşaması 100 link oluştururken her INSERT 2 sn sürer, setup zaman aşımına uğrar ve yük hiç
@@ -157,12 +271,52 @@ bağlantısı ve veritabanı yükü redirect'i servis eden sürecin hesabına ya
 **Neden:** Yazma istek yolundan çıktı ama **süreçten** çıkmadı: aynı pod CPU'su, aynı `pgxpool`,
 aynı veritabanı. İzolasyon kısmi. [Topic · Konu: Kaynak izolasyonu, bulkhead]
 
-**Reproduce (adım adım):** `make repro P=P05-03` — **aynı** yükü (`hot-key`, 80 VU, 45 sn) iki kez,
-taze pod'larla verir. Değişen tek şey yazıcının veritabanı işi: A fazında durdurulmuş
-(`ANALYTICS_FLUSH_INTERVAL=1h`, `ANALYTICS_BATCH_SIZE=100000000` — tıklamalar yine kuyruğa girip
-toplanıyor, yalnızca yazılmıyor), B fazında varsayılan. Hüküm: B'de `write_clicks` uygulama
-pod'larından çıkıyor mu, A'da sıfırlanıyor mu (A'da yazma sürüyorsa script hüküm vermez, exit 2).
-İki fazın redirect p99'unu ve havuz bekleme p99'unu da yan yana basar — bedel, hükme bağlı değil.
+**Reproduce (adım adım):**
+
+Otomatik — ölçer ve hüküm basar: `make repro P=P05-03` (**aynı** yükü — `hot-key`, 80 VU, 45 sn — iki kez, taze
+pod'larla verir. Değişen tek şey yazıcının veritabanı işi: A fazında durdurulmuş (`ANALYTICS_FLUSH_INTERVAL=1h`,
+`ANALYTICS_BATCH_SIZE=100000000` — tıklamalar yine kuyruğa girip toplanıyor, yalnızca yazılmıyor), B fazında
+varsayılan. Hüküm: B'de `write_clicks` uygulama pod'larından çıkıyor mu, A'da sıfırlanıyor mu (A'da yazma sürüyorsa
+script hüküm vermez, exit 2). İki fazın redirect p99'unu ve havuz bekleme p99'unu da yan yana basar — bedel, hükme bağlı
+değil. Ölçüyü her fazın taze pod'larıyla sınırlar).
+
+Elle — sırayla yapıştır:
+
+1. Grafana'yı temizle. A fazı: yazıcının veritabanı işini durdur (pod'lar yeniden başlar; eski pod'lar birkaç saniye
+   daha cevap verebildiği için 10 sn bekle) ve yükü ver:
+```bash
+make fresh
+make set E="ANALYTICS_FLUSH_INTERVAL=1h ANALYTICS_BATCH_SIZE=100000000"
+sleep 10
+make load S=hot-key K6_ARGS="--vus 80 --duration 45s"
+sleep 12
+```
+2. A fazının ölçüsü: hangi pod saniyede kaç `write_clicks` sorgusu atıyor, redirect p99 ve havuzdan bağlantı alma
+   beklemesinin p99'u (ms):
+```bash
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum by (pod) (rate(db_queries_total{namespace="lvl05",op="write_clicks"}[1m]))' | jq -r '.data.result[] | "\(.metric.pod) \(.value[1])"'
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=1000 * histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace="lvl05",route="/{code}"}[1m])) by (le))' | jq -r '.data.result[0].value[1]'
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=1000 * histogram_quantile(0.99, sum(rate(db_pool_acquire_duration_seconds_bucket{namespace="lvl05"}[1m])) by (le))' | jq -r '.data.result[0].value[1]'
+```
+3. B fazı: yazıcıyı varsayılana döndür (`make reset`; pod'lar yeniden başlar), aynı yükü ver:
+```bash
+make reset
+sleep 10
+make load S=hot-key K6_ARGS="--vus 80 --duration 45s"
+sleep 12
+```
+4. B fazının ölçüsü, aynı üç sorgu:
+```bash
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum by (pod) (rate(db_queries_total{namespace="lvl05",op="write_clicks"}[1m]))' | jq -r '.data.result[] | "\(.metric.pod) \(.value[1])"'
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=1000 * histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace="lvl05",route="/{code}"}[1m])) by (le))' | jq -r '.data.result[0].value[1]'
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=1000 * histogram_quantile(0.99, sum(rate(db_pool_acquire_duration_seconds_bucket{namespace="lvl05"}[1m])) by (le))' | jq -r '.data.result[0].value[1]'
+```
+
+**Terminalde ne görmelisin:** 2. adımda ilk sorgu ya hiç satır basmaz ya da yalnızca `0` değerli satırlar: yazıcı
+durunca uygulama pod'larından yazma çıkmıyor. 4. adımda her satır bir `linkly-…` pod'u ve değeri sıfırdan büyük:
+tıklamaları veritabanına yazan sorgular redirect'i servis eden süreçlerden, onların havuzundan çıkıyor. İki fazın
+redirect p99'u ve havuz bekleme p99'u birbirine yakın kalabilir: bu ölçekte bedel gürültü mertebesinde; hükmün yapıya
+bakmasının sebebi bu.
 
 **Ölçüm dersi — iki değişkenli karşılaştırma:** "Yalnız okuma" tabanını 30 VU `redirect` ile, yoğun
 fazı 80 VU `hot-key` ile ölçmek iki fazda hem senaryoyu hem yükü değiştirir; üstelik taban da tıklama
@@ -188,8 +342,46 @@ tablosu kursaydık aynı cevap için 2 milyon satır taranırdı.
 **Neden:** Toplama, veriyi **yazarken** küçültür; ayrıntı **okurken** büyür.
 [Topic · Konu: Toplama vs ayrıntı, yazma amplifikasyonu]
 
-**Reproduce (adım adım):** `make repro P=P05-04` — geçici bir `clicks_detail` tablosu kurup 2 M satır
-üretir, iki sorgunun planını ve süresini karşılaştırır, sonra tabloyu düşürür.
+**Reproduce (adım adım):**
+
+Otomatik — ölçer ve hüküm basar: `make repro P=P05-04` (bir linke 200 tıklama üretip `stats`'ın süresini ölçer; geçici bir
+`clicks_detail` tablosu kurup aynı koda 2 M satır üretir, iki sorgunun planını ve süresini karşılaştırır, sonra tabloyu
+düşürür. Hüküm: ayrıntı tablosunun planı tam tarama).
+
+Elle — sırayla yapıştır:
+
+1. Grafana'yı temizle, Postgres pod'unu bul; bir linke 200 tıklama üret, toplama tablosundan `stats`'ın süresini ve
+   `clicks_daily`'nin satır sayısını oku:
+```bash
+make fresh
+pgpod=$(kubectl -n lvl05 get pod -l app.kubernetes.io/name=postgres -o json | jq -r '[.items[] | select(.metadata.deletionTimestamp == null) | select(any(.status.containerStatuses[]?; .ready)) | .metadata.name][0]'); echo "postgres pod: $pgpod"
+code=$(curl -s -XPOST http://lvl05.localtest.me/api/links -H 'Content-Type: application/json' -d '{"url":"https://example.com/stats-scale"}' | jq -r .code); echo "kod: $code"
+for i in $(seq 1 200); do curl -s -o /dev/null http://lvl05.localtest.me/$code; done
+sleep 4
+curl -s -o /dev/null -w 'stats süresi: %{time_total} sn\n' http://lvl05.localtest.me/api/links/$code/stats
+kubectl -n lvl05 exec "$pgpod" -c postgres -- psql -U linkly -d linkly -tAc 'SELECT count(*) FROM clicks_daily'
+```
+2. Karşı senaryo — ayrıntı tablosu kursaydık: aynı koda 2 milyon satırlık geçici bir `clicks_detail` tablosu kur
+   (Postgres'i birkaç saniye meşgul eder):
+```bash
+kubectl -n lvl05 exec "$pgpod" -c postgres -- psql -U linkly -d linkly -c 'CREATE TABLE IF NOT EXISTS clicks_detail (id bigserial, code text, at timestamptz)'
+kubectl -n lvl05 exec "$pgpod" -c postgres -- psql -U linkly -d linkly -c "INSERT INTO clicks_detail (code, at) SELECT '$code', now() - (i || ' seconds')::interval FROM generate_series(1, 2000000) i"
+kubectl -n lvl05 exec "$pgpod" -c postgres -- psql -U linkly -d linkly -c 'ANALYZE clicks_detail'
+```
+3. Aynı soruyu ("bu kod kaç kez tıklandı?") iki tabloya sor; planları ve süreleri karşılaştır:
+```bash
+kubectl -n lvl05 exec "$pgpod" -c postgres -- psql -U linkly -d linkly -c "EXPLAIN ANALYZE SELECT count(*) FROM clicks_detail WHERE code='$code'"
+kubectl -n lvl05 exec "$pgpod" -c postgres -- psql -U linkly -d linkly -c "EXPLAIN ANALYZE SELECT sum(count) FROM clicks_daily WHERE code='$code'"
+```
+4. Geçici tabloyu düşür:
+```bash
+kubectl -n lvl05 exec "$pgpod" -c postgres -- psql -U linkly -d linkly -c 'DROP TABLE clicks_detail'
+```
+
+**Terminalde ne görmelisin:** 1. adımda `stats süresi` milisaniyeler mertebesinde ve `clicks_daily` birkaç satır: kaç
+tıklama olursa olsun kod başına gün başına tek satır. 2. adımda `INSERT 0 2000000`. 3. adımda `clicks_detail` planı
+`Seq Scan` (çoğunlukla `Parallel Seq Scan`) ile 2 milyon satırı tarar; `clicks_daily` planı birkaç satır okur ve
+`Execution Time`'ı kat kat kısadır. Toplama veriyi yazarken küçültür, ayrıntı okurken büyür. 4. adımda `DROP TABLE`.
 
 **Grafana'da gör:** [`05 · Postgres`](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl05&from=now-15m&to=now&refresh=10s), [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl05&from=now-15m&to=now&refresh=10s) ve [`07 · Analytics`](http://grafana.localtest.me/d/ladder-analytics?var-level=lvl05&from=now-15m&to=now&refresh=10s) — script bitince aç; asıl karşılaştırma terminalde, çünkü `clicks_detail`'i uygulama değil script (`psql`) sorguluyor ve hiçbir uygulama paneli o sorguyu görmez (giriş: admin / ladder)
 - "Sorgu süresi p99 (türe göre)" → `stats` serisi düşük: kaç tıklama olursa olsun toplama tablosu kod başına gün başına tek satır okur. Script `stats`'ı yalnızca bir kez çağırdığı için değer bir dakika kadar görünür.
@@ -212,8 +404,53 @@ sonradan eklemekten pahalıdır (veri zaten yazılmıştır).
 **Neden:** Drain kodu doğru olabilir; kubelet süreci bitirmesine izin vermezse hiçbir anlamı yok.
 [Topic · Konu: Kapatma bütçesi]
 
-**Reproduce (adım adım):** `CONFIRM=1 make repro P=P05-05` — mevcut ayarla ve `grace=3s` (+`preStop=1s`) ile
-kaybı ölçüp karşılaştırır.
+**Reproduce (adım adım):**
+
+Otomatik — ölçer ve hüküm basar: `CONFIRM=1 make repro P=P05-05` (flush aralığını 15 sn'ye açar; mevcut ayarla — grace
+60 sn, preStop 5 sn, `SHUTDOWN_GRACE=20s` — ve `grace=3s` (+`preStop=1s`) ile birer linke 2000 tıklama üretip
+`rollout restart` sonrası kaybı ölçer; sayım durulana kadar bekler, sonunda ayarları geri alır. Hüküm: kısa grace'te
+kayıp daha büyük).
+
+Elle — sırayla yapıştır:
+
+1. Grafana'yı temizle, tamponu görünür yap: flush aralığı 15 sn, parti 5000 (P05-01 ile aynı sebep: varsayılan 1 sn'lik
+   tampon neredeyse hep boş yakalanır). Pod'lar yeniden başlar; 10 sn bekle:
+```bash
+make fresh
+make set E="ANALYTICS_FLUSH_INTERVAL=15s ANALYTICS_BATCH_SIZE=5000"
+sleep 10
+```
+2. Mevcut ayarla (drain'e zaman var): bir linke 2000 tıklama üret (20 paralel), pod'ları yeniden başlat, sonra sayacı
+   5 sn arayla 8 kez oku — sayı durulunca kaybı gör:
+```bash
+code=$(curl -s -XPOST http://lvl05.localtest.me/api/links -H 'Content-Type: application/json' -d '{"url":"https://example.com/grace/ok"}' | jq -r .code); echo "kod: $code"
+seq 1 2000 | xargs -P 20 -I{} curl -s -o /dev/null --max-time 5 http://lvl05.localtest.me/$code
+kubectl -n lvl05 rollout restart deploy/linkly
+kubectl -n lvl05 rollout status deploy/linkly --timeout=200s
+for i in $(seq 1 8); do curl -s http://lvl05.localtest.me/api/links/$code/stats | jq .clicks; sleep 5; done
+```
+3. **Riskli adım:** grace'i 3 sn'ye, preStop beklemesini 1 sn'ye indir — ikisi tek patch'te, çünkü Kubernetes preStop
+   beklemesinin grace'ten kısa olmasını nesnenin son hâlinde doğrular ve ayrı patch'lerin ara hâlini reddeder.
+   `SHUTDOWN_GRACE` hâlâ 20 sn: kubelet süreci drain'in ortasında öldürecek. Sonra aynı ölçümü tekrarla:
+```bash
+kubectl -n lvl05 patch deploy/linkly --type=json -p '[{"op":"replace","path":"/spec/template/spec/terminationGracePeriodSeconds","value":3},{"op":"replace","path":"/spec/template/spec/containers/0/lifecycle/preStop/sleep/seconds","value":1}]'
+kubectl -n lvl05 rollout status deploy/linkly --timeout=200s
+code2=$(curl -s -XPOST http://lvl05.localtest.me/api/links -H 'Content-Type: application/json' -d '{"url":"https://example.com/grace/short"}' | jq -r .code); echo "kod: $code2"
+seq 1 2000 | xargs -P 20 -I{} curl -s -o /dev/null --max-time 5 http://lvl05.localtest.me/$code2
+kubectl -n lvl05 rollout restart deploy/linkly
+kubectl -n lvl05 rollout status deploy/linkly --timeout=200s
+for i in $(seq 1 8); do curl -s http://lvl05.localtest.me/api/links/$code2/stats | jq .clicks; sleep 5; done
+```
+4. Geri al: grace 60 sn ve preStop 5 sn (deploy/'daki değerler, yine tek patch), sonra ortamı:
+```bash
+kubectl -n lvl05 patch deploy/linkly --type=json -p '[{"op":"replace","path":"/spec/template/spec/terminationGracePeriodSeconds","value":60},{"op":"replace","path":"/spec/template/spec/containers/0/lifecycle/preStop/sleep/seconds","value":5}]'
+kubectl -n lvl05 rollout status deploy/linkly --timeout=200s
+make reset
+```
+
+**Terminalde ne görmelisin:** 2. adımda sayı `2000`'de ya da ona çok yakın bir yerde durulur: kapanan her pod kuyruğunu
+yazıp çıktı. 3. adımda `2000`'in belirgin biçimde altında durulur ve bir daha yükselmez: kubelet, `SHUTDOWN_GRACE`
+beklenirken süreci SIGKILL ile bitirdi, drain hiç başlamadı. Aynı kod, aynı drain mantığı, farklı YAML → farklı veri kaybı.
 
 **Grafana'da gör:** Grafana'da görünmez — drain sunucu kapandıktan **sonra** çalışır (doğru sıra, bkz. §10), yani drain'in yazdığı `written` artışları `/metrics` ucu çoktan kapanmışken sayılır ve Prometheus'a hiç ulaşmaz; SIGKILL'le kesilen drain'in eksiği de aynı yüzden görünmez. `01 · Pods & Resources` → "Son sonlanma nedeni" de bu deneyden bir şey göstermez: rollout eski pod'ları yeniden başlatmaz, siler — o panel yalnızca aynı pod içinde yeniden başlayan konteynerleri gösterir. Kanıt terminalde:
 - `CONFIRM=1 make repro P=P05-05` → iki `kayıp: … tıklama` satırı; `grace=3s` fazındaki mevcut ayardakinden büyük
@@ -234,8 +471,49 @@ seviyede farklı zarar**: artık tıklamaları ciddi ciddi sayıyoruz ve sayamı
 [Topic · Konu: HTTP önbellekleme, ölçüm bütünlüğü]
 
 **Reproduce (adım adım):**
-1. `make repro P=P05-06` — 302 modunda sayımı ölçer, sonra tuzağı açıp başlıkları karşılaştırır
-2. **Elle (asıl ikna edici olan):** Chrome'da linki 5 kez aç → `stats`'a bak → 1 tıklama
+
+Otomatik — ölçer ve hüküm basar: `make repro P=P05-06` (302 modunda aynı istemciden 50 tıklamanın sayıldığını ölçer,
+sonra tuzağı açıp iki moddaki durum kodunu ve `Cache-Control` başlığını karşılaştırır; tarayıcı adımını — asıl ikna
+edici olanı — sana bırakır).
+
+Elle — sırayla yapıştır:
+
+1. Grafana'yı temizle. Varsayılan modda (302 + `no-store`) bir linke curl ile 50 kez git — curl önbellek tutmaz,
+   sunucu hepsini görür —, sonra sayaca ve yönlendirme başlıklarına bak:
+```bash
+make fresh
+code=$(curl -s -XPOST http://lvl05.localtest.me/api/links -H 'Content-Type: application/json' -d '{"url":"https://example.com/counted"}' | jq -r .code); echo "kod: $code"
+for i in $(seq 1 50); do curl -s -o /dev/null http://lvl05.localtest.me/$code; done
+sleep 5
+curl -s http://lvl05.localtest.me/api/links/$code/stats | jq .clicks
+curl -sI http://lvl05.localtest.me/$code | grep -iE '^(HTTP|cache-control)'
+```
+2. Tuzağı aç (302 yerine 301; pod'lar yeniden başlar, eski pod'lar birkaç saniye daha 302 verebildiği için 10 sn bekle),
+   yeni bir linkin başlıklarına bak:
+```bash
+make set E="TRAP_REDIRECT_301=true"
+sleep 10
+code2=$(curl -s -XPOST http://lvl05.localtest.me/api/links -H 'Content-Type: application/json' -d '{"url":"https://example.com/uncounted"}' | jq -r .code); echo "kod: $code2"
+curl -sI http://lvl05.localtest.me/$code2 | grep -iE '^(HTTP|cache-control)'
+```
+3. Asıl ikna edici olan, tarayıcı: üçüncü bir linki varsayılan tarayıcında 5 kez aç (macOS'ta `open` her seferinde yeni
+   bir sekme açar; Chrome'da DevTools → Network ile izleyebilirsin), sonra sayaca bak:
+```bash
+code3=$(curl -s -XPOST http://lvl05.localtest.me/api/links -H 'Content-Type: application/json' -d '{"url":"https://example.com/browser"}' | jq -r .code); echo "kod: $code3"
+for i in 1 2 3 4 5; do open "http://lvl05.localtest.me/$code3"; sleep 2; done
+sleep 5
+curl -s http://lvl05.localtest.me/api/links/$code3/stats | jq .clicks
+```
+4. Tuzağı kapat:
+```bash
+make reset
+```
+
+**Terminalde ne görmelisin:** 1. adımda `50`, `HTTP/1.1 302 Found` ve `Cache-Control: no-store, max-age=0`. 2. adımda
+`HTTP/1.1 301 Moved Permanently` ve `Cache-Control` satırı yok: saklamayı yasaklayan bir şey yok, tarayıcı 301'i
+önbelleğe alır (hâlâ `302` görürsen birkaç saniye sonra son komutu tekrarla). 3. adımda `1`: yalnızca ilk açılış
+sunucuya ulaştı, kalan dördünü tarayıcı kendi önbelleğinden açtı (DevTools'ta `(disk cache)`). 3. adım için ayrı bir
+link kullanılıyor, çünkü 2. adımdaki `curl -sI` de bir tıklama sayılır.
 
 **Grafana'da gör:** Grafana'da görünmez — sunucuya hiç ulaşmayan bir istek hiçbir sunucu metriğine yazılamaz. `03 · App Business` → "Başarılı yönlendirme / sn" tarayıcının kendi önbelleğinden açtığı tıklamaları saymaz, ama saymadığını da gösteremez: eksik olan bir çizgi değil, hiç gelmemiş bir istektir. (Script'in `curl` istekleri önbellek tutmadığı için orada hepsi sayılır.) Kanıt terminalde ve tarayıcıda:
 - `curl -sI http://lvl05.localtest.me/<kod>` → tuzak kapalıyken `302` ve `Cache-Control: no-store, max-age=0`; `TRAP_REDIRECT_301=true` iken `301` ve saklamayı yasaklayan bir `Cache-Control` yok

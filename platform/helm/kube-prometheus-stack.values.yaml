@@ -74,6 +74,9 @@ prometheus:
     scrapeInterval: 30s
     evaluationInterval: 15s
     enableRemoteWriteReceiver: true          # k6 -o experimental-prometheus-rw
+    # Silme API'si: `make fresh` (ve `make up`) seviyelerin serilerini saniyeler içinde siler;
+    # Grafana her deneye boş başlar. Prometheus yalnızca yerel ingress'ten erişilir.
+    enableAdminAPI: true
     enableFeatures: [exemplar-storage]       # 11: exemplar → Tempo
     serviceMonitorSelectorNilUsesHelmValues: false
     podMonitorSelectorNilUsesHelmValues: false

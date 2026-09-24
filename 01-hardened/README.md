@@ -67,7 +67,7 @@ tavanı → 02/03). Bunlar burada P01-01, P01-02 ve P01-04 olarak, artık **öl�
 Bu seviyenin platformdan istediği: **yalnızca temel yığın (kind, ingress, Prometheus, Grafana)**. `make up` ilk adımda (profil) bunları açar ve kullanılmayanları kapatır; bir bileşen kurulu değilse hangi komutla kurulacağını söyleyip durur.
 
 ```bash
-make up            # profil → build → push → deploy → rollout wait → smoke
+make up            # profil → Grafana'yı temizle → build → push → deploy → rollout wait → smoke
 code=$(curl -s -XPOST http://lvl01.localtest.me/api/links -H 'Content-Type: application/json' -d '{"url":"https://example.com"}' | jq -r .code); echo "$code"
 curl -s -o /dev/null -w '%{http_code} → %{redirect_url}\n' http://lvl01.localtest.me/$code   # 302 → https://example.com
 make grafana       # Ladder klasörü, level=lvl01 — giriş: admin / ladder
@@ -75,6 +75,28 @@ make load S=mixed  # aynı senaryolar her seviyede: create redirect mixed hot-ke
 make repro P=P01-01   # §6'daki bir sorunu otomatik üret → REPRODUCED / NOT-REPRODUCED
 make env           # açık ayar/tuzaklar · değiştir: make set E="KEY=değer" · hepsini geri al: make reset (§7)
 make down          # seviyeyi kaldır · kümeyi durdurmak için: make -C ../platform stop
+```
+
+**Rehber — bu seviyeyi baştan sona, sırayla.** Komut bloklarında açıklama yok; her bloğu olduğu gibi yapıştırabilirsin.
+
+1. Önceki seviye açıksa kapat (aynı anda tek seviye çalışır), bu seviyeyi kur. `make up` Grafana'yı da temizler:
+```bash
+make -C ../00-naive down
+make up
+```
+2. 00'ın sorunlarını bu seviyede koş (~15 dk). Koşarken başka komut çalıştırma: aynı pod'lara dokunurlar.
+   Çıktıdaki `BEKLENEN` sütunu `NOT-REPRODUCED` diyorsa 01 o sorunu çözmüş olmalı:
+```bash
+make verify-prev
+```
+3. §6'daki sorunları sırayla yaşa (P01-01 → P01-08). Her sorunda aynı düzen:
+   **Elle** bloklarını sırayla yapıştır (ilk komut `make fresh`: Grafana bu deneye boş başlar) →
+   **Terminalde ne görmelisin** ile karşılaştır → **Grafana'da gör** linklerini aç, her madde hangi panelde neyi
+   göreceğini söyler. İstersen aynı deneyi `make repro P=…` ile otomatik koş: ölçer ve hükmünü basar.
+4. Bitince açık kalan ayarları geri al ve seviyeyi kapat:
+```bash
+make reset
+make down
 ```
 
 ## 5. API
@@ -108,8 +130,30 @@ grafiğinde **dikey bir düşüş** olarak görünmesi.
 [Topic · Konu: Durum yönetimi, kalıcılık]
 
 **Reproduce (adım adım):**
-1. `CONFIRM=1 make repro P=P01-01` — 25 link oluşturur, `links_total`'ı okur, pod'u siler, tekrar okur
-2. Elle: link oluştur → `kubectl -n lvl01 delete pod -l app.kubernetes.io/name=linkly` → aynı kodu iste → 404
+
+Otomatik — ölçer ve hüküm basar: `CONFIRM=1 make repro P=P01-01` (25 link oluşturur, pod'u siler, sayacı ve kanarya kodu yeniden okur).
+
+Elle — `01-hardened` klasöründe, sırayla yapıştır:
+
+1. Grafana'yı temizle, bir kanarya link ve 25 link daha oluştur, pod'un kaç link bildiğine bak:
+```bash
+make fresh
+code=$(curl -s -XPOST http://lvl01.localtest.me/api/links -H 'Content-Type: application/json' -d '{"url":"https://example.com/p0101"}' | jq -r .code); echo "kanarya kodu: $code"
+for i in $(seq 1 25); do curl -s -o /dev/null -XPOST http://lvl01.localtest.me/api/links -H 'Content-Type: application/json' -d "{\"url\":\"https://example.com/$i\"}"; done
+curl -s http://lvl01.localtest.me/metrics | grep '^links_total'
+curl -s -o /dev/null -w 'restart öncesi: %{http_code}\n' http://lvl01.localtest.me/$code
+```
+2. Pod'u yeniden başlat, aynı kodu tekrar iste:
+```bash
+kubectl -n lvl01 delete pod -l app.kubernetes.io/name=linkly
+kubectl -n lvl01 wait --for=condition=Ready pod -l app.kubernetes.io/name=linkly --timeout=90s
+curl -s -o /dev/null -w 'restart sonrası: %{http_code}\n' http://lvl01.localtest.me/$code
+curl -s http://lvl01.localtest.me/metrics | grep '^links_total'
+```
+
+**Terminalde ne görmelisin:** önce `links_total 26` (önceki denemelerden kalan linklerle daha fazla olabilir) ve
+`restart öncesi: 302`; pod silinip yenisi hazır olunca `restart sonrası: 404` ve `links_total 0`. Bütün linkler
+pod'un belleğindeydi; yeni pod boş başladı.
 
 **Grafana'da gör:** [`03 · App Business`](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl01&from=now-15m&to=now&refresh=10s) — script pod'u sildikten sonra aç (giriş: admin / ladder)
 - "Kayıtlı link sayısı (pod'a göre)" → eski pod'un çizgisi scriptin oluşturduğu 25+ linkin seviyesinde biter, yeni pod adıyla **0**'dan başlayan bir çizgi belirir: dikey düşüş, yani kaybın büyüklüğü.
@@ -127,8 +171,30 @@ büyüklüğünü söyleyemiyordun bile.
 **Neden:** Her pod'un kendi map'i; Service istekleri dağıtıyor. [Topic · Konu: Stateless servis]
 
 **Reproduce (adım adım):**
-1. `CONFIRM=1 make repro P=P01-02` — 3 replikaya çıkar, endpoint'lerin yetişmesini bekler, 60 kez okur
-2. Script ayrıca **metrikten** aynı gerçeği gösterir: `sum by (pod) (redirect_total{result="not_found"})`
+
+Otomatik: `CONFIRM=1 make repro P=P01-02` (3 replikaya çıkar, 60 kez okur, hangi pod'un kaç 404 saydığını metrikten basar, sonra geri alır).
+
+Elle — sırayla yapıştır:
+
+1. Grafana'yı temizle, tek pod varken bir link oluştur:
+```bash
+make fresh
+code=$(curl -s -XPOST http://lvl01.localtest.me/api/links -H 'Content-Type: application/json' -d '{"url":"https://example.com/p0102"}' | jq -r .code); echo "kod: $code"
+```
+2. 3 replikaya çık, ingress yeni pod'ları görene kadar bekle, aynı kodu 30 kez iste:
+```bash
+kubectl -n lvl01 scale deploy/linkly --replicas=3
+kubectl -n lvl01 rollout status deploy/linkly
+sleep 10
+for i in $(seq 1 30); do curl -s -o /dev/null -w '%{http_code} ' http://lvl01.localtest.me/$code; done; echo
+```
+3. Geri al:
+```bash
+kubectl -n lvl01 scale deploy/linkly --replicas=1
+```
+
+**Terminalde ne görmelisin:** 30 cevabın yaklaşık üçte biri `302`, üçte ikisi `404`. Link yalnızca onu oluşturan
+pod'un belleğinde; ingress istekleri üç pod'a dağıtıyor ve diğer ikisi linki hiç görmedi.
 
 **Grafana'da gör:** [`03 · App Business`](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl01&from=now-15m&to=now&refresh=10s) ve [`01 · Pods & Resources`](http://grafana.localtest.me/d/ladder-pods?var-level=lvl01&from=now-15m&to=now&refresh=10s) — script çalışırken ya da hemen sonra aç (giriş: admin / ladder)
 - "404 (pod'a göre)" → her pod kendi sayacını çizer: linkin yazıldığı pod'un çizgisi 0'da kalır, **diğer ikisi** yükselir — 404'ü linki hiç görmemiş pod'lar veriyor. 00'da bu panel boştu.
@@ -150,18 +216,51 @@ PDB erişilebilirlik **üretmez**; yalnızca var olan yedekliliği korur. Yedekl
 bir şey de yoktur — sadece bakımı kilitler. [Topic · Konu: HA, PDB, yedeklilik]
 
 **Reproduce (adım adım):**
-1. `CONFIRM=1 make repro P=P01-03` — yük altında iki ucu da gösterir:
-   **(a)** normal drain → `disruptionsAllowed=0` yüzünden tahliye reddedilir, drain timeout'a düşer
-   **(b)** operatörün gerçekte yaptığı: zorla sil → pod ölür, yedeği yok → 5xx
-2. Sonunda node uncordon edilir
+
+Otomatik: `CONFIRM=1 make repro P=P01-03` — yük altında iki ucu da gösterir: **(a)** normal `kubectl drain`
+`disruptionsAllowed=0` yüzünden reddedilir ve timeout'a düşer; **(b)** zorla silme → pod ölür, yedeği yok → 5xx.
+Script düğümün tamamını boşaltmayı dener (o düğümdeki platform pod'ları da taşınır) ve sonunda `uncordon` eder.
+
+Elle — yalnızca uygulama pod'una dokunan sürüm, sırayla yapıştır:
+
+1. Grafana'yı temizle, PDB'nin ne izin verdiğine bak ve trafiği alan (hazır) pod'u seç — kapanmakta olan bir pod'un
+   tahliyesine PDB izin verir, deney onu değil çalışan pod'u sınamalı:
+```bash
+make fresh
+kubectl -n lvl01 rollout status deploy/linkly
+kubectl -n lvl01 get pdb linkly
+pod=$(kubectl -n lvl01 get endpointslice -l kubernetes.io/service-name=linkly -o jsonpath='{.items[*].endpoints[?(@.conditions.ready==true)].targetRef.name}'); echo "pod: $pod"
+```
+2. **(a) Kibar yol:** `kubectl drain`'in her pod için yaptığı tahliye isteğini tek pod için gönder:
+```bash
+printf '{"apiVersion":"policy/v1","kind":"Eviction","metadata":{"name":"%s","namespace":"lvl01"}}' "$pod" | kubectl create --raw "/api/v1/namespaces/lvl01/pods/$pod/eviction" -f -
+```
+3. **(b) Zorla yol:** İKİNCİ bir terminalde `01-hardened` klasöründe 90 sn'lik yükü başlat:
+```bash
+make load S=redirect K6_ARGS="--vus 5 --duration 90s"
+```
+   Yük başladıktan ~20 sn sonra İLK terminalde pod'u zorla sil ve yenisini bekle:
+```bash
+kubectl -n lvl01 delete pod "$pod" --force --grace-period=0
+kubectl -n lvl01 wait --for=condition=Ready pod -l app.kubernetes.io/name=linkly --timeout=90s
+```
+
+**Terminalde ne görmelisin:** `kubectl get pdb` satırında `MIN AVAILABLE 1 · ALLOWED DISRUPTIONS 0`. Tahliye isteği
+`Error from server (TooManyRequests): Cannot evict pod as it would violate the pod's disruption budget.` ile
+reddedilir — `kubectl drain` bu cevabı alıp tekrar dener ve timeout'a düşer: düğüm bakımı kilitlenir. Zorla silmede
+ikinci terminalde k6'nın `complete` sayacı bir süre donar ve sonunda her kullanıcı için bir
+`Request Failed … request timeout` uyarısı çıkar: ölen pod'a giden istekler 60 sn cevapsız bekledi. k6 çıktısının
+sonundaki özet satırı (ölçülen): `k6 lvl01: reqs=188628 failed=43.03% 5xx=5 404=62109 429=19054 …` —
+`5xx` kullanıcı sayısı kadar (asılı kalan istekler), `404` on binlerce (yeni pod'un belleği boş, P01-01). `429`'lar
+da gelir: yeni pod'un 404'leri çok hızlı döner, istek hızı pod'un IP başına saniyede 5000'lik sınırını aşar.
 
 **Ölçülen çıktı:** `minAvailable=1 · izin verilen kesinti=0` →
 `error when evicting pods/"linkly-…" -n "lvl01": global timeout reached: 45s`. Yani PDB sözünü
 tuttu: kimse ölmedi — ama node'a da dokunamadın.
 
 **Grafana'da gör:** [`01 · Pods & Resources`](http://grafana.localtest.me/d/ladder-pods?var-level=lvl01&from=now-15m&to=now&refresh=10s), [`15 · k6`](http://grafana.localtest.me/d/ladder-k6?var-level=lvl01&from=now-15m&to=now&refresh=10s) ve [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl01&from=now-15m&to=now&refresh=10s) — scripti başlatınca aç; deney ~2 dk sürer (giriş: admin / ladder)
-- "Hazır pod adresi (endpoint) sayısı" → uç (a) boyunca **1'de kalır**: PDB tahliyeyi reddediyor, kimse ölmüyor. Uç (b)'de pod zorla silinince hazır adres kalmaz — çizgi **kesilir** (boşluk = 0 hazır adres) ve yeni pod hazır olunca 1'e döner.
-- "Pod durumları" → zorla silmeden hemen sonra kısa bir `Pending` katmanı: yeni pod başka bir node'da açılıyor. Birkaç saniye sürerse örneklemeye yakalanmayabilir; o zaman yukarıdaki boşluğa bak.
+- "Hazır pod adresi (endpoint) sayısı" → uç (a) boyunca **1'de kalır**: PDB tahliyeyi reddediyor, kimse ölmüyor. Uç (b)'de pod zorla silinince hazır adres kalmaz — çizgi **0'a iner** ve yeni pod hazır olunca 1'e döner.
+- "Pod durumları" → zorla silmeden hemen sonra kısa bir sarı `Pending` basamağı: yeni pod başka bir node'da açılıyor. Birkaç saniye sürerse örneklemeye yakalanmayabilir; o zaman yukarıdaki panelin 0'a indiği ana bak.
 - "Dönen durum kodları" (k6) → boşluğun olduğu anda `503` (ingress: gönderilecek pod yok); ardından `302`'nin yerini `404` alır — yeni pod'un belleği boş (P01-01).
 - "İstek / saniye (durum koduna göre)" (App RED) → `503` **görmezsin**: kesintiyi uygulama değil ingress yaşadı, uygulama yalnızca sonrasındaki `404`'leri sayar. İki panel arasındaki fark aradaki katmandır; bkz. [Grafana'yı okumak](../README.md#grafanayı-okumak).
 
@@ -175,8 +274,32 @@ tuttu: kimse ölmedi — ama node'a da dokunamadın.
 **Neden:** Store'da eviction yok, TTL yok, üst sınır yok. [Topic · Konu: Bounded resources]
 
 **Reproduce (adım adım):**
-1. `make repro P=P01-04` — 90 sn link üretir; **tepe** heap, tepe `links_total` ve tepe working set okur
-2. Uzun sürüm: `DURATION=240s URL_SIZE=8000 make repro P=P01-04` → OOMKilled (P00-08'in aynısı, 256Mi limitte)
+
+Otomatik: `make repro P=P01-04` — 90 sn link üretir; **tepe** heap, tepe `links_total` ve tepe working set okur.
+Uzun sürüm: `DURATION=240s URL_SIZE=8000 make repro P=P01-04` → OOMKilled (P00-08'in aynısı, 256Mi limitte).
+
+Elle — sırayla yapıştır:
+
+1. Grafana'yı temizle, başlangıç değerlerini oku:
+```bash
+make fresh
+curl -s http://lvl01.localtest.me/metrics | grep -E '^(links_total|go_memstats_heap_alloc_bytes) '
+```
+2. Tek kullanıcıyla 90 sn boyunca 2 KB'lık linkler üret (tek kullanıcı: çökme yok, yalnızca büyüme), sonra tekrar oku:
+```bash
+URL_SIZE=2000 make load S=create K6_ARGS="--vus 1 --duration 90s"
+curl -s http://lvl01.localtest.me/metrics | grep -E '^(links_total|go_memstats_heap_alloc_bytes) '
+kubectl -n lvl01 top pod
+```
+3. İstersen sınıra kadar götür (4 dk), sonra pod'un neden öldüğüne bak:
+```bash
+URL_SIZE=8000 make load S=create K6_ARGS="--vus 1 --duration 240s"
+kubectl -n lvl01 get pod -l app.kubernetes.io/name=linkly -o jsonpath='{.items[0].status.containerStatuses[0].lastState.terminated.reason}'; echo
+```
+
+**Terminalde ne görmelisin:** 1. adımda `links_total 0` ve heap ~3 MB (`3.1e+06`). 2. adımdan sonra (ölçülen)
+`links_total 64474` ve `go_memstats_heap_alloc_bytes 1.51e+08` — yani ~150 MB; `kubectl top pod` ~143Mi gösterir,
+256Mi sınırın yarısından fazlası. Hiçbiri geri düşmez (eviction, TTL, üst sınır yok). 3. adımın sonunda `OOMKilled` yazar: konteyner 256 MiB sınırına çarptı ve bütün linklerle birlikte öldü.
 
 **Ölçüm notu:** "Öncesi/sonrası heap" ölçmek yanıltır — süreç test sırasında OOM olup yeniden
 doğarsa son ölçüm sıfırdan başlar, *büyüme yok* gibi görünür ve hüküm yanlış negatif olur. Bu yüzden
@@ -185,7 +308,7 @@ kök: **anlık ölçüm, ölüp dirilen bir süreci göremez.**
 
 **Grafana'da gör:** [`01 · Pods & Resources`](http://grafana.localtest.me/d/ladder-pods?var-level=lvl01&from=now-15m&to=now&refresh=10s) ve [`03 · App Business`](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl01&from=now-15m&to=now&refresh=10s) — scripti başlatınca aç; yük 90 sn sürer (giriş: admin / ladder)
 - "Heap bellek (Go)" → yük boyunca **monoton** tırmanır, yük bitince de inmez: store hiçbir şeyi bırakmıyor. 00'da bu panel boştu — eğriyi çarpmadan önce görmek 01'in kazancı.
-- "Bellek kullanımı" → heap'i izleyerek `sınır: …` çizgisine (256 MiB) doğru tırmanır. Uzun sürümde (`DURATION=240s URL_SIZE=8000`) konteyner limite çarpar ve aynı dashboard'daki "Son sonlanma nedeni" panelinde `OOMKilled` belirir (örnekleme yüzünden çizgi limite değmeden kesilebilir — P00-08).
+- "Bellek kullanımı" → heap'i izleyerek tırmanır; "Bellek: sınırın yüzde kaçı" → aynı büyüme sınırın (256 MiB) yüzdesi olarak %100'e doğru gider. Uzun sürümde (`DURATION=240s URL_SIZE=8000`) konteyner sınıra çarpar ve aynı dashboard'daki "Son sonlanma nedeni" panelinde `OOMKilled` belirir (örnekleme yüzünden çizgi %100'e değmeden kesilebilir — P00-08).
 - "Kayıtlı link sayısı (pod'a göre)" → heap ile aynı biçimde tırmanır: bellek = link sayısı × link boyutu.
 
 **Nerede çözülüyor:** 02 (durum DB'de) · 03 (bounded LRU). 01'in kazancı: eğriyi görüp **alarm
@@ -201,8 +324,40 @@ aynı client bazı pod'larda limitlenip bazılarında geçiyor.
 replika sayısıyla çarpılır. [Topic · Konu: Dağıtık durum, hız sınırlama]
 
 **Reproduce (adım adım):**
-1. `CONFIRM=1 make repro P=P01-05` — limiti 50 rps'e çeker, önce 1 pod sonra 3 pod ile aynı yükü verir
-2. Kabul edilen istek sayısını karşılaştırır (beklenen: ~3 kat)
+
+Otomatik: `CONFIRM=1 make repro P=P01-05` — limiti pod başına 50 rps'e çeker, önce 1 pod sonra 3 pod ile aynı yükü
+verir, kabul edilen istek sayısını karşılaştırır (beklenen: ~3 kat), sonra her şeyi geri alır.
+
+Elle — sırayla yapıştır:
+
+1. Grafana'yı temizle, limiti pod başına saniyede 50 isteğe çek. Pod yeniden başlar; eski pod birkaç saniye daha
+   trafik alır ve kendi kovasıyla ölçümü şişirir, bu yüzden trafikten çıkmasını bekle:
+```bash
+make fresh
+make set E="RATE_LIMIT_PER_SEC=50 RATE_LIMIT_BURST=50"
+sleep 20
+```
+2. Tek pod ile 20 sn yük ver:
+```bash
+make load S=redirect K6_ARGS="--vus 20 --duration 20s"
+```
+3. 3 pod'a çık, aynı yükü ver:
+```bash
+kubectl -n lvl01 scale deploy/linkly --replicas=3
+kubectl -n lvl01 rollout status deploy/linkly
+sleep 10
+make load S=redirect K6_ARGS="--vus 20 --duration 20s"
+```
+4. Geri al:
+```bash
+kubectl -n lvl01 scale deploy/linkly --replicas=1
+make reset
+```
+
+**Terminalde ne görmelisin:** her yükün çıktısının sonunda bir özet satırı: `k6 lvl01: reqs=… 404=… 429=…`.
+Kabul edilen istek = `reqs − 429`. Tek pod'da ~1000 (ölçülen 1059: 50 rps × 20 sn); 3 pod'da ~3000 (ölçülen 3171).
+"Saniyede 50" yazdın, sistem 150 geçirdi: her pod kendi kovasını tutuyor. (3 pod'daki 404'ler P01-02'dendir: link
+onu oluşturan pod'da; hız sınırıyla ilgisi yok.)
 
 **Grafana'da gör:** [`10 · Rate limit`](http://grafana.localtest.me/d/ladder-ratelimit?var-level=lvl01&from=now-15m&to=now&refresh=10s) — scripti başlatınca aç; iki faz 20'şer sn, panellerin 1 dk'lık ortalaması yüzünden geçiş yumuşak görünür (giriş: admin / ladder)
 - "İzin verilen (pod'a göre)" → ilk fazda (1 pod) **tek** çizgi, limit civarında (~50/s); ikinci fazda (3 pod) **üç ayrı** çizgi, her biri yine limit civarında: üç ayrı kova, üç ayrı sayaç, toplam ~3 katı.
@@ -221,10 +376,34 @@ sayısı link sayısıyla birlikte büyür; sorgular ve Prometheus'un kendisi ya
 IP, tenant id, user id) label olamaz. [Topic · Konu: Kardinalite]
 
 **Reproduce (adım adım):**
-1. `make repro P=P01-06` — `TRAP_METRIC_LABEL_CODE=true` açar, 400 farklı kodu ziyaret eder
-2. `count(count by (short_code) (http_requests_total{namespace="lvl01"}))` ve
-   `prometheus_tsdb_head_series` farkını basar; sonra tuzağı kapatır
-3. Route şablonunun (`/{code}`) neden tek bir seri ürettiğini `internal/httpapi/middleware.go:routeOf`'ta gör
+
+Otomatik: `make repro P=P01-06` — `TRAP_METRIC_LABEL_CODE=true` açar, 400 farklı kodu ziyaret eder,
+`count(count by (short_code) (http_requests_total{namespace="lvl01"}))` ve `prometheus_tsdb_head_series` farkını
+basar, sonra tuzağı kapatır. Route şablonunun (`/{code}`) neden tek bir seri ürettiğini
+`internal/httpapi/middleware.go:routeOf`'ta gör.
+
+Elle — sırayla yapıştır:
+
+1. Grafana'yı temizle, tuzağı aç (pod yeniden başlar):
+```bash
+make fresh
+make set E="TRAP_METRIC_LABEL_CODE=true"
+```
+2. 200 link oluşturup her birini bir kez aç, sonra pod'un kaç ayrı seri ürettiğini say:
+```bash
+for i in $(seq 1 200); do c=$(curl -s -XPOST http://lvl01.localtest.me/api/links -H 'Content-Type: application/json' -d "{\"url\":\"https://example.com/card/$i\"}" | jq -r .code); curl -s -o /dev/null http://lvl01.localtest.me/$c; done
+curl -s http://lvl01.localtest.me/metrics | grep -c 'short_code='
+```
+3. Tuzağı kapat, eski pod trafikten çıkana kadar bekle, tekrar say:
+```bash
+make reset
+sleep 10
+curl -s http://lvl01.localtest.me/metrics | grep -c 'short_code='
+```
+
+**Terminalde ne görmelisin:** tuzak açıkken `201` (ölçülen): ziyaret ettiğin her kısa kod istek sayacında ayrı bir
+zaman serisi açtı — 200 linkte 200 seri, 1 milyon linkte 1 milyon. Tuzak kapanınca `0` — ama Prometheus o serileri
+bir süre daha belleğinde taşır (Grafana linkindeki `prometheus_tsdb_head_series`).
 
 **Grafana'da gör:** [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl01&from=now-15m&to=now&refresh=10s) — script 400 kodu ziyaret ederken aç (giriş: admin / ladder)
 - "İstek / saniye (uç noktaya göre)" → **yine birkaç çizgi** (`/{code}`, `/api/links` …): panel `sum by (route)` ile topladığı için `short_code` label'ı ekranda eriyip gider. Patlama panelde değil, altındaki seri sayısında — dashboard'a bakarak kardinaliteyi göremezsin.
@@ -242,12 +421,47 @@ metrikten trace'e atlayacağız — kardinalite ödemeden).
 uzun sürerse restart eder. Uygulama aslında sağlıklıdır; onu devre dışı bırakan **probe'un kendisidir**.
 **Neden:** `/healthz` ve `/readyz` iş zincirine (hız sınırı + timeout) dahil edilirse, yük arttığında
 probe 429/timeout alır → kubelet konteyneri öldürür → yük kalan pod'lara biner → onlar da ölür.
-Yük artışı kendi kendine bir **kesintiye** dönüşür. [Topic · Konu: Probe semantiği, kaskad]
+Yük artışı kendi kendine bir **kesintiye** dönüşür. Tuzak, bu kestirmenin genelde yanında gelen ikinci
+hatayı da yapar: zincirin hız sınırı istemci başına değil **pod başına tek kova**dır. İkisi birlikte
+gerekir: IP başına bir kova probe'ları korurdu — kubelet düğümün IP'sinden gelir, kendi kovası olur;
+tek kovada ise istemcinin yükü probe'un payını da tüketir. `internal/httpapi/middleware.go:TrapChain`,
+birim testi `TestTrapLivenessStrictProbeFromOtherIPShares`. [Topic · Konu: Probe semantiği, kaskad]
 
 **Reproduce (adım adım):**
-1. `make repro P=P01-07` — `TRAP_LIVENESS_STRICT=true` + limiti 30 rps yapar, **150 sn** yük verir
-2. `Unhealthy` olaylarını (liveness ve readiness ayrı ayrı) ve restart sayısını sayar, sonra tuzağı kapatır
-3. Birim test karşılığı: `internal/httpapi/trap_test.go` — tuzak kapalıyken `/healthz` 200, açıkken 429
+
+Otomatik: `make repro P=P01-07` — `TRAP_LIVENESS_STRICT=true` + limiti 30 rps yapar, **150 sn** yük verir,
+`Unhealthy` olaylarını (liveness ve readiness ayrı ayrı) ve restart sayısını sayar, sonra tuzağı kapatır.
+Birim test karşılığı: `internal/httpapi/trap_test.go` — tuzak kapalıyken `/healthz` 200, açıkken 429.
+
+Elle — sırayla yapıştır:
+
+1. Grafana'yı temizle, tuzağı aç ve limiti düşür (pod yeniden başlar):
+```bash
+make fresh
+make set E="TRAP_LIVENESS_STRICT=true RATE_LIMIT_PER_SEC=30 RATE_LIMIT_BURST=30"
+```
+2. İKİNCİ bir terminalde probe hatalarını canlı izle:
+```bash
+kubectl -n lvl01 get events -w --field-selector reason=Unhealthy
+```
+3. İLK terminalde limitin çok üstünde 150 sn yük ver, sonra sonucu oku:
+```bash
+make load S=redirect K6_ARGS="--vus 10 --duration 150s"
+kubectl -n lvl01 get events --field-selector reason=Unhealthy
+kubectl -n lvl01 get pods
+```
+4. Tuzağı kapat (ikinci terminaldeki izlemeyi Ctrl+C ile durdur):
+```bash
+make reset
+```
+
+**Terminalde ne görmelisin:** ikinci terminalde yük başladıktan kısa süre sonra her ~8 sn'de bir
+`Readiness probe failed: HTTP probe failed with statuscode: 429`; arada `Liveness probe failed: … 429`. Pod
+Endpoints'ten düşer ve ingress, uygulama sağlıklıyken **503** döner. Ölçülen: 21 readiness ve 3 liveness 429'u,
+restart 0; k6 özet satırı `k6 lvl01: reqs=959985 … 5xx=564313 404=0 429=392232` — `5xx`'in tamamı pod trafikten
+düştüğü anlarda ingress'in 503'ü. (Tuzağı açan rollout'ta yeni pod'un açılış anındaki `connection refused` ve
+`statuscode: 503` olayları tuzakla ilgisizdir.) Liveness'ın öldürmesi için 6 ardışık hata (60 sn) gerekir; en
+görünür belirti (restart) en geç gelendir.
 
 **Ölçüm notu:** Yük, probe'un **toleransından uzun** sürmeli. Bu deployment'ta liveness
 `failureThreshold: 6 × periodSeconds: 10` = 60 sn tolerans; tam 60 sn'lik bir yük restart üretmez ve
@@ -255,15 +469,13 @@ hüküm yanlış negatif olur, bu yüzden yük 150 sn sürer. Tolerans, tasarım
 kadar sabırlı olduğunu bilmeden "probe çalışıyor mu?" sorusuna cevap veremezsin.
 Ayrıca readiness de aynı kovadan içer: pod daha restart olmadan **Endpoints'ten düşer**.
 
-**Ölçülen tur (150 sn yük, 30 rps limit):** `Unhealthy(readiness) 77 olay · Unhealthy(liveness) 2 olay · restart 0`.
-Dikkat: baskın etki **restart değil, readiness**. Pod daha ölmeden Endpoints'ten düşüyor — yani
-ingress ona trafik göndermeyi bırakıyor. Tek replikada bu doğrudan **kesinti** demek; N replikada
-ise düşen pod'un yükü diğerlerine biner, onların da probe'ları düşer: **kaskad**. Liveness'ın restart
-üretmesi için 6 ardışık hata (60 sn) gerekir — yani en görünür belirti (restart) aslında en
-*geç* gelen belirti. "Restart yok, demek ki sorun yok" demek bu yüzden yanlış.
+**Ölçülen (150 sn yük, 30 rps limit):** `Unhealthy(readiness) 21 · Unhealthy(liveness) 3 · restart 0` ve
+k6'da 564 313 adet 503. Baskın etki **restart değil, readiness**: pod daha ölmeden Endpoints'ten düşer, ingress
+ona trafik göndermeyi bırakır. Tek replikada bu doğrudan **kesinti**; N replikada düşen pod'un yükü diğerlerine
+biner, onların da probe'ları düşer: **kaskad**. "Restart yok, demek ki sorun yok" demek bu yüzden yanlış.
 
 **Grafana'da gör:** [`01 · Pods & Resources`](http://grafana.localtest.me/d/ladder-pods?var-level=lvl01&from=now-15m&to=now&refresh=10s), [`10 · Rate limit`](http://grafana.localtest.me/d/ladder-ratelimit?var-level=lvl01&from=now-15m&to=now&refresh=10s) ve [`15 · k6`](http://grafana.localtest.me/d/ladder-k6?var-level=lvl01&from=now-15m&to=now&refresh=10s) — scripti başlatınca aç; yük 150 sn sürer (giriş: admin / ladder)
-- "Hazır pod adresi (endpoint) sayısı" → yük boyunca 1 ile boşluk arasında **kesik kesik** gider: readiness düştükçe pod Endpoints'ten çıkıyor (ölçülen tur: 77 readiness olayı). Tek replikada her boşluk bir kesinti.
+- "Hazır pod adresi (endpoint) sayısı" → yük boyunca 1 ile 0 arasında **basamak basamak** gider: readiness düştükçe pod Endpoints'ten çıkıyor (ölçülen: 21 readiness olayı). Tek replikada her 0 bir kesinti.
 - "Yeniden başlatma sayısı" → çoğu turda **kıpırdamaz** (ölçülen tur: restart 0): liveness'ın 60 sn toleransı var. En görünür belirti en geç gelen belirtidir — "restart yok" sorun yok demek değil.
 - "Reddedilen / sn" → yük boyunca yüksek: limit 30 rps'e çekildi, üstü reddediliyor.
 - "Dönen durum kodları" (k6) → `429` baskın; pod Endpoints'ten düştüğü anlarda `503` (ingress: hazır pod yok). Kodların anlamı: [Grafana'yı okumak](../README.md#grafanayı-okumak).
@@ -281,8 +493,32 @@ pod restart olunca tüm tıklamalar sıfırlanıyor.
 [Topic · Konu: Asenkronizm, okuma/yazma yolu ayrımı]
 
 **Reproduce (adım adım):**
-1. `CONFIRM=1 make repro P=P01-08` — 300 tıklama yapar, sayacı okur, hot-key yükünde p99'u ölçer,
-   pod'u yeniden başlatır ve sayacın sıfırlandığını gösterir
+
+Otomatik: `CONFIRM=1 make repro P=P01-08` — 300 tıklama yapar, sayacı okur, hot-key yükünde p99'u ölçer,
+pod'u yeniden başlatır ve sayacın sıfırlandığını gösterir.
+
+Elle — sırayla yapıştır:
+
+1. Grafana'yı temizle, bir link oluştur, 300 kez aç, sayacı oku:
+```bash
+make fresh
+code=$(curl -s -XPOST http://lvl01.localtest.me/api/links -H 'Content-Type: application/json' -d '{"url":"https://example.com/p0108"}' | jq -r .code); echo "kod: $code"
+for i in $(seq 1 300); do curl -s -o /dev/null http://lvl01.localtest.me/$code; done
+curl -s http://lvl01.localtest.me/api/links/$code | jq .clicks
+```
+2. Aynı sıcak linke 50 kullanıcıyla 30 sn yük ver (her redirect aynı sayacı kilitleyip artırır):
+```bash
+make load S=hot-key K6_ARGS="--vus 50 --duration 30s"
+```
+3. Pod'u yeniden başlat, sayaca tekrar bak:
+```bash
+kubectl -n lvl01 delete pod -l app.kubernetes.io/name=linkly
+kubectl -n lvl01 wait --for=condition=Ready pod -l app.kubernetes.io/name=linkly --timeout=90s
+curl -s -o /dev/null -w '%{http_code}\n' http://lvl01.localtest.me/api/links/$code
+```
+
+**Terminalde ne görmelisin:** önce `300`. Hot-key yükünün sonundaki `k6 lvl01: …` özet satırında `p99` düşüktür (bu ölçekte mutex ucuz,
+bedeli 02'de satır kilidine dönüşünce görünür). Restart sonrası `404`: link de, 300 tıklama da gitti.
 
 **Grafana'da gör:** [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl01&from=now-15m&to=now&refresh=10s) ve [`03 · App Business`](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl01&from=now-15m&to=now&refresh=10s) — scripti başlatınca aç; hot-key yükü 30 sn sürer (giriş: admin / ladder)
 - "p99 süre (uç noktaya göre)" → hot-key yükü sırasında `/{code}` çizgisi yükselir: her redirect, yanıt dönmeden önce aynı sayaç kilidini bekliyor.

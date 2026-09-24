@@ -18,9 +18,19 @@ step "Limitin üstünde trafik ver (150 sn) — probe da aynı kovadan içiyor"
 k6run redirect --vus 10 --duration "${DURATION:-150s}" >/dev/null 2>&1 || true
 sleep 20
 after=$(restarts_of "$pod"); [[ -z "$after" ]] && after=$(restarts_of "$(pod_name)")
-# Olayları describe'dan değil doğrudan event API'sinden say: describe çıktısı kırpılıyor.
-probe429=$(kubectl -n "$NS" get events --field-selector reason=Unhealthy -o jsonpath='{range .items[*]}{.message}{"\n"}{end}' 2>/dev/null | grep -ci 'liveness' || true)
-ready429=$(kubectl -n "$NS" get events --field-selector reason=Unhealthy -o jsonpath='{range .items[*]}{.message}{"\n"}{end}' 2>/dev/null | grep -ci 'readiness' || true)
+# Olayları describe'dan değil doğrudan event API'sinden say: describe çıktısı kırpılıyor. Yalnızca
+# REDDEDİLEN probe'lar sayılır (429 ya da zaman aşımı): tuzağı açan rollout'ta yeni pod'un açılış anındaki
+# "connection refused" ve hazır olmadan dönen 503 da Unhealthy olayıdır ama tuzakla ilgisi yoktur; onları
+# saymak her koşuda REPRODUCED üretir. Aynı mesaj tekrarlanınca Kubernetes onu tek olayda toplar, sayı
+# `count` alanındadır.
+probe_rejects() {
+  kubectl -n "$NS" get events --field-selector reason=Unhealthy -o json 2>/dev/null \
+    | jq --arg kind "$1" '[.items[] | select(.message | test($kind; "i"))
+        | select(.message | test("statuscode: 429|deadline exceeded|Client.Timeout"))
+        | (.count // .series.count // 1)] | add // 0'
+}
+probe429=$(probe_rejects liveness)
+ready429=$(probe_rejects readiness)
 grafana_hint "01 · Pods & Resources → 'Restart sayısı' · 10 · Rate limit → 'reject/s'"
 note "restart: $before → ${after:-?} · Unhealthy(liveness) olayı: $probe429 · Unhealthy(readiness) olayı: $ready429"
 note "readiness de aynı kovadan içiyor: probe 429 alınca pod Endpoints'ten DÜŞER — yani daha restart olmadan trafik almayı bırakır."

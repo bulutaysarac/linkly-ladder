@@ -67,7 +67,7 @@ içindeki `db.*` denemeleri ve `pool.acquire` olayı); P02-06, P04-03, P07-03, P
 Bu seviyenin platformdan istediği: **temel yığın (kind, ingress, Prometheus, Grafana) + Chaos Mesh, KEDA, CloudNativePG, Tempo + Loki (yalnızca bu seviyede açılır)**. `make up` ilk adımda (profil) bunları açar ve kullanılmayanları kapatır; bir bileşen kurulu değilse hangi komutla kurulacağını söyleyip durur.
 
 ```bash
-make up            # profil → build → push → deploy → rollout wait → smoke
+make up            # profil → Grafana'yı temizle → build → push → deploy → rollout wait → smoke
 code=$(curl -s -XPOST http://lvl11.localtest.me/api/links -H 'Content-Type: application/json' -d '{"url":"https://example.com"}' | jq -r .code); echo "$code"
 curl -s -o /dev/null -w '%{http_code} → %{redirect_url}\n' http://lvl11.localtest.me/$code   # 302 → https://example.com
 make grafana       # Ladder klasörü, level=lvl11 — giriş: admin / ladder
@@ -78,6 +78,32 @@ make down          # seviyeyi kaldır · kümeyi durdurmak için: make -C ../pla
 ```
 
 Trace'e bakmak için: Grafana → Explore → Tempo (ya da `kubectl -n monitoring port-forward svc/tempo 3200:3200`).
+
+**Rehber — bu seviyeyi baştan sona, sırayla.** Komut bloklarında açıklama yok; her bloğu olduğu gibi yapıştırabilirsin.
+
+1. Önceki seviye açıksa kapat (aynı anda tek seviye çalışır), bu seviyeyi kur. `make up` Grafana'yı da temizler:
+```bash
+make -C ../10-resilience down
+make up
+```
+2. 10'un altı sorun scriptini bu seviyede koş. Koşarken başka komut çalıştırma: aynı pod'lara dokunurlar.
+   11, 10'un sorunlarından hiçbirini çözmüyor (`problems/SOLVES` gerekçesini yazar): `BEKLENEN` sütunu her satırda
+   `(açık kalabilir)` der ve örneğin P10-03 burada da `REPRODUCED` çıkar. Onay isteyen P10-02 `SKIPPED` görünür —
+   onu da koşmak için `CONFIRM=1 make verify-prev`:
+```bash
+make verify-prev
+```
+3. §6'daki sorunları sırayla yaşa (P11-01 → P11-08). Her sorunda aynı düzen:
+   **Elle** bloklarını sırayla yapıştır (ilk komut `make fresh`: Grafana bu deneye boş başlar) →
+   **Terminalde ne görmelisin** ile karşılaştır → **Grafana'da gör** linklerini aç, her madde hangi panelde neyi
+   göreceğini söyler. İstersen aynı deneyi `make repro P=…` ile otomatik koş: ölçer ve hükmünü basar.
+   Tempo'ya terminalden bakan adımlar İKİNCİ bir terminalde `kubectl port-forward` açar; adım bitince onu Ctrl+C ile durdur.
+4. Bitince kalan arızaları ve açık ayarları geri al, seviyeyi kapat:
+```bash
+make unchaos
+make reset
+make down
+```
 
 ## 5. API
 
@@ -98,7 +124,7 @@ Her seviyede aynı: [docs/API.md](../docs/API.md). Dışarıdan değişiklik yok
 | P11-05 | Debug log Loki'yi limitler | `make repro P=P11-05` | [15 · k6](http://grafana.localtest.me/d/ladder-k6?var-level=lvl11&from=now-15m&to=now&refresh=10s) → "Gönderilen istek / sn" | seviye içi |
 | P11-06 | **TRAP** tenant label'ı → kardinalite | `make repro P=P11-06` | [03 · App Business](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl11&from=now-15m&to=now&refresh=10s) → "İstek / kiracı" | seviye içi |
 | P11-07 | Dashboard drift'i | `make repro P=P11-07` | [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl11&from=now-15m&to=now&refresh=10s) → "Saniyedeki istek" | seviye içi (kod) |
-| P11-08 | **TRAP** profilsiz görünmeyen hot spot | `make repro P=P11-08` | [01 · Pods & Resources](http://grafana.localtest.me/d/ladder-pods?var-level=lvl11&from=now-15m&to=now&refresh=10s) · [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl11&from=now-15m&to=now&refresh=10s) → "CPU kullanımı (çekirdek)" | profil (14) |
+| P11-08 | **TRAP** profilsiz görünmeyen hot spot | `make repro P=P11-08` | [01 · Pods & Resources](http://grafana.localtest.me/d/ladder-pods?var-level=lvl11&from=now-15m&to=now&refresh=10s) · [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl11&from=now-15m&to=now&refresh=10s) → "CPU kullanımı (bir çekirdeğin %'si)" | profil (14) |
 
 ---
 
@@ -108,8 +134,54 @@ Her seviyede aynı: [docs/API.md](../docs/API.md). Dışarıdan değişiklik yok
 **Neden:** Metrikler toplamdır. Tek bir isteğin içinde neyin ne kadar sürdüğünü ancak trace bilir.
 [Topic · Konu: Metrik/trace/log korelasyonu]
 
-**Reproduce:** `make repro P=P11-01` — gizli bir gecikme enjekte eder (hangi bağımlılık olduğunu
-söylemeden), önce metrikle tahmin ettirir, sonra exemplar'dan trace'e atlar.
+**Reproduce (adım adım):**
+
+Otomatik — ölçer ve hüküm basar: `make repro P=P11-01` (gizli bir gecikme enjekte eder — hangi bağımlılık olduğunu
+söylemeden —, önce metrikle tahmin ettirir, sonra exemplar'dan trace'e atlar ve trace'in span'lerini Tempo'dan çekip
+süreye göre basar).
+
+Elle — `11-observability-deep` klasöründe, sırayla yapıştır:
+
+1. Grafana'yı temizle, temiz tabanda 30 sn yük ver ve `/{code}` p99'unu oku:
+```bash
+make fresh
+make load S=redirect K6_ARGS="--vus 20 --duration 30s"
+sleep 10
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace="lvl11",route="/{code}"}[2m])) by (le))' | jq -r '"taban p99 (sn): " + .data.result[0].value[1]'
+```
+2. Redis'e 200 ms gecikme enjekte et, aynı yükü 40 sn ver; p99'u ve bağımlılık başına p99'u oku (metriğin söyleyebildiği
+   kadarı):
+```bash
+make chaos C=redis-delay-200ms
+sleep 5
+make load S=redirect K6_ARGS="--vus 20 --duration 40s"
+sleep 12
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace="lvl11",route="/{code}"}[2m])) by (le))' | jq -r '"şimdi p99 (sn): " + .data.result[0].value[1]'
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=histogram_quantile(0.99, sum(rate(dependency_request_duration_seconds_bucket{namespace="lvl11"}[2m])) by (le, dep))' | jq -r '.data.result[] | "\(.metric.dep): \(.value[1]) sn"'
+```
+3. Son 5 dakikanın exemplar'larından yavaş (> 100 ms) bir isteğin `trace_id`'sini al:
+```bash
+tid=$(curl -sG 'http://prometheus.localtest.me/api/v1/query_exemplars' --data-urlencode 'query=http_request_duration_seconds_bucket{namespace="lvl11",route="/{code}"}' --data-urlencode "start=$(( $(date +%s) - 300 ))" --data-urlencode "end=$(date +%s)" | jq -r '[.data[]?.exemplars[]? | select((.value|tonumber) > 0.1) | .labels.trace_id] | .[0] // empty'); echo "trace_id: $tid"
+```
+4. İKİNCİ bir terminalde Tempo'ya tünel aç (açık kalsın):
+```bash
+kubectl -n monitoring port-forward svc/tempo 13201:3200
+```
+5. İLK terminalde o trace'in span'lerini süreye göre bas:
+```bash
+curl -s "http://127.0.0.1:13201/api/traces/$tid" | jq -r '[(.batches // .resourceSpans // [])[] | ([.resource.attributes[]? | select(.key=="service.name") | .value.stringValue][0]) as $svc | (.scopeSpans // .instrumentationLibrarySpans // [])[] | .spans[]? | {s: $svc, n: .name, d: (((.endTimeUnixNano|tonumber) - (.startTimeUnixNano|tonumber)) / 1e6)}] | sort_by(-.d) | .[:6][] | "\(.d|floor) ms  \(.n)  (\(.s))"'
+```
+6. İkinci terminaldeki tüneli Ctrl+C ile durdur, gecikmeyi kaldır:
+```bash
+make unchaos
+```
+
+**Terminalde ne görmelisin:** taban p99 birkaç milisaniye (`0.00…` sn); gecikmeden sonra `0.2`'nin üstünde. Bağımlılık
+satırlarında `redis` 0,2 sn civarı, `postgres` alçak: metrik **kapıyı** gösteriyor ama tek bir isteğin hangi adımda
+beklediğini söylemiyor. 3. adım 32 haneli bir `trace_id` basar (boşsa o aralıkta örneklenmiş — %5 — yavaş istek yok:
+2. adımın yükünü tekrarla). 5. adımda en üstte `GET /{code}` (tüm istek), hemen altında sürenin neredeyse tamamını
+taşıyan `cache.get` ve `guard.redis` span'leri, hepsi `(linkly-redirect)`: sürenin gittiği adım Redis çağrısı. Aynı
+`trace_id`'yi Grafana → Explore → Loki'de `{namespace="lvl11"} |= "<trace_id>"` ile ararsan o isteğin log satırı çıkar.
 
 **Grafana'da gör:** [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl11&from=now-15m&to=now&refresh=10s) ve [`11 · Resilience`](http://grafana.localtest.me/d/ladder-resilience?var-level=lvl11&from=now-15m&to=now&refresh=10s) — scripti başlatınca aç; önce 30 sn temiz taban, sonra gizli gecikmeyle 40 sn (giriş: admin / ladder)
 - "p99 süre (uç noktaya göre)" → `/{code}` çizgisi tabanda alçak; gizli gecikme başlayınca **~200 ms'nin üstüne sıçrar**. Metrik "yavaşladı" der — hepsi bu.
@@ -130,11 +202,52 @@ olarak görünüyor.
 **Neden:** HTTP'de bağlam otomatik taşınır (`traceparent`). Kuyrukta taşınmaz — **sen koymazsan**.
 [Topic · Konu: Bağlam yayılımı]
 
-**Reproduce:** `make repro P=P11-02` — propagation açık/kapalı iki faz; her fazın zaman penceresinde
+**Reproduce (adım adım):**
+
+Otomatik: `make repro P=P11-02` — propagation açık/kapalı iki faz; her fazın zaman penceresinde
 Tempo'da `consume-batch` span'i taşıyan trace'lerin **kökünü** sayar: kök `linkly-redirect` ise
 tüketici redirect'in trace'ine bağlı, kök `linkly-analytics` ise yetim. Hüküm iki modu karşılaştırır
 (açıkken bağlı > yetim, tuzakla yetim > bağlı). Tuzak yalnızca header'a yazmayı kapatır; span'ler,
 metrikler ve tıklamaların kendisi aynı kalır.
+
+Elle — sırayla yapıştır:
+
+1. Grafana'yı temizle:
+```bash
+make fresh
+```
+2. İKİNCİ bir terminalde Tempo'ya tünel aç (deney boyunca açık kalsın):
+```bash
+kubectl -n monitoring port-forward svc/tempo 13200:3200
+```
+3. İLK terminalde propagation açıkken (varsayılan) 30 sn yük ver, span'lerin Tempo'ya ulaşması için 20 sn bekle, bu
+   pencerede tüketici span'i (`consume-batch`) taşıyan trace'leri **kök servislerine** göre say:
+```bash
+t0=$(date +%s)
+make load S=redirect K6_ARGS="--vus 10 --duration 30s"
+sleep 20
+t1=$(date +%s)
+curl -sG 'http://127.0.0.1:13200/api/search' --data-urlencode 'q={ resource.service.name = "linkly-analytics" && name = "consume-batch" }' --data-urlencode "start=$t0" --data-urlencode "end=$t1" --data-urlencode 'limit=500' | jq -r '[.traces[]?.rootServiceName] | group_by(.) | map("\(.[0]): \(length)") | .[]'
+```
+4. Tuzağı aç (bağlam Kafka header'ına konmaz; redirect pod'ları yeniden başlar), aynı fazı tekrarla:
+```bash
+make set E="TRAP_NO_KAFKA_PROPAGATION=true" W=redirect
+t0=$(date +%s)
+make load S=redirect K6_ARGS="--vus 10 --duration 30s"
+sleep 20
+t1=$(date +%s)
+curl -sG 'http://127.0.0.1:13200/api/search' --data-urlencode 'q={ resource.service.name = "linkly-analytics" && name = "consume-batch" }' --data-urlencode "start=$t0" --data-urlencode "end=$t1" --data-urlencode 'limit=500' | jq -r '[.traces[]?.rootServiceName] | group_by(.) | map("\(.[0]): \(length)") | .[]'
+```
+5. İkinci terminaldeki tüneli Ctrl+C ile durdur, tuzağı kapat:
+```bash
+make reset
+```
+
+**Terminalde ne görmelisin:** her sayım satırı `<kök servis>: <trace sayısı>`. 3. adımda `linkly-redirect` baskın:
+tüketici span'i redirect isteğinin trace'inin bir dalı (tek ağaç). 4. adımda `linkly-analytics` baskın: aynı span'ler
+artık kendi başına, **yetim** kök. Kökü henüz Tempo'ya ulaşmamış trace'ler üçüncü bir ad altında sayılabilir (script
+onları "kök henüz yok" diye ayırır). İki adımda da sayım boşsa Tempo'da tüketici trace'i yok — tracing ya da Alloy'un
+OTLP alıcısı çalışmıyor.
 
 **Grafana'da gör:** [`08 · Stream (Redpanda)`](http://grafana.localtest.me/d/ladder-stream?var-level=lvl11&from=now-15m&to=now&refresh=10s) — scripti başlatınca aç; iki faz 30'ar sn, her fazdan sonra 20 sn beklenir (giriş: admin / ladder)
 - "Tüketilen kayıtlar (sonuca göre)" → iki fazda da `ok` akar: tıklamalar işleniyor. Kopan şey veri değil, **bağlam**.
@@ -153,7 +266,41 @@ yaptığın için görünmez olan yer, en çok trace gereken yerdir.
 **Neden:** Head sampling kararı trace'in **başında** verilir — yavaş mı, hatalı mı bilinmeden.
 [Topic · Konu: Sampling stratejileri]
 
-**Reproduce:** `make repro P=P11-03` — %5 ve %100 ile Alloy'un CPU/bellek tepesini karşılaştırır.
+**Reproduce (adım adım):**
+
+Otomatik: `make repro P=P11-03` — aynı yükte %5 ve %100 sampling ile Alloy'un kabul ettiği span sayısını ve Alloy'un
+CPU/bellek tepesini karşılaştırır, sonra oranı %5'e döndürür.
+
+Elle — sırayla yapıştır:
+
+1. Grafana'yı temizle, %5 sampling'le (varsayılan) 40 sn yük ver; son 3 dakikada Alloy'un kabul ettiği span sayısını ve
+   Alloy'un CPU (çekirdek) / bellek (bayt) tepesini oku:
+```bash
+make fresh
+make load S=redirect K6_ARGS="--vus 30 --duration 40s"
+sleep 15
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum(increase(otelcol_receiver_accepted_spans_total{namespace="monitoring"}[3m]))' | jq -r '"kabul edilen span: " + .data.result[0].value[1]'
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=max_over_time(sum(rate(container_cpu_usage_seconds_total{namespace="monitoring",pod=~"alloy.*",image!="",image!~".*pause.*"}[30s]))[3m:15s])' | jq -r '"Alloy CPU tepe (çekirdek): " + .data.result[0].value[1]'
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=max_over_time(sum(container_memory_working_set_bytes{namespace="monitoring",pod=~"alloy.*",image!="",image!~".*pause.*"})[3m:15s])' | jq -r '"Alloy bellek tepe (bayt): " + .data.result[0].value[1]'
+```
+2. Sampling'i %100'e çıkar (redirect pod'ları yeniden başlar), aynı yükü ver, aynı üç ölçümü al:
+```bash
+make set E="TRACE_SAMPLE_PCT=100" W=redirect
+make load S=redirect K6_ARGS="--vus 30 --duration 40s"
+sleep 15
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum(increase(otelcol_receiver_accepted_spans_total{namespace="monitoring"}[3m]))' | jq -r '"kabul edilen span: " + .data.result[0].value[1]'
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=max_over_time(sum(rate(container_cpu_usage_seconds_total{namespace="monitoring",pod=~"alloy.*",image!="",image!~".*pause.*"}[30s]))[3m:15s])' | jq -r '"Alloy CPU tepe (çekirdek): " + .data.result[0].value[1]'
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=max_over_time(sum(container_memory_working_set_bytes{namespace="monitoring",pod=~"alloy.*",image!="",image!~".*pause.*"})[3m:15s])' | jq -r '"Alloy bellek tepe (bayt): " + .data.result[0].value[1]'
+```
+3. Sampling'i manifest'teki %5'e döndür:
+```bash
+make reset
+```
+
+**Terminalde ne görmelisin:** iki yükün özet satırı (`k6 lvl11: reqs=…`) birbirine yakın: aynı trafik. 2. adımda
+`kabul edilen span` 1. adımdakinin birkaç katı (script 3 katından fazlasını bekler; redirect span'lerinde teorik üst
+sınır 20×). Alloy'un CPU ve bellek tepesi de artar ama span artışından küçük ve gürültülü: Alloy aynı anda log da
+taşıyor — sampling'in doğrudan kontrol ettiği değişken span sayısı, maliyeti onun sonucu.
 
 **Grafana'da gör:** [`15 · k6`](http://grafana.localtest.me/d/ladder-k6?var-level=lvl11&from=now-15m&to=now&refresh=10s) — scripti başlatınca aç; iki faz 40'ar sn, arada redirect rollout'u (giriş: admin / ladder)
 - "Gönderilen istek / sn" → iki eşit yük fazı (30 VU): karşılaştırma aynı trafik altında yapılıyor.
@@ -174,8 +321,40 @@ Günlerce süren %0.2'lik kanama: eşik susar, burn-rate ticket açar.
 **Neden:** SLO bir hedef değil, harcamana izin verilen bir **bütçedir**. Alarm, bütçenin **tükenme
 hızına** bakmalı. [Topic · Konu: SLO, error budget, burn rate]
 
-**Reproduce:** `make repro P=P11-04` — kısa bir hata sıçraması üretip hangi alarmların ateşlediğini
-karşılaştırır (`deploy/slo.yaml` içinde bilerek bir de **naive eşik alarmı** var).
+**Reproduce (adım adım):**
+
+Otomatik: `make repro P=P11-04` — kısa bir hata sıçraması üretip hangi alarmların ateşlediğini
+karşılaştırır (`deploy/slo.yaml` içinde bilerek bir de **naive eşik alarmı** var). Uzun sürüm: `SPIKE=180 make repro P=P11-04`
+(sıçrama hiçbir alarmı tetiklemediyse script hüküm vermez ve bunu önerir).
+
+Elle — sırayla yapıştır:
+
+1. Grafana'yı temizle, tanımlı alarmları listele:
+```bash
+make fresh
+curl -s 'http://prometheus.localtest.me/api/v1/rules' | jq -r '.data.groups[]?.rules[]? | select(.type=="alerting") | select(.name|test("Linkly")) | "\(.name) [\(.labels.severity // "-")]"' | sort -u
+```
+2. Postgres'e %50 paket kaybı ver, ~90 sn yükle hata sıçraması üret, arızayı kaldır, alarmların değerlendirilmesi için
+   75 sn bekle:
+```bash
+make chaos C=pg-loss-50
+make load S=mixed K6_ARGS="--vus 20 --duration 90s"
+make unchaos
+sleep 75
+```
+3. Bu seviyenin hangi alarmları ateşledi ve hata bütçesinden ne kaldı:
+```bash
+curl -s 'http://prometheus.localtest.me/api/v1/alerts' | jq -r '.data.alerts[]? | select((.labels.alertname|test("Linkly")) and .labels.namespace == "lvl11") | "\(.labels.alertname) → \(.state) [\(.labels.severity // "-")]"' | sort -u
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=slo:period_error_budget_remaining:ratio{sloth_slo="redirect-availability",namespace="lvl11"}' | jq -r '"kalan hata bütçesi (oran): " + .data.result[0].value[1]'
+```
+
+**Terminalde ne görmelisin:** 1. adım dört alarm listeler: `LinklyNaiveErrorRateThreshold [none]`,
+`LinklyRedirectErrorBudgetBurnFast [page]`, `LinklyRedirectErrorBudgetBurnMedium [page]`,
+`LinklyRedirectErrorBudgetBurnSlow [ticket]`. Yükün özet satırında `5xx` sıfırdan büyük: sıçrama bu. 3. adımda naive
+alarm `LinklyNaiveErrorRateThreshold → firing` (`for:` yok, hemen çalar); burn-rate alarmları ya hiç yok ya da `pending`
+(`for:` süreleri 2 dk / 15 dk / 1 sa dolmadı). Kalan bütçe 1'in altında — 6 saatlik saklama yüzünden bu laboratuvarda
+sıfırın altına bile inebilir. Hiçbir alarm görünmüyorsa sıçrama naive eşiğe (%1, 5 dk) yetmedi: 2. adımı
+`--duration 180s` ile tekrarla.
 
 **Grafana'da gör:** [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl11&from=now-15m&to=now&refresh=10s) ve [`12 · SLO`](http://grafana.localtest.me/d/ladder-slo?var-level=lvl11&from=now-15m&to=now&refresh=10s) — scripti başlatınca aç; sıçrama ~90 sn, ardından alarmlar için 75 sn beklenir (giriş: admin / ladder)
 - "5xx (uç noktaya göre)" (App RED) → `/{code}` için ~90 sn'lik bir 5xx tepesi: alarmların tepki verdiği olay bu. (Postgres guard'ı önbelleğin altında: isabetler cevaplanmaya devam eder, hata yalnızca ıskalardan gelir.)
@@ -199,7 +378,45 @@ loglar kaybolur.**
 **Neden:** Log boru hattı sonsuz değil (`ingestion_rate_mb: 8`).
 [Topic · Konu: Gözlemlenebilirlik kapasitesi]
 
-**Reproduce:** `make repro P=P11-05` — info ve debug seviyelerinde log hacmini ve Loki reddini ölçer.
+**Reproduce (adım adım):**
+
+Otomatik: `make repro P=P11-05` — aynı yükte `LOG_LEVEL=info` ve `debug` ile Loki'ye giren bayt/s'i ve Loki'nin reddettiği
+kayıtları ölçer, sonra seviyeyi `info`'ya döndürür.
+
+Elle — sırayla yapıştır:
+
+1. Grafana'yı temizle, `info` seviyesinde (varsayılan) 40 sn yük ver; bu fazın penceresinde Loki'ye giren bayt/s'i,
+   Loki'nin reddettiği kayıtları ve bir redirect pod'unun son 200 log satırındaki debug satırı sayısını oku:
+```bash
+make fresh
+t0=$(date +%s)
+make load S=redirect K6_ARGS="--vus 30 --duration 40s"
+sleep 15
+w=$(( $(date +%s) - t0 ))
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode "query=sum(increase(loki_distributor_bytes_received_total[${w}s])) / ${w}" | jq -r '"Loki bayt/s: " + .data.result[0].value[1]'
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum(increase(loki_discarded_samples_total[3m])) or sum(increase(loki_request_duration_seconds_count{status_code="429"}[3m])) or vector(0)' | jq -r '"Loki reddi: " + .data.result[0].value[1]'
+kubectl -n lvl11 logs deploy/redirect --tail=200 | grep -c 'redirect isteği'
+```
+2. Log seviyesini `debug` yap (redirect pod'ları yeniden başlar), aynı yükü ver, aynı üç ölçümü al:
+```bash
+make set E="LOG_LEVEL=debug" W=redirect
+t0=$(date +%s)
+make load S=redirect K6_ARGS="--vus 30 --duration 40s"
+sleep 15
+w=$(( $(date +%s) - t0 ))
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode "query=sum(increase(loki_distributor_bytes_received_total[${w}s])) / ${w}" | jq -r '"Loki bayt/s: " + .data.result[0].value[1]'
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum(increase(loki_discarded_samples_total[3m])) or sum(increase(loki_request_duration_seconds_count{status_code="429"}[3m])) or vector(0)' | jq -r '"Loki reddi: " + .data.result[0].value[1]'
+kubectl -n lvl11 logs deploy/redirect --tail=200 | grep -c 'redirect isteği'
+```
+3. Log seviyesini manifest'teki `info`'ya döndür:
+```bash
+make reset
+```
+
+**Terminalde ne görmelisin:** 1. adımda debug satırı sayısı `0`. 2. adımda `Loki bayt/s` 1. adımdakinden belirgin büyük
+(her redirect'e bir log satırı daha ekleniyor; scriptin hükmü bu farka bakar) ve son 200 satırın büyük kısmı
+`redirect isteği` debug satırı. `Loki reddi` sıfırdan ayrılırsa limit (`ingestion_rate_mb: 8`) aşılmış ve satırlar
+**düşmüştür**; bu yük limite yetmediyse `0` kalır — hacim artışı yine de faturadır.
 
 **Grafana'da gör:** [`15 · k6`](http://grafana.localtest.me/d/ladder-k6?var-level=lvl11&from=now-15m&to=now&refresh=10s) — scripti başlatınca aç; iki faz 40'ar sn, arada redirect rollout'u (giriş: admin / ladder)
 - "Gönderilen istek / sn" → iki eşit yük fazı (30 VU): log hacmindeki fark trafikten değil, log seviyesinden.
@@ -219,7 +436,41 @@ Araçlar: çalışırken seviye değiştirebilmek · log **sampling** · yüksek
 **Neden:** P01-06'nın (kısa kod label'ı) daha makul görünen kılığı. *Kardinalite, bir label'ın
 değer sayısı kadar büyür ve bu sayı genelde **iş büyüdükçe** artar.* [Topic · Konu: Kardinalite]
 
-**Reproduce:** `make repro P=P11-06` — 500 farklı tenant'tan istek gönderip seri artışını ölçer.
+**Reproduce (adım adım):**
+
+Otomatik: `make repro P=P11-06` — `TRAP_TENANT_LABEL`'ı açar, 500 farklı tenant'tan istek gönderip `tenant` label'ının
+kaç değer aldığını ve Prometheus'un toplam seri artışını ölçer, sonra tuzağı kapatır. Tenant sayısı: `N=2000 make repro P=P11-06`.
+
+Elle — sırayla yapıştır:
+
+1. Grafana'yı temizle, Prometheus'un şu anki toplam seri sayısına bak:
+```bash
+make fresh
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=prometheus_tsdb_head_series' | jq -r '"toplam seri (öncesi): " + .data.result[0].value[1]'
+```
+2. Tuzağı aç (tenant metrik label'ı olur; redirect pod'ları yeniden başlar), sonlanan eski pod'lar trafikten çıksın diye
+   10 sn bekle, bir link oluştur, onu 500 farklı tenant adına bir kez iste:
+```bash
+make set E="TRAP_TENANT_LABEL=true" W=redirect
+sleep 10
+code=$(curl -s -XPOST http://lvl11.localtest.me/api/links -H 'Content-Type: application/json' -d '{"url":"https://example.com/card"}' | jq -r .code); echo "kod: $code"
+for i in $(seq 1 500); do curl -s -o /dev/null -H "X-Tenant-ID: tenant-$i" http://lvl11.localtest.me/$code; done
+```
+3. Kazımanın yetişmesi için bekle, `tenant` label'ının kaç farklı değer aldığını ve toplam seri sayısını oku:
+```bash
+sleep 20
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=count(count by (tenant) (http_requests_total{namespace="lvl11"}))' | jq -r '"farklı tenant değeri: " + .data.result[0].value[1]'
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=prometheus_tsdb_head_series' | jq -r '"toplam seri (sonrası): " + .data.result[0].value[1]'
+```
+4. Tuzağı kapat:
+```bash
+make reset
+```
+
+**Terminalde ne görmelisin:** 2. adımda 7 karakterlik bir kod. 3. adımda `farklı tenant değeri` ~500 (redirect
+pod'ları arasında dağılsa da her değer bir kez sayılır) ve `toplam seri (sonrası)` öncesinden yüzlerce fazla: her tenant,
+istek sayacında ayrı bir zaman serisi açtı. Scriptin hükmü yalnızca tenant değer sayısına bakar (1'den büyük mü); toplam
+seri kümede kendi başına da oynar. Tuzak kapandıktan sonra da seriler Prometheus'un belleğinde bir süre durur.
 
 **Grafana'da gör:** [`03 · App Business`](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl11&from=now-15m&to=now&refresh=10s) — script çalışırken ya da hemen sonra aç; 500 istek tek tek gönderilir (giriş: admin / ladder)
 - "İstek / kiracı" → tuzak kapalıyken tek (etiketsiz) seri; tuzak açılınca **yüzlerce ayrı çizgi** (`tenant-1` … `tenant-500`) ve lejant taşar: her tenant kendi zaman serisi. Script sonunda tuzağı kapatınca çizgiler kesilir — ama seriler Prometheus'un belleğinde bir süre daha durur.
@@ -239,8 +490,35 @@ en çok trafik üreten 10 tenant → log/analitik sorgusu · tek bir yavaş iste
 **Neden:** Dashboard'lar kod değilse, gözlemlenebilirliğin sürüm kontrolü yok demektir.
 [Topic · Konu: Dashboards as code]
 
-**Reproduce:** `make repro P=P11-07` — API üzerinden değiştirmeyi dener, sonra kaynaktan yeniden
-uygulayıp drift'in kaybolduğunu gösterir.
+**Reproduce (adım adım):**
+
+Otomatik: `make repro P=P11-07` — dashboard'ların düzenlenebilirliğini okur, API üzerinden değiştirmeyi dener, sonra
+kaynaktan yeniden uygulayıp drift'in kaybolduğunu gösterir.
+
+Elle — sırayla yapıştır (yük yok; hedef Grafana'nın kendisi):
+
+1. Grafana'yı temizle, `02 · App RED`'in düzenlenebilir olup olmadığına ve başlığına bak:
+```bash
+make fresh
+curl -s -u admin:ladder http://grafana.localtest.me/api/dashboards/uid/ladder-app-red | jq -r '.dashboard.editable, .dashboard.title'
+```
+2. Drift denemesi: dashboard'u API'den panelsiz ve başlığı değişmiş bir sürümle ezmeye çalış, başlığa tekrar bak:
+```bash
+curl -s -u admin:ladder -XPOST http://grafana.localtest.me/api/dashboards/db -H 'Content-Type: application/json' -d '{"dashboard":{"uid":"ladder-app-red","title":"Ladder / 02 · App RED (ELLE DEĞİŞTİRİLDİ)","panels":[],"schemaVersion":39},"overwrite":true}'; echo
+curl -s -u admin:ladder http://grafana.localtest.me/api/dashboards/uid/ladder-app-red | jq -r '.dashboard.title'
+```
+3. Dashboard'ları kaynaktan (`platform/dashboards/gen.py`) yeniden uygula, sidecar'ın yüklemesi için bekle, başlığa
+   son kez bak:
+```bash
+make -C ../platform dashboards
+sleep 25
+curl -s -u admin:ladder http://grafana.localtest.me/api/dashboards/uid/ladder-app-red | jq -r '.dashboard.title'
+```
+
+**Terminalde ne görmelisin:** 1. adım `false` ve `Ladder / 02 · App RED` basar: dashboard koddan geliyor, elle
+düzenlenemez. 2. adımdaki API cevabı ya bir ret (dosyadan yüklenen — provisioned — dashboard'u Grafana kaydetmez; başlık
+değişmez) ya da kabuldür (başlık bir süre `… (ELLE DEĞİŞTİRİLDİ)` olur). 3. adımda `✔ dashboards (… adet)` ve başlık
+yine `Ladder / 02 · App RED`: drift kalıcı olamaz.
 
 **Grafana'da gör:** [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl11&from=now-15m&to=now&refresh=10s) — script bittikten sonra aç; deneyin hedefi bu dashboard'un kendisi (giriş: admin / ladder)
 - "Saniyedeki istek" → panel ve dashboard'un geri kalanı **yerinde**, başlık hâlâ "Ladder / 02 · App RED". Script API'den başlığı "(ELLE DEĞİŞTİRİLDİ)" olan panelsiz bir sürüm göndermeyi dener; Grafana dosyadan yüklenen (provisioned) bu dashboard'u kaydetmez ya da `make dashboards` onu kaynaktan geri yazar — drift kalıcı olamaz.
@@ -258,18 +536,67 @@ demiyor.
 **Neden:** Metrikler **ne kadar**, trace **nerede**, log **neden** der. *"Hangi satır"* sorusunun
 cevabı profildir. [Topic · Konu: Sürekli profil]
 
-**Reproduce:** `make repro P=P11-08` — `TRAP_REGEX_PER_REQUEST` açık/kapalı **istek başına CPU**'yu
+**Reproduce (adım adım):**
+
+Otomatik: `make repro P=P11-08` — `TRAP_REGEX_PER_REQUEST` açık/kapalı **istek başına CPU**'yu
 karşılaştırır, sonra tuzak açıkken redirect pod'unun **iç portundan (6060)** bir CPU profili alır.
 Hüküm metrik farkına değil profile bakar: `regexp` kareleri profilde görünüyorsa REPRODUCED;
 profil alınamazsa hüküm yok (çıkış 2). Uç, deploy edilen sürecin kendi iç dinleyicisindedir:
 servislerin hiç kullanmadığı bir handler'a kaydedilmiş bir uçtan profil alınamaz ve deney her
 koşuda "profil yok" der.
 
+Elle — sırayla yapıştır (profil adımları yerelde `go` ister):
+
+1. Grafana'yı temizle, regex bir kez derlenmişken (varsayılan) 40 sn yük ver; istek başına CPU'yu ve `/{code}` p99'unu oku:
+```bash
+make fresh
+make load S=redirect K6_ARGS="--vus 30 --duration 40s"
+sleep 12
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum(rate(container_cpu_usage_seconds_total{namespace="lvl11",pod=~"redirect.*",image!="",image!~".*pause.*"}[2m])) / sum(rate(http_requests_total{namespace="lvl11",route="/{code}"}[2m]))' | jq -r '"istek başına CPU (ms): " + ((.data.result[0].value[1] // "0") | tonumber * 1000 | tostring)'
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace="lvl11",route="/{code}"}[2m])) by (le))' | jq -r '"p99 (sn): " + .data.result[0].value[1]'
+```
+2. Tuzağı aç (her istekte regex yeniden derlenir; redirect pod'ları yeniden başlar), aynı yükü ver, aynı iki ölçümü al:
+```bash
+make set E="TRAP_REGEX_PER_REQUEST=true" W=redirect
+make load S=redirect K6_ARGS="--vus 30 --duration 40s"
+sleep 12
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum(rate(container_cpu_usage_seconds_total{namespace="lvl11",pod=~"redirect.*",image!="",image!~".*pause.*"}[2m])) / sum(rate(http_requests_total{namespace="lvl11",route="/{code}"}[2m]))' | jq -r '"istek başına CPU (ms): " + ((.data.result[0].value[1] // "0") | tonumber * 1000 | tostring)'
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace="lvl11",route="/{code}"}[2m])) by (le))' | jq -r '"p99 (sn): " + .data.result[0].value[1]'
+```
+3. Profil yük altında alınmalı: İKİNCİ bir terminalde `11-observability-deep` klasöründe 30 sn yük başlat:
+```bash
+make load S=redirect K6_ARGS="--vus 30 --duration 30s"
+```
+4. Hemen ardından İLK terminalde hazır bir redirect pod'u seç, API sunucusunun pod proxy'si üzerinden iç port 6060'tan
+   20 sn'lik CPU profili al ve `regexp` karelerini ara (ilk 40 düğüm, önce kendi süresine sonra kümülatif süreye göre):
+```bash
+pod=$(kubectl -n lvl11 get pod -l app.kubernetes.io/name=redirect -o json | jq -r '[.items[] | select(.metadata.deletionTimestamp == null) | select(any(.status.containerStatuses[]?; .ready)) | .metadata.name][0] // empty'); echo "pod: $pod"
+kubectl --request-timeout=60s -n lvl11 get --raw "/api/v1/namespaces/lvl11/pods/${pod}:6060/proxy/debug/pprof/profile?seconds=20" > /tmp/p1108.prof
+go tool pprof -top -nodecount=40 /tmp/p1108.prof | grep -iE 'regexp|onepass|syntax|Compile|MatchString'
+go tool pprof -top -cum -nodecount=40 /tmp/p1108.prof | grep -iE 'regexp|onepass|syntax|Compile|MatchString'
+```
+5. İstersen profili tarayıcıda (flame graph) aç; bitince Ctrl+C ile durdur:
+```bash
+go tool pprof -http=: /tmp/p1108.prof
+```
+6. Tuzağı kapat, profil dosyasını sil:
+```bash
+make reset
+rm -f /tmp/p1108.prof
+```
+
+**Terminalde ne görmelisin:** 1. ve 2. adımın `istek başına CPU (ms)` değerleri birbirine yakın (script yorumundaki ölçüm:
+0.613 → 0.680 ms, ~%11) ve p99 en fazla hafifçe kıpırdar — metrik sebebi göstermiyor. 4. adımda `grep` satırlarında
+`regexp` / `regexp/syntax` fonksiyonları (`Compile`, `onepass` …) ve profildeki payları görünür: sebep, "hangi satır",
+yalnızca profilde. `go tool pprof` "unrecognized profile format" derse profil alınamamıştır (pod iç portta dinlemiyor ya
+da istek zaman aşımına uğradı; script bu durumda hüküm vermez). `grep` hiçbir şey basmazsa profil alındı ama regexp
+kareleri ilk 40 düğümde değil — scriptin NOT-REPRODUCED durumu.
+
 **Grafana'da gör:** [`01 · Pods & Resources`](http://grafana.localtest.me/d/ladder-pods?var-level=lvl11&from=now-15m&to=now&refresh=10s) ve [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl11&from=now-15m&to=now&refresh=10s) — scripti başlatınca aç; iki faz 40'ar sn, arada redirect rollout'u (giriş: admin / ladder)
-- "CPU kullanımı (çekirdek)" → `redirect-…` pod'larında iki faz **neredeyse aynı**: istek başına regex derlemenin maliyeti konteyner CPU'sunun gürültüsünün altında. Görmemen, sorunun kendisi.
+- "CPU kullanımı (bir çekirdeğin %'si)" → `redirect-…` pod'larında iki faz **neredeyse aynı**: istek başına regex derlemenin maliyeti konteyner CPU'sunun gürültüsünün altında. Görmemen, sorunun kendisi.
 - "p99 süre (uç noktaya göre)" → `/{code}` en fazla hafifçe kıpırdar; sebebe dair hiçbir şey söylemez.
 - Explore'da: `sum(rate(container_cpu_usage_seconds_total{namespace="lvl11",pod=~"redirect.*",image!="",image!~".*pause.*"}[2m])) / sum(rate(http_requests_total{namespace="lvl11",route="/{code}"}[2m]))` → istek başına CPU (saniye); iki faz arasındaki fark küçük — script'in "istek başına CPU" satırının aynısı.
-- Sebebin kendisi — *hangi satır?* — hiçbir panelde yok: o yalnızca profilde görünür. Script tuzak açıkken redirect pod'undan 20 sn'lik bir CPU profili alır (iç port **6060**, `kubectl get --raw …/pods/<pod>:6060/proxy/debug/pprof/profile`) ve `regexp` karelerini terminale basar. Elle: `kubectl -n lvl11 port-forward deploy/redirect 6060:6060` → `go tool pprof -http=: http://localhost:6060/debug/pprof/profile?seconds=30`.
+- Sebebin kendisi — *hangi satır?* — hiçbir panelde yok: o yalnızca profilde görünür. Script tuzak açıkken redirect pod'undan 20 sn'lik bir CPU profili alır (iç port **6060**, `kubectl get --raw …/pods/<pod>:6060/proxy/debug/pprof/profile`) ve `regexp` karelerini terminale basar. Elle: `kubectl -n lvl11 port-forward deploy/redirect 6060:6060` → `go tool pprof -http=: 'http://localhost:6060/debug/pprof/profile?seconds=30'` (tüneli sonra Ctrl+C ile durdur).
 
 **Araçlar:** `net/http/pprof` (bu seviyede iç port 6060'ta — ingress'e açık servis portunda değil) + `go tool pprof`; üretimde sürekli profil (Pyroscope).
 *"Dün gece CPU neden yükseldi?" sorusunun cevabı, o gece profil toplanmadıysa kaybolur.*

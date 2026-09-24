@@ -39,9 +39,9 @@ seq_after=$(promq "sum(pg_stat_user_tables_seq_scan{namespace=\"$NS\",relname=\"
 listp99=$(promq "histogram_quantile(0.99, sum(rate(db_query_duration_seconds_bucket{namespace=\"$NS\",op=\"list\"}[5m])) by (le))")
 grafana_hint "05 · Postgres → 'seq scan / idx scan' · 'DB query p99 by op' (op=list)"
 note "GET /api/links süresi: ${t}s · list p99: $(awk -v v="$listp99" 'BEGIN{printf "%.0f", v*1000}') ms · seq_scan sayacı: ${seq_before%%.*} → ${seq_after%%.*}"
-note "ÇÖZÜM (002 migration, CONCURRENTLY):"
-note "  setenv job/migrate MIGRATE_TARGET=2  # ya da deploy/migrate-job.yaml'da 2 yap"
-note "  kubectl -n $NS delete job migrate && make up   →  sonra bu scripti tekrar koş"
+note "ÇÖZÜM (002 migration, CONCURRENTLY): deploy/migrate-job.yaml'da MIGRATE_TARGET'ı 2 yap, sonra"
+note "  kubectl -n $NS delete job migrate && make deploy   →  bu scripti tekrar koş"
+note "  (ya da README P02-05 rehberindeki psql komutuyla aynı indeksi elle oluştur)"
 note "Dikkat: düz CREATE INDEX tabloyu KİLİTLER; 002 bu yüzden CONCURRENTLY kullanıyor."
 if [[ -n "$scan_line" ]]; then
   reproduced "planda Seq Scan var (${after:-?} satır, list ${t}s) — tenant index'i yok"

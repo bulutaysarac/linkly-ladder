@@ -22,6 +22,9 @@ export const BASE = __ENV.BASE_URL || 'http://lvl00.localtest.me';
 export const LEVEL = __ENV.LEVEL || 'unknown';
 export const TENANT = __ENV.TENANT || 't1';
 const URL_SIZE = parseInt(__ENV.URL_SIZE || '0', 10);
+// İstemcinin sabrı: bir isteğe en fazla bu kadar bekler, sonra bırakır (k6'nın varsayılanı 60s).
+// P10-03 istemcinin sunucudan önce vazgeçtiği durumu bununla kurar: -e K6_TIMEOUT=1s.
+export const TIMEOUT = __ENV.K6_TIMEOUT || '60s';
 
 // 13'ten itibaren yazma ucu Bearer anahtar istiyor; anahtar boşsa başlık hiç gönderilmez.
 // 13'ten itibaren kiracıyı ANAHTAR belirler — X-Tenant-ID yalnızca 13 öncesinde (ve P13-01'in tuzağında)
@@ -48,7 +51,7 @@ export function targetUrl() {
 // Link oluştur, kodu döndür (null = başarısız). tags.name ile URL grouping — kardinalite patlamasın.
 export function createLink(url = targetUrl(), extraHeaders = {}) {
   const res = http.post(`${BASE}/api/links`, JSON.stringify({ url }), {
-    headers: headers(extraHeaders), tags: { name: 'POST /api/links' },
+    headers: headers(extraHeaders), tags: { name: 'POST /api/links' }, timeout: TIMEOUT,
   });
   const ok = check(classify(res), { 'create 201': (r) => r.status === 201 });
   if (!ok) return null;
@@ -58,14 +61,14 @@ export function createLink(url = targetUrl(), extraHeaders = {}) {
 // Redirect'i takip ETME: 30x'in kendisini ölçüyoruz.
 export function redirect(code, extraHeaders = {}) {
   const res = http.get(`${BASE}/${code}`, {
-    redirects: 0, headers: { ...LOADTEST_HDR, ...extraHeaders }, tags: { name: 'GET /{code}' },
+    redirects: 0, headers: { ...LOADTEST_HDR, ...extraHeaders }, tags: { name: 'GET /{code}' }, timeout: TIMEOUT,
   });
   check(classify(res), { 'redirect 30x': (r) => r.status >= 300 && r.status < 400 });
   return res;
 }
 
 export function getMeta(code) {
-  return http.get(`${BASE}/api/links/${code}`, { headers: headers(), tags: { name: 'GET /api/links/{code}' } });
+  return http.get(`${BASE}/api/links/${code}`, { headers: headers(), tags: { name: 'GET /api/links/{code}' }, timeout: TIMEOUT });
 }
 
 // Isınma: N link oluşturup kodlarını döndürür (setup() içinde kullanılır).

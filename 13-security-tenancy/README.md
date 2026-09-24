@@ -54,7 +54,7 @@ DNS çözümüyle derinleşti ve `X-Tenant-ID` sahteciliği tamamen bitti.
 Bu seviyenin platformdan istediği: **temel yığın (kind, ingress, Prometheus, Grafana) + Chaos Mesh, KEDA, CloudNativePG, Argo CD + Argo Rollouts, cert-manager + Kyverno**. `make up` ilk adımda (profil) bunları açar ve kullanılmayanları kapatır; bir bileşen kurulu değilse hangi komutla kurulacağını söyleyip durur.
 
 ```bash
-make up            # profil → build → push → deploy → rollout wait → smoke
+make up            # profil → Grafana'yı temizle → build → push → deploy → rollout wait → smoke
 code=$(curl -s -XPOST http://lvl13.localtest.me/api/links -H 'Content-Type: application/json' -H 'Authorization: Bearer acme-key-9f2c' -d '{"url":"https://example.com"}' | jq -r .code); echo "$code"
 curl -s -o /dev/null -w '%{http_code} → %{redirect_url}\n' http://lvl13.localtest.me/$code   # 302 → https://example.com
 make grafana       # Ladder klasörü, level=lvl13 — giriş: admin / ladder
@@ -65,6 +65,33 @@ make down          # seviyeyi kaldır · kümeyi durdurmak için: make -C ../pla
 ```
 
 **Dikkat:** 13'ten itibaren yönetim uçları (`/api/...`) `Authorization: Bearer <anahtar>` ister — yukarıdaki POST bu yüzden anahtarlı (anahtarlar: `deploy/api-keys.yaml`). `GET /{code}` **public** kalır — kısa linke tıklayanın API anahtarı olmaz.
+
+**Rehber — bu seviyeyi baştan sona, sırayla.** Komut bloklarında açıklama yok; her bloğu olduğu gibi yapıştırabilirsin.
+
+1. Önceki seviye açıksa kapat (aynı anda tek seviye çalışır), bu seviyeyi kur. `make up` Grafana'yı da temizler:
+```bash
+make -C ../12-delivery down
+make up
+```
+2. 12'nin sorunlarını bu seviyede koş (~15 dk; 12'nin canary deneyleri uzun sürer). Koşarken başka komut çalıştırma:
+   aynı pod'lara dokunurlar. 13, 12'nin hiçbir sorununu çözdüğünü iddia etmez (§3, `problems/SOLVES`): `BEKLENEN`
+   sütununda her satır `(açık kalabilir)` der. Bu adımın kanıtladığı, 12'nin scriptlerinin kimlik doğrulamalı
+   ortamda hâlâ koşabildiğidir (anahtarı kümeden okurlar):
+```bash
+make verify-prev
+```
+3. §6'daki sorunları sırayla yaşa (P13-01 → P13-08). Her sorunda aynı düzen:
+   **Elle** bloklarını sırayla yapıştır (ilk komut `make fresh`: Grafana bu deneye boş başlar) →
+   **Terminalde ne görmelisin** ile karşılaştır → **Grafana'da gör** linklerini aç, her madde hangi panelde neyi
+   göreceğini söyler. İstersen aynı deneyi `make repro P=…` ile otomatik koş: ölçer ve hükmünü basar.
+   Bu seviyede her `/api/...` isteği bir anahtar taşır (`Authorization: Bearer acme-key-9f2c`; globex'inki
+   `globex-key-3a71`, hepsi `deploy/api-keys.yaml`'da); `GET /{code}` anahtarsızdır.
+4. Bitince açık kalan ayarları geri al ve seviyeyi kapat. `make down` Kyverno `ClusterPolicy`'sini silmez; kapsamı
+   yalnızca `lvl13` olduğu için başka seviyeye dokunmaz (P13-07):
+```bash
+make reset
+make down
+```
 
 ## 5. API
 
@@ -104,7 +131,44 @@ acme'nin linki silinebiliyor. Kapalıyken aynı istek `401`/`404`.
 **Neden:** Kimlik doğrulama **kodu** tuzakta da duruyor — değişen tek şey **kararın neye
 dayandığı**. [Topic · Konu: Güven sınırı, kimlik]
 
-**Reproduce:** `make repro P=P13-01`.
+**Reproduce (adım adım):**
+
+Otomatik — ölçer ve hüküm basar: `make repro P=P13-01` (acme'nin anahtarıyla bir link oluşturur; globex anahtarı +
+`X-Tenant-ID: acme` ve hiç kimlik göndermeden silmeyi dener; sonra `TRAP_HEADER_TENANT`'ı yalnızca api'de açıp aynı
+silmeyi yalnızca header'la yapar ve bitince tuzağı kapatır).
+
+Elle — `13-security-tenancy` klasöründe, sırayla yapıştır:
+
+1. Grafana'yı temizle, acme kendi anahtarıyla bir link oluştursun:
+```bash
+make fresh
+code=$(curl -s -XPOST http://lvl13.localtest.me/api/links -H 'Content-Type: application/json' -H 'Authorization: Bearer acme-key-9f2c' -d '{"url":"https://example.com/acme-gizli"}' | jq -r .code); echo "acme'nin kodu: $code"
+```
+2. globex, kendi anahtarıyla ama `X-Tenant-ID: acme` diyerek silmeyi denesin; sonra hiç kimlik göndermeden:
+```bash
+curl -s -w ' → %{http_code}\n' -XDELETE http://lvl13.localtest.me/api/links/$code -H 'Authorization: Bearer globex-key-3a71' -H 'X-Tenant-ID: acme'
+curl -s -w ' → %{http_code}\n' -XDELETE http://lvl13.localtest.me/api/links/$code
+```
+3. Tuzağı yalnızca api servisinde aç (api pod'ları yeniden başlar), aynı silmeyi yalnızca header'la yap, sonra acme'nin
+   kendi anahtarıyla linke bak:
+```bash
+make set E="TRAP_HEADER_TENANT=true" W=api
+kubectl -n lvl13 rollout status deploy/api
+sleep 10
+curl -s -w ' → %{http_code}\n' -XDELETE http://lvl13.localtest.me/api/links/$code -H 'X-Tenant-ID: acme'
+curl -s -o /dev/null -w 'acme kendi linkine bakıyor: %{http_code}\n' http://lvl13.localtest.me/api/links/$code -H 'Authorization: Bearer acme-key-9f2c'
+```
+4. Tuzağı kapat (api pod'ları manifestteki ortamla yeniden başlar):
+```bash
+make reset
+```
+
+**Terminalde ne görmelisin:** her `curl` önce cevabın JSON gövdesini, altındaki satırda ` → <HTTP kodu>` basar.
+2. adımda önce `{"error":"not_found","request_id":"…"}` ve `→ 404`: kiracı anahtardan geliyor, globex için acme'nin
+linki yok — başlık yok sayıldı. Kimliksiz denemede `{"error":"missing_credentials","request_id":"…"}` ve `→ 401`.
+3. adımda `✔ deploy/api: TRAP_HEADER_TENANT=true` ve `deployment "api" successfully rolled out`; ardından gövdesiz
+` → 204`: hiç anahtar göndermeyen biri, yalnızca `X-Tenant-ID: acme` yazarak acme'nin linkini sildi. Son satır
+`acme kendi linkine bakıyor: 404` — link gerçekten gitti.
 
 **Grafana'da gör:** [`14 · Security`](http://grafana.localtest.me/d/ladder-security?var-level=lvl13&from=now-15m&to=now&refresh=10s) ve [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl13&from=now-15m&to=now&refresh=10s) — script bittikten sonra aç; deney tek tek `curl` istekleriyle yapılır, tepeler küçüktür (giriş: admin / ladder)
 - "Kimlik reddi / sn (401 / 403)" → kimliksiz `DELETE` denemesinden kısa, alçak bir `401` tepesi. `403` çizgisi hiç çıkmaz: bu seviyede geçersiz anahtar da `401`dir (§5), `403` üreten bir yol yok.
@@ -124,7 +188,63 @@ yalnızca o kiracının satırları.
 **Neden:** Uygulama filtreleri, biri `WHERE`'i unutana kadar doğrudur — ve o hata **hiçbir hata
 üretmez**. [Topic · Konu: RLS, katmanlı savunma]
 
-**Reproduce:** `make repro P=P13-02`.
+**Reproduce (adım adım):**
+
+Otomatik — ölçer ve hüküm basar: `make repro P=P13-02` (iki kiracıya üçer link yazar, filtresiz sorguyu uygulamanın
+rolüyle koşar, RLS'i açıp aynı sorguyu tekrarlar, RLS açıkken üç yazmanın bedelini ölçer ve RLS'i kapatır). RLS
+migration hedefinin dışındadır (`deploy/migrate-job.yaml`): açan da kapatan da bu deneydir.
+
+Elle — sırayla yapıştır. Sorgular Postgres primary'sinde `psql -U postgres` ile koşar; **uygulamanın gördüğünü**
+görmek için sorgunun başına `SET ROLE linkly` konur. Süper kullanıcı (`postgres`) RLS'i tamamen atlar — o rolle
+bakılan tablo politika açıkken de bütün satırları gösterir.
+
+1. Grafana'yı temizle, primary pod'unu bul, iki kiracı için üçer link oluştur (kiracıyı anahtar belirler), kiracı
+   dağılımına bak:
+```bash
+make fresh
+kubectl -n lvl13 wait --for=condition=Ready pod -l cnpg.io/cluster=pg,cnpg.io/instanceRole=primary --timeout=180s
+prim=$(kubectl -n lvl13 get pod -l cnpg.io/cluster=pg,cnpg.io/instanceRole=primary -o jsonpath='{.items[0].metadata.name}'); echo "primary: $prim"
+for i in 1 2 3; do curl -s -o /dev/null -XPOST http://lvl13.localtest.me/api/links -H 'Content-Type: application/json' -H 'Authorization: Bearer acme-key-9f2c' -d '{"url":"https://example.com/rls"}'; done
+for i in 1 2 3; do curl -s -o /dev/null -XPOST http://lvl13.localtest.me/api/links -H 'Content-Type: application/json' -H 'Authorization: Bearer globex-key-3a71' -d '{"url":"https://example.com/rls"}'; done
+kubectl -n lvl13 exec "$prim" -c postgres -- psql -U postgres -d linkly -qtAc "SELECT tenant, count(*) FROM links GROUP BY tenant ORDER BY tenant"
+```
+2. "Unutulmuş `WHERE tenant = …`": filtresiz sorguyu uygulamanın rolüyle koş:
+```bash
+kubectl -n lvl13 exec "$prim" -c postgres -- psql -U postgres -d linkly -qtAc "SET ROLE linkly; SELECT count(*) FROM links"
+```
+3. RLS'i aç (`007_rls.sql`'in yaptığı üç komut) ve `FORCE`'un yerinde olduğunu doğrula. **Dikkat:** bu adımdan
+   5. adıma kadar seviyedeki link oluşturmaların hepsi reddedilir (uygulama `app.tenant_id` ayarlamıyor); 5. adımı
+   atlama:
+```bash
+kubectl -n lvl13 exec "$prim" -c postgres -- psql -U postgres -d linkly -qtAc "ALTER TABLE links ENABLE ROW LEVEL SECURITY"
+kubectl -n lvl13 exec "$prim" -c postgres -- psql -U postgres -d linkly -qtAc "CREATE POLICY links_tenant_isolation ON links USING (tenant = current_setting('app.tenant_id', true))"
+kubectl -n lvl13 exec "$prim" -c postgres -- psql -U postgres -d linkly -qtAc "ALTER TABLE links FORCE ROW LEVEL SECURITY"
+kubectl -n lvl13 exec "$prim" -c postgres -- psql -U postgres -d linkly -qtAc "SELECT relforcerowsecurity FROM pg_class WHERE relname='links'"
+```
+4. Aynı unutulmuş sorgu RLS altında: ayarsız, acme olarak, globex olarak, sonra süper kullanıcıyla; ardından
+   uygulamadan üç yazma dene:
+```bash
+kubectl -n lvl13 exec "$prim" -c postgres -- psql -U postgres -d linkly -qtAc "SET ROLE linkly; SELECT count(*) FROM links"
+kubectl -n lvl13 exec "$prim" -c postgres -- psql -U postgres -d linkly -qtAc "SET ROLE linkly; SET app.tenant_id = 'acme'; SELECT count(*) FROM links"
+kubectl -n lvl13 exec "$prim" -c postgres -- psql -U postgres -d linkly -qtAc "SET ROLE linkly; SET app.tenant_id = 'globex'; SELECT count(*) FROM links"
+kubectl -n lvl13 exec "$prim" -c postgres -- psql -U postgres -d linkly -qtAc "SELECT count(*) FROM links"
+for i in 1 2 3; do curl -s -o /dev/null -w '%{http_code} ' -XPOST http://lvl13.localtest.me/api/links -H 'Content-Type: application/json' -H 'Authorization: Bearer acme-key-9f2c' -d '{"url":"https://example.com/cost"}'; done; echo
+```
+5. RLS'i kapat (migration'ın `Down` kısmı), sızıntının geri döndüğünü ve yazmanın yeniden çalıştığını gör:
+```bash
+kubectl -n lvl13 exec "$prim" -c postgres -- psql -U postgres -d linkly -qtAc "ALTER TABLE links NO FORCE ROW LEVEL SECURITY"
+kubectl -n lvl13 exec "$prim" -c postgres -- psql -U postgres -d linkly -qtAc "DROP POLICY IF EXISTS links_tenant_isolation ON links"
+kubectl -n lvl13 exec "$prim" -c postgres -- psql -U postgres -d linkly -qtAc "ALTER TABLE links DISABLE ROW LEVEL SECURITY"
+kubectl -n lvl13 exec "$prim" -c postgres -- psql -U postgres -d linkly -qtAc "SET ROLE linkly; SELECT count(*) FROM links"
+curl -s -o /dev/null -w 'RLS kapalı, yazma: %{http_code}\n' -XPOST http://lvl13.localtest.me/api/links -H 'Content-Type: application/json' -H 'Authorization: Bearer acme-key-9f2c' -d '{"url":"https://example.com/cost"}'
+```
+
+**Terminalde ne görmelisin:** 1. adımda `acme|…` ve `globex|…` satırları (acme'ninki büyüktür: `make up`'ın smoke
+testi ve önceki denemeler de acme anahtarıyla yazar). 2. adımda tek sayı: 1. adımdaki sayıların **toplamı** — filtresiz sorgu
+bütün kiracıların satırlarını döndürdü; hata yok, log yok. 3. adımın ilk üç komutu sessizdir (`-q`), sonuncusu `t`
+basar. 4. adımda ayarsız sorgu **`0`**, acme olarak yalnızca acme'nin sayısı, globex olarak yalnızca globex'inki,
+süper kullanıcıyla yine toplam; üç yazma `503 503 503` (Postgres `42501`: yeni satır politikayı geçemedi). 5. adımda
+sayı yeniden toplamdır ve `RLS kapalı, yazma: 201`.
 
 **Grafana'da gör:** [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl13&from=now-15m&to=now&refresh=10s) — script bittikten sonra aç (giriş: admin / ladder)
 - Sızıntının kendisi (filtresiz sorgunun başka kiracının satırlarını döndürmesi) **hiçbir panelde görünmez**: hata yok, log yok, alarm yok. Kanıt, scriptin bastığı satır sayılarıdır (RLS'siz N satır → RLS ile, `app.tenant_id` ayarsız 0).
@@ -145,7 +265,37 @@ yalnızca o kiracının satırları.
 **Neden:** Kubernetes'in varsayılanı "herkes herkesle konuşabilir"dir.
 [Topic · Konu: NetworkPolicy, en az yetki]
 
-**Reproduce:** `make repro P=P13-03`.
+**Reproduce (adım adım):**
+
+Otomatik — ölçer ve hüküm basar: `make repro P=P13-03` (NetworkPolicy'leri listeler, izin listesinde olmayan bir test
+pod'undan Postgres havuzuna ve Redis'e bağlanmayı dener, test pod'unu siler).
+
+Elle — sırayla yapıştır:
+
+1. Grafana'yı temizle, tanımlı politikalara bak:
+```bash
+make fresh
+kubectl -n lvl13 get networkpolicy
+```
+2. İzin listesindeki hiçbir etiketi taşımayan bir test pod'u çalıştır. Pod bu seviyenin Kyverno politikasına uymak
+   zorunda (bellek limiti ve readinessProbe; P13-07), yoksa admission'da reddedilir. Pod iki bağlantıyı dener ve biter:
+```bash
+kubectl -n lvl13 delete pod netcheck --ignore-not-found
+kubectl -n lvl13 run netcheck --image=busybox:1.36 --restart=Never --overrides='{"spec":{"containers":[{"name":"netcheck","image":"busybox:1.36","command":["sh","-c","nc -z -w 3 pg-pooler-rw 5432 && echo POSTGRES_ERISILEBILIR || echo POSTGRES_ENGELLENDI; nc -z -w 3 redis 6379 && echo REDIS_ERISILEBILIR || echo REDIS_ENGELLENDI"],"resources":{"limits":{"memory":"64Mi"}},"readinessProbe":{"exec":{"command":["true"]}}}]}}'
+kubectl -n lvl13 wait --for=jsonpath='{.status.phase}'=Succeeded pod/netcheck --timeout=90s
+kubectl -n lvl13 logs netcheck
+```
+3. İzin listesindeki pod'lar (redirect) aynı veritabanına bağlı çalışıyor mu bak, test pod'unu sil:
+```bash
+kubectl -n lvl13 get pod -l app.kubernetes.io/name=redirect
+kubectl -n lvl13 delete pod netcheck
+```
+
+**Terminalde ne görmelisin:** 1. adımda yedi politika: `default-deny-ingress` ve izin listesi (`allow-ingress-to-services`,
+`allow-metrics-scrape`, `allow-pooler-from-apps`, `allow-postgres-from-apps`, `allow-redis-from-apps`,
+`allow-redpanda-from-apps`). 2. adımda `pod/netcheck created`, birkaç saniye sonra `pod/netcheck condition met`
+(her `nc` 3 sn zaman aşımını bekler) ve log'da iki satır: `POSTGRES_ENGELLENDI` ve `REDIS_ENGELLENDI`. 3. adımda
+redirect pod'ları `1/1 Running`: izin listesindeki etiketi taşıdıkları için aynı havuza bağlanıyorlar.
 
 **Grafana'da gör:** Grafana'da görünmez — NetworkPolicy paketi CNI seviyesinde (Calico) düşürür; uygulama bunu hiç görmez ve bir metrik üretmez. `14 · Security` → "Ağ politikası hataları (Calico)" paneli bu kümede **boş** kalır: Calico'nun (felix) metrikleri Prometheus'a kazınmıyor — üstelik panelin sorguladığı `felix_int_dataplane_failures` düşürülen paketleri değil dataplane hatalarını sayar. Kanıt terminalde:
 - `kubectl -n lvl13 get networkpolicy` → `default-deny-ingress` ve izin listesi (`allow-postgres-from-apps`, `allow-redis-from-apps`, …): kim kiminle konuşuyor, tek bakışta.
@@ -167,7 +317,39 @@ cluster'da kullanılamaz kılardı. *Bir sırrın güvenli olduğunu varsaymak, 
 kötüdür* — bu yüzden düz Secret duruyor ve script çözümü tek komuta indiriyor.
 [Topic · Konu: Sır yönetimi]
 
-**Reproduce:** `make repro P=P13-04` — durumu ölçer ve `kubeseal` komutunu yazar.
+**Reproduce (adım adım):**
+
+Otomatik — ölçer ve hüküm basar: `make repro P=P13-04` — git'te düz metin sır arar, sealed-secrets controller'ını,
+CRD'sini ve şifreleme anahtarını kontrol eder ve düz Secret'ı SealedSecret'a çeviren `kubeseal` komutunu yazar.
+
+Elle — sırayla yapıştır (kümede hiçbir şeyi değiştirmez; yalnızca okur):
+
+1. Grafana'yı temizle, git'teki düz metin sırları bul, sonra kümedeki Secret'ın yalnızca base64 olduğunu gör:
+```bash
+make fresh
+grep -rn 'API_KEYS:\|POSTGRES_PASSWORD:\|linkly:linkly@' deploy/ | grep -v secretKeyRef
+kubectl -n lvl13 get secret linkly-api-keys -o jsonpath='{.data.API_KEYS}' | base64 -d; echo
+```
+2. sealed-secrets kurulu mu — CRD, controller ve kümenin şifreleme anahtarı:
+```bash
+kubectl get crd sealedsecrets.bitnami.com
+kubectl -n kube-system get pods -l app.kubernetes.io/name=sealed-secrets
+kubectl -n kube-system get secret -l sealedsecrets.bitnami.com/sealed-secrets-key
+```
+3. İstersen çözümü dene — makinende `kubeseal` CLI'ı varsa (kurulum ön koşullarında yok). Komut kümeye bir şey
+   yazmaz; controller'ın açık anahtarını okuyup şifreli dosyayı `/tmp`'ye bırakır:
+```bash
+kubectl -n lvl13 create secret generic linkly-api-keys --from-literal=API_KEYS='acme:pro:acme-key-9f2c,globex:free:globex-key-3a71,initech:enterprise:initech-key-77bd' --dry-run=client -o yaml | kubeseal --controller-namespace kube-system -o yaml > /tmp/linkly-api-keys-sealed.yaml
+grep -A1 encryptedData /tmp/linkly-api-keys-sealed.yaml
+```
+
+**Terminalde ne görmelisin:** 1. adımda `deploy/api-keys.yaml:…: API_KEYS: "acme:pro:acme-key-9f2c,…"`,
+`deploy/cnpg.yaml:…: POSTGRES_PASSWORD: linkly` ve `postgres://linkly:linkly@…` içeren `DATABASE_URL` satırları:
+git'e commit edilmiş düz metin. `base64 -d` aynı anahtar listesini düz metin olarak basar — Secret'a erişebilen
+herkes okur; base64 bir kodlamadır, şifreleme değil. 2. adımda CRD `sealedsecrets.bitnami.com` listelenir,
+controller pod'u `Running`, anahtar Secret'ı `sealed-secrets-key…` adıyla görünür: araç kurulu, kullanılmıyor.
+3. adımda `encryptedData:` altında `API_KEYS:` ve uzun, okunamaz bir şifreli metin — bu dosya git'e girebilir,
+yalnızca bu kümenin özel anahtarı çözer.
 
 **Grafana'da gör:** Grafana'da görünmez — sır git'teki bir dosyada duruyor; hiçbir metrik bir dosyanın içeriğini ölçmez. Kanıt terminalde:
 - `grep -n 'API_KEYS:\|POSTGRES_PASSWORD:' deploy/api-keys.yaml deploy/cnpg.yaml` → `API_KEYS: "acme:pro:acme-key-9f2c,…"` ve `POSTGRES_PASSWORD: linkly`: git'e commit edilmiş düz metin.
@@ -185,7 +367,45 @@ kapalıyken **kabul edilir**.
 **Neden:** 01'deki kontrol yalnızca düz IP'lere bakıyordu; saldırgan bir alan adı kaydeder.
 [Topic · Konu: SSRF/open redirect, DNS rebinding]
 
-**Reproduce:** `make repro P=P13-05`.
+**Reproduce (adım adım):**
+
+Otomatik — ölçer ve hüküm basar: `make repro P=P13-05` (DNS kontrolü açıkken dört adresi dener, `TRAP_NO_DNS_CHECK`'i
+yalnızca api'de açıp `localtest.me`'yi tekrar dener, toplam güvenlik reddini Prometheus'tan okur ve tuzağı kapatır).
+
+Elle — sırayla yapıştır:
+
+1. Grafana'yı temizle, DNS kontrolü açıkken dört hedef dene: düz özel IP, `localhost`, özel ağa çözülen bir ad
+   (`localtest.me` → 127.0.0.1) ve normal bir adres. Bir kazıma bekleyip api pod'larının güvenlik reddi sayacını
+   sebebe göre oku (api'nin `/metrics` ucu ingress'ten açık değil; sayaç Prometheus'tan okunur, tuzak api pod'larını
+   yenilemeden önce):
+```bash
+make fresh
+curl -s -w ' → %{http_code}\n' -XPOST http://lvl13.localtest.me/api/links -H 'Content-Type: application/json' -H 'Authorization: Bearer acme-key-9f2c' -d '{"url":"http://169.254.169.254/latest/meta-data/"}'
+curl -s -w ' → %{http_code}\n' -XPOST http://lvl13.localtest.me/api/links -H 'Content-Type: application/json' -H 'Authorization: Bearer acme-key-9f2c' -d '{"url":"http://localhost:8080/admin"}'
+curl -s -w ' → %{http_code}\n' -XPOST http://lvl13.localtest.me/api/links -H 'Content-Type: application/json' -H 'Authorization: Bearer acme-key-9f2c' -d '{"url":"http://localtest.me/"}'
+curl -s -w ' → %{http_code}\n' -XPOST http://lvl13.localtest.me/api/links -H 'Content-Type: application/json' -H 'Authorization: Bearer acme-key-9f2c' -d '{"url":"https://example.com/ok"}'
+sleep 20
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum by (reason) (create_rejected_unsafe_total{namespace="lvl13"})' | jq -r '.data.result[] | .metric.reason + ": " + .value[1]'
+```
+2. DNS kontrolünü yalnızca api'de kapat (01'deki hâl: yalnızca düz IP'ye bakar), aynı adı tekrar dene:
+```bash
+make set E="TRAP_NO_DNS_CHECK=true" W=api
+kubectl -n lvl13 rollout status deploy/api
+sleep 10
+curl -s -w ' → %{http_code}\n' -XPOST http://lvl13.localtest.me/api/links -H 'Content-Type: application/json' -H 'Authorization: Bearer acme-key-9f2c' -d '{"url":"http://localtest.me/"}'
+```
+3. Tuzağı kapat:
+```bash
+make reset
+```
+
+**Terminalde ne görmelisin:** her `curl` önce cevabın JSON gövdesini, altındaki satırda ` → <HTTP kodu>` basar.
+1. adımda ilk iki deneme `{"error":"unsafe_url:private_address","request_id":"…"}` ve `→ 400`, üçüncüsü
+`{"error":"unsafe_url:private_address_resolved","request_id":"…"}` ve `→ 400` (ad DNS ile çözülüp 127.0.0.1
+bulundu), dördüncüsü `{"code":"…","short_url":"http://lvl13.localtest.me/…","url":"https://example.com/ok"}` ve `→ 201`.
+Sayaç satırları `private_address: 2` ve `private_address_resolved: 1` (api pod'ları bu seviyede önceden başka ret
+saydıysa daha büyük); `scheme`, `host`, `parse` `0`. 2. adımda aynı `localtest.me` bu kez
+`{"code":"…",…,"url":"http://localtest.me/"}` ve `→ 201`: kontrol atlatıldı ve hiçbir ret sayacına eklenmedi.
 
 **Grafana'da gör:** [`14 · Security`](http://grafana.localtest.me/d/ladder-security?var-level=lvl13&from=now-15m&to=now&refresh=10s) ve [`03 · App Business`](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl13&from=now-15m&to=now&refresh=10s) — script bittikten sonra aç; her deneme tek istek olduğu için tepeler alçaktır (giriş: admin / ladder)
 - "Tehlikeli URL reddi (sebebe göre)" → DNS kontrolü açıkken iki seri: `private_address` (düz IP `169.254.169.254` ve `localhost`) ve `private_address_resolved` (`localtest.me` → 127.0.0.1 — yalnızca DNS çözümünün yakalayabildiği). Tuzak açıldıktan sonra aynı `localtest.me` isteği reddedilmez: `private_address_resolved` yeni bir tepe yapmaz.
@@ -208,11 +428,49 @@ ve görünürlüğü**. Negatif önbellek her istekte **yeni** kod üreten saf b
 yapamaz (tekrar edecek bir "yok" cevabı yok); faydası aynı yok-olan kodlar tekrar sorulduğunda
 görünür. [Topic · Konu: Enumeration]
 
-**Reproduce:** `make repro P=P13-06` — iki faz, her biri 40 sn `scan` yükü (limiter devrede):
+**Reproduce (adım adım):**
+
+Otomatik — ölçer ve hüküm basar: `make repro P=P13-06` — iki faz, her biri 40 sn `scan` yükü (limiter devrede):
 (1) her istek yeni bir kod (enumeration) → negatif isabet ~0, izin verilen her istek DB'ye iner;
 (2) aynı 60 yok-olan kod tekrar tekrar (`KEYS=60`, `scan.js`) → negatif önbellek cevaplar, 404 başına
 DB okuması düşer. Script iki fazın "404 başına DB okuması"nı yan yana basar; 2. fazda negatif isabet
 yoksa ölçemediğini söyler (exit 2).
+
+Elle — sırayla yapıştır. Deney limiter'ı sınıyor: yük `LIMITS_ENFORCED=1` ile herkese açık girişten, muafiyet jetonu
+olmadan gider (yoksa k6 limitsiz yük girişini kullanır ve limiter'ı hiç görmez). Her fazdan sonra dört sayı okunur:
+404 sayısı, negatif önbellek isabeti, DB okuması (`op="get"`) ve limiter reddi.
+
+1. Grafana'yı temizle, 1. faz — her istek yeni, var olmayan bir kod (40 sn), sonra dört sayıyı oku:
+```bash
+make fresh
+LIMITS_ENFORCED=1 make load S=scan K6_ARGS="--vus 30 --duration 40s"
+sleep 12
+for q in \
+  'sum(increase(redirect_total{namespace="lvl13",result="not_found"}[1m]))' \
+  'sum(increase(cache_ops_total{namespace="lvl13",result="negative_hit"}[1m]))' \
+  'sum(increase(db_queries_total{namespace="lvl13",op="get"}[1m]))' \
+  'sum(increase(ratelimit_decisions_total{namespace="lvl13",decision="reject"}[1m]))'
+do printf '%s → ' "$q"; curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode "query=$q" | jq -r '.data.result[0].value[1] // "0"'; done
+```
+2. 2. faz — aynı 60 yok-olan kod tekrar tekrar (ölü linkler, tekrar eden botlar), aynı dört sayı:
+```bash
+KEYS=60 CODE_LEN=7 LIMITS_ENFORCED=1 make load S=scan K6_ARGS="--vus 30 --duration 40s"
+sleep 12
+for q in \
+  'sum(increase(redirect_total{namespace="lvl13",result="not_found"}[1m]))' \
+  'sum(increase(cache_ops_total{namespace="lvl13",result="negative_hit"}[1m]))' \
+  'sum(increase(db_queries_total{namespace="lvl13",op="get"}[1m]))' \
+  'sum(increase(ratelimit_decisions_total{namespace="lvl13",decision="reject"}[1m]))'
+do printf '%s → ' "$q"; curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode "query=$q" | jq -r '.data.result[0].value[1] // "0"'; done
+```
+
+**Terminalde ne görmelisin:** iki yükün de başında `k6 girişi: public (http://lvl13.localtest.me)` — limiter yolun
+üstünde. k6 çıktısının sonundaki özet satırında (`k6 lvl13: reqs=… 5xx=… 404=… 429=…`) `404` küçük bir pay; geri kalanı iki limiter'dan
+döner: uygulamanın IP limiti `429` (10 sn'de 300 istek), ingress'in saniyede 400 istek sınırı `5xx` (503;
+`platform/lib/loadtest.sh`). Yalnızca limiter'ın izin verdiği istekler `404` olur. 1. fazda Prometheus'tan: `not_found` sıfırdan büyük,
+`negative_hit` ~0 ve `op="get"` DB okuması 404 sayısına yakın (404 başına ~1 okuma: her kod yeni, önbellekte tekrar
+edecek bir "yok" yok). 2. fazda 404 sayısı benzer (aynı limiter), ama `negative_hit` 404'lerin çoğunu karşılar ve DB
+okuması belirgin düşer: 404 başına DB okuması, iki fazın farkıdır. Her iki fazda `reject` 404'ten büyüktür.
 
 **Grafana'da gör:** [`14 · Security`](http://grafana.localtest.me/d/ladder-security?var-level=lvl13&from=now-15m&to=now&refresh=10s), [`10 · Rate limit`](http://grafana.localtest.me/d/ladder-ratelimit?var-level=lvl13&from=now-15m&to=now&refresh=10s) ve [`04 · Cache`](http://grafana.localtest.me/d/ladder-cache?var-level=lvl13&from=now-15m&to=now&refresh=10s) — ilk tarama başlayınca aç; iki faz arka arkaya ~2 dk sürer (giriş: admin / ladder)
 - "Var olmayan kod istekleri / sn (tarama)" → iki faz boyunca iki plato, sonra sıfır; platonun yüksekliği limiter'ın izin verdiği hızdır (iki fazda da aynı). Normal trafikte bu çizgi sıfıra yakındır — eksik olan "404 oranı" kuralının eşiği bu çizgiden okunur.
@@ -233,7 +491,31 @@ yoksa ölçemediğini söyler (exit 2).
 **Neden:** Bu kurallar şimdiye kadar yalnızca README'lerde yazıyordu.
 [Topic · Konu: Policy as code]
 
-**Reproduce:** `make repro P=P13-07` — üç ihlali `--dry-run=server` ile dener.
+**Reproduce (adım adım):**
+
+Otomatik — ölçer ve hüküm basar: `make repro P=P13-07` — politikaları listeler, üç ihlali `--dry-run=server` ile dener
+ve kaçının reddedildiğini sayar.
+
+Elle — sırayla yapıştır. `--dry-run=server` isteği admission'dan geçirir ama hiçbir şey yaratmaz; geri alınacak bir
+şey kalmaz:
+
+1. Grafana'yı temizle, tanımlı politikalara bak:
+```bash
+make fresh
+kubectl get clusterpolicy
+```
+2. Üç ihlali ayrı ayrı dene — her pod yalnızca bir kuralı çiğner: `:latest` etiketi, bellek limiti yok, readinessProbe yok:
+```bash
+kubectl -n lvl13 run policy-test-latest --image=busybox:latest --restart=Never --overrides='{"spec":{"containers":[{"name":"c","image":"busybox:latest","command":["sleep","30"],"resources":{"limits":{"memory":"64Mi"}},"readinessProbe":{"exec":{"command":["true"]}}}]}}' --dry-run=server
+kubectl -n lvl13 run policy-test-nolimit --image=busybox:1.36 --restart=Never --overrides='{"spec":{"containers":[{"name":"c","image":"busybox:1.36","command":["sleep","30"],"readinessProbe":{"exec":{"command":["true"]}}}]}}' --dry-run=server
+kubectl -n lvl13 run policy-test-noprobe --image=busybox:1.36 --restart=Never --overrides='{"spec":{"containers":[{"name":"c","image":"busybox:1.36","command":["sleep","30"],"resources":{"limits":{"memory":"64Mi"}}}]}}' --dry-run=server
+```
+
+**Terminalde ne görmelisin:** 1. adımda `linkly-ladder-baseline`. 2. adımda üç komutun üçü de
+`Error from server: admission webhook "…" denied the request` ile başlayan çok satırlı bir ret basar; altında
+`linkly-ladder-baseline` ve çiğnenen kuralın adı ile mesajı: sırasıyla `disallow-latest-tag` (":latest etiketi yasak"),
+`require-memory-limit` ("Bellek limiti zorunlu"), `require-probes` ("readinessProbe zorunlu"). Üç kuralı birden
+taşıyan bir pod geçer — P13-03'teki `netcheck` pod'u bu yüzden bellek limiti ve readinessProbe taşır.
 
 **Grafana'da gör:** [`14 · Security`](http://grafana.localtest.me/d/ladder-security?var-level=lvl13&from=now-15m&to=now&refresh=10s) — script bittikten sonra aç (giriş: admin / ladder)
 - "Politika ihlalleri (Kyverno)" → `linkly-ladder-baseline` adında kısa, alçak bir `fail` tepesi: reddedilen üç deneme (panel 5 dk'lık `rate` çizdiği için tepe yayvan). Panel küme geneli sayar, namespace filtresi yok.
@@ -261,7 +543,30 @@ kapsıyor ve ne zaman kaldırılacak?" sorusunun cevabını yaz.*
 **Neden:** *Kod güvenliği, çalıştırdığın imajın güvenliğiyle sınırlıdır.*
 [Topic · Konu: Saldırı yüzeyi, tedarik zinciri]
 
-**Reproduce:** `make repro P=P13-08`.
+**Reproduce (adım adım):**
+
+Otomatik — ölçer ve hüküm basar: `make repro P=P13-08` (hazır bir redirect pod'unun imajını ve `securityContext`'ini
+okur, içinde shell çalıştırmayı dener, eksik tedarik zinciri adımlarını listeler).
+
+Elle — sırayla yapıştır (yalnızca okur):
+
+1. Grafana'yı temizle, hazır ve silinmekte olmayan bir redirect pod'u seç (scriptin `pod_name` yardımcısıyla aynı
+   seçim), imajına ve `securityContext`'ine bak:
+```bash
+make fresh
+pod=$(kubectl -n lvl13 get pod -l app.kubernetes.io/name=redirect -o json | jq -r '[.items[] | select(.metadata.deletionTimestamp == null) | select(any(.status.containerStatuses[]?; .ready)) | .metadata.name][0] // empty'); echo "pod: $pod"
+kubectl -n lvl13 get pod "$pod" -o jsonpath='{.spec.containers[0].image}'; echo
+kubectl -n lvl13 get pod "$pod" -o jsonpath='{.spec.containers[0].securityContext}'; echo
+```
+2. Konteynerde shell çalıştırmayı dene:
+```bash
+kubectl -n lvl13 exec "$pod" -- /bin/sh -c 'echo VAR'
+```
+
+**Terminalde ne görmelisin:** 1. adımda imaj `localhost:5001/linkly-ladder/13-redirect-svc:<etiket>` (içerik hash'li
+etiket, `:latest` değil) ve `"allowPrivilegeEscalation":false`, `"capabilities":{"drop":["ALL"]}`,
+`"readOnlyRootFilesystem":true`, `"runAsNonRoot":true`, `"runAsUser":65532` içeren bir JSON. 2. adımda `VAR` yerine
+`/bin/sh` için `no such file or directory` diyen bir hata: imajda shell yok (distroless).
 
 **Grafana'da gör:** Grafana'da görünmez — sertleştirme bir çalışma zamanı olayı değil, pod tanımının ve imajın bir özelliği; hiçbir panel onu çizmez (`14 · Security` → "Politika ihlalleri (Kyverno)" da göstermez: bu alanları zorunlu kılan bir kural yok). Kanıt terminalde:
 - `kubectl -n lvl13 get pod -l app.kubernetes.io/name=redirect -o jsonpath='{.items[0].spec.containers[0].securityContext}'` → `"readOnlyRootFilesystem":true`, `"runAsNonRoot":true` ve `"capabilities":{"drop":["ALL"]}` içeren bir JSON.

@@ -6,6 +6,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # bulutta bu noktada node eklenir ve bu da dakikalar sürer (ölçekleme zincirinin en yavaş halkası).
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
+need_confirm "redirect 10 replikaya çıkacak ve kümenin CPU rezervi dolacak (deney sonunda geri alınır)"
 on_cleanup "kubectl -n \"$NS\" scale "$(wl redirect)" --replicas=2"
 orig_lim=$(kubectl -n "$NS" get "$(wl redirect)" -o jsonpath='{.spec.template.spec.containers[0].resources.limits.cpu}' 2>/dev/null) || true
 on_cleanup "setres "$(wl redirect)" --requests=cpu=150m --limits=cpu=${orig_lim:-300m}"

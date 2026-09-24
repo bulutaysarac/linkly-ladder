@@ -69,7 +69,7 @@ else
   warn "go kurulu mu, pod iç portta (6060, PPROF_ADDR) dinliyor mu, kubectl raw isteği zaman aşımına mı uğradı?"
 fi
 rm -f "$prof"
-grafana_hint "01 · Pods & Resources → 'CPU kullanımı (çekirdek)' · 02 · App RED → 'p99 süre (uç noktaya göre)' — sebep hiçbir panelde yok, profilde"
+grafana_hint "01 · Pods & Resources → 'CPU kullanımı (bir çekirdeğin %'si)' · 02 · App RED → 'p99 süre (uç noktaya göre)' — sebep hiçbir panelde yok, profilde"
 note "ÖLÇÜM DERSİ: istek başına regexp.MustCompile birkaç MİKROSANİYEDİR. 600 rps'te bu, saniyede"
 note "birkaç milisaniyelik CPU demek — konteyner CPU metriğinin gürültüsünün ALTINDA. Yani"
 note "'istek başına CPU arttı mı?' diye soran bir script çoğu koşuda HAYIR cevabı alır"

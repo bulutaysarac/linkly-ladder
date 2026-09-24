@@ -31,7 +31,7 @@ SERVICES    := $(notdir $(wildcard cmd/*))
 PREV        := $(shell ls -d $(ROOT)/[0-9][0-9]-*/ | sort | awk -v cur="$(ROOT)/$(LEVEL)-$(NAME)/" '$$0==cur{print prev; exit}{prev=$$0}')
 EXPORT_ENV  := NS=$(NS) LEVEL=$(LEVEL) BASE_URL=$(BASE_URL) PROM_URL=$(PROM_URL) GRAFANA_URL=$(GRAFANA_URL) LADDER_ROOT=$(ROOT)
 
-.PHONY: help build push deploy wait smoke profile up down status load repro chaos unchaos grafana set unset env reset logs diff-prev verify-prev test lint
+.PHONY: help build push deploy wait smoke profile fresh up down status load repro chaos unchaos grafana set unset env reset logs diff-prev verify-prev test lint
 
 help: ## Hedefler
 	@echo "Seviye $(LEVEL) ($(NAME))  namespace=$(NS)  url=$(BASE_URL)  servisler=$(SERVICES)"
@@ -152,7 +152,12 @@ smoke: ## POST + GET 30x
 profile: ## Bu seviyenin platform bileşenlerini aç, gerisini kapat (make up bunu kendisi yapar)
 	@$(PLATFORM)/lib/profile.sh $(LEVEL)
 
-up: profile push deploy wait smoke ## profil → build → push → deploy → wait → smoke
+fresh: ## Grafana'yı temizle: seviyelerin ve k6'nın geçmiş metriklerini sil (make up bunu kendisi yapar)
+	@PROM_URL=$(PROM_URL) SOFT=$(SOFT) $(PLATFORM)/lib/fresh.sh
+
+up: profile ## profil → Grafana'yı temizle → build → push → deploy → wait → smoke
+	@$(MAKE) --no-print-directory fresh SOFT=1
+	@$(MAKE) --no-print-directory push deploy wait smoke
 	@echo; echo "✔ $(NS) ayakta → $(BASE_URL)"; echo "  Grafana: $(GRAFANA_URL)/dashboards?query=Ladder  (level=$(NS))"
 
 down: ## Namespace'i sil

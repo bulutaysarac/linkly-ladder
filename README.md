@@ -292,6 +292,7 @@ Bu bölüm, projeyi hiç görmemiş biri için baştan sona yazıldı. Sırayla 
 | `git`, `python3`, `make` | macOS'ta hazır gelir (`xcode-select --install`) |
 | Go 1.26+ (**isteğe bağlı**) | Yalnızca `make test`/`make lint` için; imajlar Docker içinde derlenir |
 | Boş portlar: **80, 443, 5001** | 80/443 ingress'e, 5001 yerel imaj registry'sine gider |
+| zsh kullanıyorsan (macOS varsayılanı), bir kez: `echo 'setopt interactivecomments' >> ~/.zshrc` ve yeni bir terminal aç | README'lerdeki bazı komut satırları sonunda `# açıklama` taşır. zsh bu ayar olmadan `#`'i yorum saymaz, komutun argümanı yapar ve komut hata verir. Seviye rehberlerindeki bloklar yorumsuzdur; bu ayar geri kalan bloklar için |
 | İnternet | İmajlar ve helm chart'ları indirilir. `*.localtest.me` adresleri genel DNS'te 127.0.0.1'e çözülür |
 
 macOS'ta geliştirildi ve denendi; Linux'ta çalışması beklenir ama denenmedi.
@@ -329,7 +330,8 @@ cd ../00-naive
 make up
 ```
 
-`make up` sırasıyla: seviyenin platform profilini uygular → servisleri Docker'da derler →
+`make up` sırasıyla: seviyenin platform profilini uygular → Grafana'yı temizler (önceki deneylerin
+çizgileri silinir) → servisleri Docker'da derler →
 registry'ye iter → Kubernetes'e kurar → hazır olmasını bekler → bir link oluşturup açarak dener.
 **Ne görmelisin:** `smoke ✔ POST /api/links → <kod>, GET /<kod> → 301` ve `✔ lvl00 ayakta` (~1 dk; ilk
 derlemede daha uzun).
@@ -353,7 +355,8 @@ Her seviyenin README'si aynı 10 başlığa sahiptir. Bir seviyede **şu sırayl
 |---|---|
 | §1 Bu seviye ne? · §2 Mimari | Ne kuruldu, neden |
 | §3 Önceki seviyeden çözülenler | Bir önceki seviyede yaşadığın hangi acıya cevap |
-| **§6 Reproduce edilebilir sorunlar** | **Asıl ders.** Her sorun: belirti, neden, adım adım elle üretme, Grafana'da nerede görüneceği, hangi seviyede çözüldüğü |
+| **§4 Ayağa kaldırma → Rehber** | O seviyenin baştan sona komut sırası: önceki seviyeyi kapat, kur, önceki sorunları koş, sorunları sırayla yaşa, temizle |
+| **§6 Reproduce edilebilir sorunlar** | **Asıl ders.** Her sorun: belirti, neden, `make fresh` ile başlayan yapıştırılabilir komutlar, "Terminalde ne görmelisin", Grafana'da hangi panelde ne görüneceği, hangi seviyede çözüldüğü |
 | §7 Alıştırmalar | Bir çözümü bilerek bozup sorunun geri geldiğini görmek |
 | §8 Gözlemlenebilirlik · §9 Bilerek bırakılanlar · §10 `make diff-prev` | Paneller, kapsam dışı kalanlar, kod farkının okuma rehberi |
 
@@ -449,7 +452,8 @@ Her şeyi kaldırmak (küme dahil): `make -C platform destroy`.
 | `port is already allocated` (80/443/5001) | Portu başka bir şey tutuyor (başka bir kind kümesi, yerel bir web sunucusu) | `lsof -i :80` ile bul ve kapat; başka bir kind kümesiyse `kind get clusters` → `kind delete cluster --name <ad>` |
 | 13+'da POST `401` | Yönetim uçları API anahtarı ister | README §4'teki `Authorization: Bearer …` başlıklı komutu kullan |
 | Script `SKIPPED` dedi | Ölçüm yapılamadı (ortam hazır değil) — sahte hüküm vermek yerine durdu | Script çıktısındaki sarı uyarıyı oku; genelde `make up` ile düzelir |
-| Grafana'da eski deneylerin çizgileri yenisine karışıyor | Prometheus 6 saat saklar; önceki koşular aynı panellerde | Zaman aralığını daralt ("Last 15 minutes") ya da baştan başla: `make wipe CONFIRM=1` |
+| Grafana'da eski deneylerin çizgileri yenisine karışıyor | Prometheus 6 saat saklar; önceki koşular aynı panellerde | `make fresh` (seviye klasöründe): geçmiş çizgiler saniyeler içinde silinir. Her şeyi baştan: `make wipe CONFIRM=1` |
+| `bad pattern` / `No rule to make target '#'` / `command not found: #` | zsh `#`'i yorum saymıyor | Bir kez: `echo 'setopt interactivecomments' >> ~/.zshrc`, yeni terminal |
 | Her şey tuhaf | — | `make status` (seviye), `make -C platform status` (platform), `make logs` |
 
 Kendi deneyini yazacaksan: [docs/PROBLEM-TEMPLATE.md](docs/PROBLEM-TEMPLATE.md) ve aşağıdaki
@@ -483,7 +487,7 @@ yalnız o seri; panel başlığı → ⋮ → **View** (büyüt) · **Explore** 
 3. **Zaman aralığı deneyi kapsıyor mu?** Deney aralığın dışında kaldıysa çizgi yoktur.
 4. **Yeni mi başladı?** Prometheus uygulama metriklerini 10 sn'de, küme metriklerini (pod, restart,
    CPU) 30 sn'de bir toplar ve paneller 1 dk'lık ortalama çizer: yeni bir olay **30–90 sn gecikmeyle**
-   ve yumuşatılmış görünür. Birkaç saniyelik bir sıçrama düzleşir — README o durumda kanıtı terminalde gösterir.
+   ve yumuşatılmış görünür. `make fresh` ya da `make up` sonrasında da paneller ~1 dk boş kalır. Birkaç saniyelik bir sıçrama düzleşir — README o durumda kanıtı terminalde gösterir.
 5. **Grafana/Prometheus ayakta mı?** `make -C platform status`; Grafana için `make profile`.
 
 ### k6 "Dönen durum kodları" panelindeki kodlar (istemcinin gördüğü)
@@ -543,7 +547,8 @@ Diğer adresler: http://prometheus.localtest.me (ham metrik, giriş yok) · http
 ## Her seviyede aynı komutlar
 
 ```
-make up        # profil → build → push → deploy → rollout → smoke
+make up        # profil → Grafana'yı temizle → build → push → deploy → rollout → smoke
+make fresh     # Grafana'yı temizle: geçmiş çizgiler gider, kurulum ve veri kalır (her deneyin ilk adımı)
 make down      # namespace sil
 make status    # pod/servis durumu        ·  make logs  # uygulama logları
 make load S=   # create redirect mixed hot-key burst abuser read-your-writes stairs scan

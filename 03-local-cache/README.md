@@ -54,7 +54,7 @@ yaygın yanılgıdır.
 Bu seviyenin platformdan istediği: **temel yığın (kind, ingress, Prometheus, Grafana) + Chaos Mesh**. `make up` ilk adımda (profil) bunları açar ve kullanılmayanları kapatır; bir bileşen kurulu değilse hangi komutla kurulacağını söyleyip durur.
 
 ```bash
-make up            # profil → build → push → deploy → rollout wait → smoke
+make up            # profil → Grafana'yı temizle → build → push → deploy → rollout wait → smoke
 code=$(curl -s -XPOST http://lvl03.localtest.me/api/links -H 'Content-Type: application/json' -d '{"url":"https://example.com"}' | jq -r .code); echo "$code"
 curl -s -o /dev/null -w '%{http_code} → %{redirect_url}\n' http://lvl03.localtest.me/$code   # 302 → https://example.com
 make grafana       # Ladder klasörü, level=lvl03 — giriş: admin / ladder
@@ -62,6 +62,29 @@ make load S=mixed  # aynı senaryolar her seviyede: create redirect mixed hot-ke
 make repro P=P03-01   # §6'daki bir sorunu otomatik üret → REPRODUCED / NOT-REPRODUCED
 make env           # açık ayar/tuzaklar · değiştir: make set E="KEY=değer" · hepsini geri al: make reset (§7)
 make down          # seviyeyi kaldır · kümeyi durdurmak için: make -C ../platform stop
+```
+
+**Rehber — bu seviyeyi baştan sona, sırayla.** Komut bloklarında açıklama yok; her bloğu olduğu gibi yapıştırabilirsin.
+
+1. Önceki seviye açıksa kapat (aynı anda tek seviye çalışır), bu seviyeyi kur. `make up` Grafana'yı da temizler:
+```bash
+make -C ../02-postgres down
+make up
+```
+2. 02'nin sorunlarını bu seviyede koş. Koşarken başka komut çalıştırma: aynı pod'lara dokunurlar.
+   Çıktıdaki `BEKLENEN` sütunu `NOT-REPRODUCED` diyen tek satır P02-01: 03'ün çözdüğü sorun. Onay isteyen scriptler
+   (P02-02, P02-03, P02-04, P02-10) onaysız `SKIPPED` der; onları da koşmak istersen `CONFIRM=1 make verify-prev`:
+```bash
+make verify-prev
+```
+3. §6'daki sorunları sırayla yaşa (P03-01 → P03-07). Her sorunda aynı düzen:
+   **Elle** bloklarını sırayla yapıştır (ilk komut `make fresh`: Grafana bu deneye boş başlar) →
+   **Terminalde ne görmelisin** ile karşılaştır → **Grafana'da gör** linklerini aç, her madde hangi panelde neyi
+   göreceğini söyler. İstersen aynı deneyi `make repro P=…` ile otomatik koş: ölçer ve hükmünü basar.
+4. Bitince açık kalan ayarları geri al ve seviyeyi kapat:
+```bash
+make reset
+make down
 ```
 
 ## 5. API
@@ -94,8 +117,37 @@ dakikalarca çalışmaya devam eder. Hangi isteğin çalışacağı hangi pod'a 
 (`cached.go · Invalidate`), diğer N−1 pod hiçbir şey duymaz. [Topic · Konu: Önbellek tutarlılığı, invalidation]
 
 **Reproduce (adım adım):**
-1. `make repro P=P03-01` — linki tüm pod'ların önbelleğine sokar, siler, 60 kez okur
-2. Elle: `for i in $(seq 30); do curl -s -o /dev/null -w '%{http_code} ' http://lvl03.localtest.me/$code; done`
+
+Otomatik — ölçer ve hüküm basar: `make repro P=P03-01` (linki tüm pod'ların önbelleğine sokar, siler, 60 kez okur ve kaçının hâlâ yönlendirdiğini sayar).
+
+Elle — `03-local-cache` klasöründe, sırayla yapıştır:
+
+1. Grafana'yı temizle; bir link oluştur ve 36 kez okuyarak üç pod'un da önbelleğine sok (ingress istekleri pod'lara
+   sırayla dağıtır):
+```bash
+make fresh
+code=$(curl -s -XPOST http://lvl03.localtest.me/api/links -H 'Content-Type: application/json' -d '{"url":"https://example.com/p0301"}' | jq -r .code); echo "kod: $code"
+for i in $(seq 1 36); do curl -s -o /dev/null http://lvl03.localtest.me/$code; done
+```
+2. Linki sil (istek tek bir pod'a düşer) ve veritabanında kalmadığını gör:
+```bash
+curl -s -o /dev/null -w 'DELETE → %{http_code}\n' -XDELETE http://lvl03.localtest.me/api/links/$code
+kubectl -n lvl03 exec postgres-0 -c postgres -- psql -U linkly -d linkly -tAc "SELECT count(*) FROM links WHERE code = '$code'"
+```
+3. Silinmiş kodu 30 kez iste:
+```bash
+for i in $(seq 1 30); do curl -s -o /dev/null -w '%{http_code} ' http://lvl03.localtest.me/$code; done; echo
+```
+4. İstersen bayatlık penceresinin sonunu gör: TTL'in (60 sn, ±%20 jitter) dolmasını bekle, tekrar iste:
+```bash
+sleep 75
+for i in $(seq 1 30); do curl -s -o /dev/null -w '%{http_code} ' http://lvl03.localtest.me/$code; done; echo
+```
+
+**Terminalde ne görmelisin:** `DELETE → 204` ve veritabanında `0` satır. Buna rağmen 30 cevabın yaklaşık üçte ikisi
+`302`, üçte biri `404`: `404`'ler silme isteğini alıp kendi kopyasını temizleyen tek pod'dan, `302`'ler hiçbir şey
+duymamış diğer iki pod'dan geliyor. 4. adımda 30 cevabın hepsi `404`: kopyalar TTL dolunca kendiliğinden düştü — o
+ana kadar kullanıcı "sildim" dediği linke yönlenmeye devam etti.
 
 **Grafana'da gör:** [`03 · App Business`](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl03&from=now-15m&to=now&refresh=10s) ve [`04 · Cache`](http://grafana.localtest.me/d/ladder-cache?var-level=lvl03&from=now-15m&to=now&refresh=10s) — script bittikten sonra aç; deney birkaç saniyelik ve az istekli, bu yüzden çizgiler 30–90 sn gecikmeyle küçük tümsekler olarak belirir (giriş: admin / ladder)
 - "404 (pod'a göre)" → silmeden sonraki `404`'lerin neredeyse tamamı **tek** bir pod'dan gelir: silme isteğini alıp kendi kopyasını temizleyen pod. Diğer pod'ların çizgisi 0'da kalır — onlar silinmiş linki hâlâ yönlendiriyor.
@@ -116,8 +168,44 @@ dönüş. Grafik testere dişine benzer.
 istekler zorunlu olarak DB'ye iner. [Topic · Konu: Soğuk başlangıç, kapasite planlaması]
 
 **Reproduce (adım adım):**
-1. `make repro P=P03-02` — 300 linkle ısıtır, 180 sn'lik yük altında **önce kararlı hâli**, sonra
-   `rollout restart` penceresini ayrı ayrı ölçer ve ikisini kıyaslar
+
+Otomatik: `make repro P=P03-02` (TTL'i deney süresince 10 dk yapar, 2000 kodluk sürekli yük altında **önce kararlı hâli**, sonra `rollout restart` penceresini ayrı ayrı ölçer ve ikisini kıyaslar; ~5 dk).
+
+Elle — sırayla yapıştır:
+
+1. Grafana'yı temizle; TTL dolmasını sustur (Ölçüm dersi 2), pod'lar yeni ayarla yeniden başlar:
+```bash
+make fresh
+make set E="CACHE_TTL=10m"
+```
+2. İKİNCİ bir terminalde `03-local-cache` klasöründe 2000 kodluk çalışma kümesiyle 4 dk sürecek yükü başlat:
+```bash
+SEED=2000 SEED_BUDGET_MS=240000 make load S=redirect K6_ARGS="--vus 20 --duration 240s"
+```
+3. Yük başlar başlamaz İLK terminalde 2 dk bekle (75 sn ısınma + 45 sn ölçüm penceresi) ve kararlı hâlde saniyedeki DB
+   okumasını ölç:
+```bash
+sleep 120
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum(increase(db_queries_total{namespace="lvl03",op="get"}[45s])) / 45' | jq -r '.data.result[0].value[1]'
+```
+4. Hemen ardından dağıtım yap; yeni pod'lar ısınınca, dağıtımın başından beri geçen pencerede saniyedeki DB okumasını
+   ölç:
+```bash
+t0=$(date +%s)
+kubectl -n lvl03 rollout restart deploy/linkly
+kubectl -n lvl03 rollout status deploy/linkly
+sleep 30
+rw=$(( $(date +%s) - t0 )); echo "rollout penceresi: $rw sn"
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode "query=sum(increase(db_queries_total{namespace=\"lvl03\",op=\"get\"}[${rw}s])) / $rw" | jq -r '.data.result[0].value[1]'
+```
+5. İkinci terminaldeki yük bitince TTL'i geri al:
+```bash
+make reset
+```
+
+**Terminalde ne görmelisin:** 3. adımdaki sayı yere yakın: önbellek sıcak, TTL uzun, okumaların neredeyse hiçbiri DB'ye
+inmiyor. 4. adımdaki sayı bunun birkaç katı (script en az 3 katını ve saniyede 5'ten fazlasını arar): her yeni pod boş
+bellekle doğdu ve 2000 kodun hepsini kendisi için yeniden DB'den çekti. Testere dişinin bir dişi bu.
 
 **Ölçüm dersi 1 — "tepe" tek başına kanıt değil:** Tüm koşunun tepesini (`max_over_time`) alıp
 sondaki orana bölmek yanıltır: o tepe rollout'tan değil, **yükün kendi soğuk başlangıcından** gelir —
@@ -153,9 +241,36 @@ için önbellekte 9000 kayıt. Bellek kullanımı replika sayısıyla çarpılı
 **Neden:** Süreç içi önbellek tanımı gereği pod başına. [Topic · Konu: Bellek maliyeti, ölçek]
 
 **Reproduce (adım adım):**
-1. `make repro P=P03-03` — 3000 link oluşturur, **aynı** 3000 kodu her pod'a doğrudan (port-forward,
-   ingress'siz) okutur, her pod'un `cache_entries`'ini kendi `/metrics` ucundan okumadan önce ve sonra
-   okur; ölçü: pod'lara eklenen kayıtların toplamı ÷ farklı kod sayısı
+
+Otomatik: `make repro P=P03-03` (3000 link oluşturur, **aynı** 3000 kodu her pod'a doğrudan — port-forward, ingress'siz — okutur, her pod'un `cache_entries`'ini kendi `/metrics` ucundan okumadan önce ve sonra okur; ölçü: pod'lara eklenen kayıtların toplamı ÷ farklı kod sayısı).
+
+Elle — sırayla yapıştır:
+
+1. Grafana'yı temizle; 3000 farklı link oluştur, kodları bir dosyada topla (1–2 dk) ve farklı kod sayısını say:
+```bash
+make fresh
+for i in $(seq 1 3000); do curl -s -XPOST http://lvl03.localtest.me/api/links -H 'Content-Type: application/json' -d "{\"url\":\"https://example.com/mem/$i\"}" | jq -r .code; done > /tmp/p0303-codes.txt
+sort -u /tmp/p0303-codes.txt | wc -l
+```
+2. Aynı 3000 kodu **her pod'a doğrudan** okut (dağıtımı şansa bırakma — Ölçüm dersi) ve her pod'un kendi önbellek kayıt
+   sayısını okumadan önce ve sonra oku:
+```bash
+for pod in $(kubectl -n lvl03 get pods -l app.kubernetes.io/name=linkly -o json | jq -r '.items[] | select(.metadata.deletionTimestamp == null) | select(any(.status.containerStatuses[]?; .ready)) | .metadata.name'); do
+  kubectl -n lvl03 port-forward "pod/$pod" 18093:8080 >/dev/null 2>&1 &
+  pf=$!
+  sleep 3
+  before=$(curl -s http://127.0.0.1:18093/metrics | awk '$1 == "cache_entries" {print $2}')
+  xargs -P 10 -I{} curl -s -o /dev/null --max-time 5 http://127.0.0.1:18093/{} < /tmp/p0303-codes.txt
+  after=$(curl -s http://127.0.0.1:18093/metrics | awk '$1 == "cache_entries" {print $2}')
+  echo "${pod}: önbellek kaydı $before → $after"
+  kill $pf
+  sleep 1
+done
+```
+
+**Terminalde ne görmelisin:** `3000`. Ardından üç satır, her pod için bir tane: her birinde kayıt sayısı ~3000 artar
+(`… → …`). Pod'lara eklenen toplam ~9000, farklı kod 3000: her kod ortalama 3 kez tutuluyor — script bunu
+`her kod ortalama 3.0 kez tutuluyor` diye basar. Aynı veri için üç kez bellek ödüyorsun.
 
 **Ölçüm dersi — "toplam kayıt ÷ en dolu pod" çoğalmayı kanıtlamaz:** Linkleri ingress üzerinden iki
 tur okuyup bu orana bakmak ~3 verir. Ama pod'lar anahtarları **bölüşseydi** (her pod ayrı bir üçte
@@ -182,8 +297,52 @@ on kez. Paylaşılan önbellekte bir kez ödersin — karşılığında bir ağ 
 gördüğü örneklem küçülür, ısınma N kat uzar. [Topic · Konu: Önbellek lokalitesi, dağıtım]
 
 **Reproduce (adım adım):**
-1. `CONFIRM=1 make repro P=P03-04` — 1 replika ve çok replika ile aynı yükü koşup hit oranını kıyaslar
-   (4000 kodluk çalışma kümesi, 20 VU × 60 sn; script replika sayısını deney sonunda geri alır)
+
+Otomatik: `CONFIRM=1 make repro P=P03-04` (1 replika ve 6 replika ile aynı yükü koşup ıska sayısını ve hit oranını kıyaslar — 4000 kodluk çalışma kümesi, 20 VU × 60 sn; replika sayısını deney sonunda geri alır).
+
+Elle — sırayla yapıştır:
+
+1. Grafana'yı temizle; tek pod'a in, pod'u boş önbellekle yeniden başlat, Prometheus'un eski pod'u unutmasını bekle ve
+   ıska sayacını oku:
+```bash
+make fresh
+kubectl -n lvl03 scale deploy/linkly --replicas=1
+kubectl -n lvl03 rollout status deploy/linkly
+kubectl -n lvl03 rollout restart deploy/linkly
+kubectl -n lvl03 rollout status deploy/linkly
+sleep 40
+m0=$(curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum(cache_ops_total{namespace="lvl03",result="miss"})' | jq -r '.data.result[0].value[1] // "0"'); echo "ıska sayacı: $m0"
+```
+2. 4000 kodluk çalışma kümesiyle 20 kullanıcı × 60 sn yük ver, sonra yükün yarattığı ıskayı hesapla:
+```bash
+SEED=4000 SEED_BUDGET_MS=240000 make load S=redirect K6_ARGS="--vus 20 --duration 60s"
+sleep 20
+m1=$(curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum(cache_ops_total{namespace="lvl03",result="miss"})' | jq -r '.data.result[0].value[1] // "0"')
+echo "1 pod → ıska: $(awk -v a="$m0" -v b="$m1" 'BEGIN{print b - a}')"
+```
+3. Aynısını 6 pod'la yap:
+```bash
+kubectl -n lvl03 scale deploy/linkly --replicas=6
+kubectl -n lvl03 rollout status deploy/linkly
+kubectl -n lvl03 rollout restart deploy/linkly
+kubectl -n lvl03 rollout status deploy/linkly
+sleep 40
+m0=$(curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum(cache_ops_total{namespace="lvl03",result="miss"})' | jq -r '.data.result[0].value[1] // "0"'); echo "ıska sayacı: $m0"
+SEED=4000 SEED_BUDGET_MS=240000 make load S=redirect K6_ARGS="--vus 20 --duration 60s"
+sleep 20
+m1=$(curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum(cache_ops_total{namespace="lvl03",result="miss"})' | jq -r '.data.result[0].value[1] // "0"')
+echo "6 pod → ıska: $(awk -v a="$m0" -v b="$m1" 'BEGIN{print b - a}')"
+```
+4. Geri al:
+```bash
+kubectl -n lvl03 scale deploy/linkly --replicas=3
+kubectl -n lvl03 rollout status deploy/linkly
+```
+
+**Terminalde ne görmelisin:** 1 pod'da ıska kabaca çalışma kümesi kadar (en çok 4000: her kod bir kez ısınır). 6 pod'da
+aynı yük ve aynı çalışma kümesiyle ıska bunun belirgin biçimde katı — script en az 1.8 katını arar, üst sınır pod
+sayısıdır (6): her pod aynı 4000 kodu kendisi için ayrı ayrı çekiyor. Paylaşılan bir önbellekte (04) bu iki sayı
+yaklaşık aynı çıkar.
 
 **Ölçüm notu — üç kurulum tuzağı, üçü de ders:**
 - Çalışma kümesi 200 kod olursa etki ölçülemez. Etkinin büyüklüğü `N × K / toplam istek`: pod sayısı
@@ -216,9 +375,50 @@ gider. Yük ne kadar yüksekse darbe o kadar büyük — koruma tam da en gerekl
 [Topic · Konu: Cache stampede, singleflight]
 
 **Reproduce (adım adım):**
-1. `make repro P=P03-05` — Postgres'e 200 ms gecikme enjekte eder (Chaos Mesh), TTL'i 5 sn'ye çeker,
-   `hot-key` yükü verir, önce korumalı sonra korumasız ölçer
-   (Chaos Mesh kurulu değilse: `cd platform && make chaos`)
+
+Otomatik: `make repro P=P03-05` (Postgres'e Chaos Mesh ile 200 ms gecikme enjekte eder, TTL'i 5 sn'ye çeker, `hot-key` yükü verir, önce korumalı sonra korumasız ölçer, sonunda hepsini geri alır). Chaos Mesh kurulu değilse bir kez: `cd platform && make chaos`.
+
+Elle — sırayla yapıştır:
+
+1. Grafana'yı temizle; önbelleği doldurmayı pahalı yap (Postgres'e 200 ms — aşağıdaki "Neden gecikme"), TTL'i 5 sn'ye çek
+   (pod'lar yeniden başlar), eski pod'un sayacı toplamdan düşene kadar bekle, DB `get` sayacını oku:
+```bash
+make fresh
+make chaos C=pg-delay-200ms
+make set E="CACHE_TTL=5s"
+sleep 40
+g0=$(curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum(db_queries_total{namespace="lvl03",op="get"})' | jq -r '.data.result[0].value[1] // "0"'); echo "get sayacı: $g0"
+```
+2. Koruma açıkken (varsayılan) 60 kullanıcıyla 60 sn sıcak anahtar yükü; sonra yük boyunca DB'ye inen `get` sayısı ve
+   singleflight'ta bekletilen çağrı sayısı:
+```bash
+SEED=20 HOT_SHARE=0.99 make load S=hot-key K6_ARGS="--vus 60 --duration 60s"
+sleep 20
+g1=$(curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum(db_queries_total{namespace="lvl03",op="get"})' | jq -r '.data.result[0].value[1] // "0"')
+echo "korumalı: yük boyunca DB get = $(awk -v a="$g0" -v b="$g1" 'BEGIN{print b - a}')"
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum(increase(cache_stampede_wait_total{namespace="lvl03"}[5m]))' | jq -r '.data.result[0].value[1]'
+```
+3. Korumayı kapat (pod'lar yeniden başlar), aynı yükü tekrarla:
+```bash
+make set E="TRAP_NO_SINGLEFLIGHT=true"
+sleep 40
+g0=$(curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum(db_queries_total{namespace="lvl03",op="get"})' | jq -r '.data.result[0].value[1] // "0"'); echo "get sayacı: $g0"
+SEED=20 HOT_SHARE=0.99 make load S=hot-key K6_ARGS="--vus 60 --duration 60s"
+sleep 20
+g1=$(curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum(db_queries_total{namespace="lvl03",op="get"})' | jq -r '.data.result[0].value[1] // "0"')
+echo "korumasız: yük boyunca DB get = $(awk -v a="$g0" -v b="$g1" 'BEGIN{print b - a}')"
+```
+4. Geri al: gecikmeyi kaldır, TTL'i ve tuzağı manifestteki hâline döndür:
+```bash
+make unchaos C=pg-delay-200ms
+make reset
+```
+
+**Terminalde ne görmelisin:** `make chaos` `networkchaos.chaos-mesh.org/pg-delay-200ms created` der. Korumalı turda yük
+boyunca DB `get` sayısı küçük ve bekletilen çağrı sayısı sıfırdan büyük: TTL dolduğu anda gelen istekler tek bir DB
+sorgusunu bekledi. Korumasız turda `get` sayısı belirgin biçimde büyük — script en az iki katını ve 100 fazlasını
+arar: 200 ms'lik delik boyunca gelen her istek DB'ye indi. Hit oranı iki turda da yüksek görünür; farkı yalnızca DB'ye
+inen sorgu sayısı gösterir.
 
 **Neden gecikme enjekte ediyoruz:** İzdihamın büyüklüğü `istek hızı × önbelleği DOLDURMA süresi`.
 Bu kümede Postgres 1 ms'de cevap veriyor; delik o kadar dar ki korumasız hâlde bile içeri 1-2 istek
@@ -247,7 +447,37 @@ tamamen atlar.
 [Topic · Konu: Negatif önbellek, enumeration]
 
 **Reproduce (adım adım):**
-1. `make repro P=P03-06` — `scan` senaryosuyla rastgele kodlara yük verir, açık/kapalı kıyaslar
+
+Otomatik: `make repro P=P03-06` (`scan` senaryosuyla 60 kodluk sınırlı bir "yok" havuzuna yük verir, negatif önbellek açık/kapalı kıyaslar; negatif isabet hiç olmazsa ölçmeden çıkar).
+
+Elle — sırayla yapıştır:
+
+1. Grafana'yı temizle; negatif önbellek açıkken (varsayılan) 60 var olmayan koddan oluşan bir havuza 30 kullanıcıyla
+   60 sn tarama yap (havuz sınırlı olmalı: aynı "yok" cevabı tekrarlanmazsa önbelleklenecek bir şey olmaz), sonra DB'ye
+   saniyede inen `get` sayısını ve negatif isabetleri sor:
+```bash
+make fresh
+KEYS=60 CODE_LEN=7 make load S=scan K6_ARGS="--vus 30 --duration 60s"
+sleep 18
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum(rate(db_queries_total{namespace="lvl03",op="get"}[1m]))' | jq -r '.data.result[0].value[1]'
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum(increase(cache_ops_total{namespace="lvl03",result="negative_hit"}[5m]))' | jq -r '.data.result[0].value[1]'
+```
+2. Negatif önbelleği kapat (pod'lar yeniden başlar), eski pod'lar gidince aynı taramayı yap:
+```bash
+make set E="TRAP_NO_NEGATIVE_CACHE=true"
+sleep 10
+KEYS=60 CODE_LEN=7 make load S=scan K6_ARGS="--vus 30 --duration 60s"
+sleep 18
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum(rate(db_queries_total{namespace="lvl03",op="get"}[1m]))' | jq -r '.data.result[0].value[1]'
+```
+3. Geri al:
+```bash
+make reset
+```
+
+**Terminalde ne görmelisin:** iki taramanın k6 özet satırında da istekler `404` (hepsi var olmayan kod). Açık turda
+negatif isabet sayısı büyük ve DB `get`/sn düşük: aynı "yok" cevabı 10 sn boyunca önbellekten dönüyor. Kapalı turda
+DB `get`/sn belirgin biçimde yüksek — script en az 1,5 katını arar: her "yok" cevabı yeniden DB'ye soruluyor.
 
 **Grafana'da gör:** [`04 · Cache`](http://grafana.localtest.me/d/ladder-cache?var-level=lvl03&from=now-15m&to=now&refresh=10s) ve [`05 · Postgres`](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl03&from=now-15m&to=now&refresh=10s) — script iki fazı (önce açık, sonra kapalı) 60'ar sn koşar; ikisi de bitince aç (giriş: admin / ladder)
 - "Önbellek işlemleri (katman ve sonuca göre)" → açık fazda taramanın çoğu `l1 negative_hit` olarak önbellekten döner; kapalı fazda `l1 negative_hit` **0**'a iner, yerini `l1 miss` alır.
@@ -268,10 +498,55 @@ ve TTL süresi sonra hepsi **aynı saniyede** dolar. Sistem kendi kendine bir y�
 [Topic · Konu: Korelasyon kırma, thundering herd]
 
 **Reproduce (adım adım):**
-1. `make repro P=P03-07` — TTL'i 30 sn'ye çeker, 300 kodluk kümeyi tek seferde ısıtır, jitter
-   açık/kapalı 150'şer saniye yük verip **tepe/ortalama** oranını kıyaslar (~8 dk sürer)
-2. Saniyelik seriler `/tmp/p0307-jitter.txt` ve `/tmp/p0307-nojitter.txt` dosyalarında kalır —
-   yan yana koyunca biri düz, diğeri testere dişi
+
+Otomatik: `make repro P=P03-07` (TTL'i 30 sn'ye çeker, 300 kodluk kümeyi tek seferde ısıtır, jitter açık/kapalı 150'şer saniye yük verip **tepe/ortalama** oranını kıyaslar; ~8 dk). Saniyelik seriler `/tmp/p0307-jitter.txt` ve `/tmp/p0307-nojitter.txt` dosyalarında kalır — yan yana koyunca biri düz, diğeri testere dişi.
+
+Elle — sırayla yapıştır (Prometheus bu darbeyi göremez; pod'un kendi `/metrics` ucu saniyede bir okunur — Ölçüm notu):
+
+1. Grafana'yı temizle, TTL'i 30 sn'ye çek (jitter açık, varsayılan ±%20; pod'lar yeniden başlar), eski pod'lar gidince
+   hazır bir pod seç:
+```bash
+make fresh
+make set E="CACHE_TTL=30s"
+sleep 10
+pod=$(kubectl -n lvl03 get pod -l app.kubernetes.io/name=linkly -o json | jq -r '[.items[] | select(.metadata.deletionTimestamp == null) | select(any(.status.containerStatuses[]?; .ready)) | .metadata.name][0]'); echo "pod: $pod"
+```
+2. İKİNCİ bir terminalde `03-local-cache` klasöründe 300 kodluk kümeyle 150 sn okuma yükünü başlat:
+```bash
+SEED=300 make load S=redirect K6_ARGS="--vus 20 --duration 150s"
+```
+3. Hemen ardından İLK terminalde 150 sn boyunca saniyede bir, o pod'da TTL'i dolan anahtar sayısını dosyaya yaz; sonra
+   tepe/ortalama oranını hesapla:
+```bash
+prev=""; for i in $(seq 1 150); do cur=$(kubectl -n lvl03 get --raw "/api/v1/namespaces/lvl03/pods/${pod}:8080/proxy/metrics" | awk -v pat='^cache_ops_total\{.*result="expired"' '$0 ~ pat {s += $2} END {print s + 0}'); [ -n "$prev" ] && awk -v a="$prev" -v b="$cur" 'BEGIN{print b - a}'; prev=$cur; sleep 1; done > /tmp/p0307-jitter.txt
+awk '{n++; s+=$1; if ($1>p) p=$1} END{if (s==0) {print "veri yok"; exit} printf "jitterli: tepe=%d ortalama=%.1f tepe/ortalama=%.1f\n", p, s/n, p/(s/n)}' /tmp/p0307-jitter.txt
+```
+4. Jitter'ı kapat (pod'lar yeniden başlar), yeni bir pod seç:
+```bash
+make set E="TRAP_NO_TTL_JITTER=true"
+sleep 10
+pod=$(kubectl -n lvl03 get pod -l app.kubernetes.io/name=linkly -o json | jq -r '[.items[] | select(.metadata.deletionTimestamp == null) | select(any(.status.containerStatuses[]?; .ready)) | .metadata.name][0]'); echo "pod: $pod"
+```
+5. İKİNCİ terminalde aynı yükü yeniden başlat:
+```bash
+SEED=300 make load S=redirect K6_ARGS="--vus 20 --duration 150s"
+```
+6. Hemen ardından İLK terminalde aynı örneklemeyi yap, sonra iki seriyi yan yana koy:
+```bash
+prev=""; for i in $(seq 1 150); do cur=$(kubectl -n lvl03 get --raw "/api/v1/namespaces/lvl03/pods/${pod}:8080/proxy/metrics" | awk -v pat='^cache_ops_total\{.*result="expired"' '$0 ~ pat {s += $2} END {print s + 0}'); [ -n "$prev" ] && awk -v a="$prev" -v b="$cur" 'BEGIN{print b - a}'; prev=$cur; sleep 1; done > /tmp/p0307-nojitter.txt
+awk '{n++; s+=$1; if ($1>p) p=$1} END{if (s==0) {print "veri yok"; exit} printf "jittersiz: tepe=%d ortalama=%.1f tepe/ortalama=%.1f\n", p, s/n, p/(s/n)}' /tmp/p0307-nojitter.txt
+paste /tmp/p0307-jitter.txt /tmp/p0307-nojitter.txt | head -90
+```
+7. Geri al:
+```bash
+make reset
+```
+
+**Terminalde ne görmelisin:** iki `tepe/ortalama` satırı; jitter'sız olanın oranı belirgin biçimde büyük — script en
+az 1,8 katını ve 3'ten büyüğünü arar. `paste` çıktısında her satır bir saniyede o pod'da dolan anahtar sayısı: soldaki
+sütun (jitter'lı) küçük, dağınık sayılar; sağdaki (jitter'sız) çoğunlukla `0` ve ~30 satırda bir büyük bir sayı —
+testere dişi. İki sütunun toplamı yakın: aynı sayıda anahtar doluyor, fark yalnızca bunun zamana yayılıp
+yayılmadığında.
 
 **Ölçüm notu — bu darbeyi Prometheus'tan okuyamazsın:** Darbe 1-2 saniye sürüyor, Prometheus ise
 uygulamayı 10 saniyede bir kazıyor (ServiceMonitor `interval: 10s`; küme metrikleri 30 sn) ve

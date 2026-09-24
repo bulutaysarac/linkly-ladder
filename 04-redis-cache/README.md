@@ -61,7 +61,7 @@ sayısıyla** sınırlı — `internal/cache/redis.go` bunu gerekçesiyle yazıy
 Bu seviyenin platformdan istediği: **temel yığın (kind, ingress, Prometheus, Grafana) + Chaos Mesh**. `make up` ilk adımda (profil) bunları açar ve kullanılmayanları kapatır; bir bileşen kurulu değilse hangi komutla kurulacağını söyleyip durur.
 
 ```bash
-make up            # profil → build → push → deploy → rollout wait → smoke
+make up            # profil → Grafana'yı temizle → build → push → deploy → rollout wait → smoke
 code=$(curl -s -XPOST http://lvl04.localtest.me/api/links -H 'Content-Type: application/json' -d '{"url":"https://example.com"}' | jq -r .code); echo "$code"
 curl -s -o /dev/null -w '%{http_code} → %{redirect_url}\n' http://lvl04.localtest.me/$code   # 302 → https://example.com
 make grafana       # Ladder klasörü, level=lvl04 — giriş: admin / ladder
@@ -74,6 +74,30 @@ make down          # seviyeyi kaldır · kümeyi durdurmak için: make -C ../pla
 Redis'e bakmak için:
 ```bash
 kubectl -n lvl04 exec -it $(kubectl -n lvl04 get pod -l app.kubernetes.io/name=redis -o name) -c redis -- redis-cli
+```
+
+**Rehber — bu seviyeyi baştan sona, sırayla.** Komut bloklarında açıklama yok; her bloğu olduğu gibi yapıştırabilirsin.
+
+1. Önceki seviye açıksa kapat (aynı anda tek seviye çalışır), bu seviyeyi kur. `make up` Grafana'yı da temizler:
+```bash
+make -C ../03-local-cache down
+make up
+```
+2. 03'ün sorunlarını bu seviyede koş. Uzun sürer: 03'ün yedi scripti art arda koşar. Koşarken başka komut çalıştırma:
+   aynı pod'lara dokunurlar. `CONFIRM=1`, replika sayısını değiştiren P03-04'ün de koşmasını sağlar (onaysız `SKIPPED` yazar).
+   Çıktıdaki `BEKLENEN` sütunu `NOT-REPRODUCED` diyorsa (P03-01 … P03-04) 04 o sorunu çözmüş olmalı:
+```bash
+CONFIRM=1 make verify-prev
+```
+3. §6'daki sorunları sırayla yaşa (P04-01 → P04-07). Her sorunda aynı düzen:
+   **Elle** bloklarını sırayla yapıştır (ilk komut `make fresh`: Grafana bu deneye boş başlar) →
+   **Terminalde ne görmelisin** ile karşılaştır → **Grafana'da gör** linklerini aç, her madde hangi panelde neyi
+   göreceğini söyler. İstersen aynı deneyi `make repro P=…` ile otomatik koş (yıkıcı olanlar `CONFIRM=1` ister):
+   ölçer ve hükmünü basar.
+4. Bitince açık kalan ayarları geri al ve seviyeyi kapat:
+```bash
+make reset
+make down
 ```
 
 ## 5. API
@@ -104,11 +128,45 @@ Yalnızca `TRAP_DEBUG_KEYS` açıkken ek bir uç belirir: `GET /debug/keys` (P04
 [Topic · Konu: Fail-open, bağımlılık arızası, degrade]
 
 **Reproduce (adım adım):**
-1. `CONFIRM=1 make repro P=P04-01` — önbellekli tabanı ölçer, Redis'i siler, aynı yükü tekrar verir
+
+Otomatik — ölçer ve hüküm basar: `CONFIRM=1 make repro P=P04-01` (önbellek çalışırken 25 kullanıcıyla 40 sn yük verip DB
+okuma hızını ve isabet oranını ölçer, Redis pod'unu siler, aynı yükü tekrar verir; DB okumasının tepesini, önbellek
+hatalarını, 5xx'i ve p99'u basar).
+
+Elle — `04-redis-cache` klasöründe, sırayla yapıştır:
+
+1. Grafana'yı temizle, önbellek çalışırken 40 sn yük ver; sonra DB'nin saniyede kaç okuma (`get`) sorgusu aldığına ve
+   önbellek isabet oranına bak:
+```bash
+make fresh
+make load S=redirect K6_ARGS="--vus 25 --duration 40s"
+sleep 12
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum(rate(db_queries_total{namespace="lvl04",op="get"}[1m]))' | jq -r '.data.result[0].value[1]'
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum(rate(cache_ops_total{namespace="lvl04",layer="l2",result="hit"}[1m])) / sum(rate(cache_ops_total{namespace="lvl04",layer="l2"}[1m]))' | jq -r '.data.result[0].value[1]'
+```
+2. **Yıkıcı adım:** Redis pod'unu sil ve hemen aynı yükü ver; sonra DB okumasının tepesini ve önbellek hatalarını oku:
+```bash
+kubectl -n lvl04 delete pod -l app.kubernetes.io/name=redis --wait=false
+sleep 3
+make load S=redirect K6_ARGS="--vus 25 --duration 40s"
+sleep 12
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=max_over_time(sum(rate(db_queries_total{namespace="lvl04",op="get"}[30s]))[3m:15s])' | jq -r '.data.result[0].value[1]'
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum(increase(cache_errors_total{namespace="lvl04"}[5m]))' | jq -r '.data.result[0].value[1]'
+```
+3. Redis'in geri geldiğinden emin ol (sonraki deneyler onu arıyor):
+```bash
+kubectl -n lvl04 rollout status statefulset/redis --timeout=180s
+```
+
+**Terminalde ne görmelisin:** 1. adımda k6 çıktısının sonundaki özet satırı `k6 lvl04: reqs=… 5xx=0 …`; DB `get` hızı küçük bir sayı
+(okumaların neredeyse hepsi Redis'ten dönüyor, DB'ye yalnızca ıskalar iniyor) ve isabet oranı 1'e yakın (`0.9…`).
+2. adımda k6 özet satırında yine `5xx=0` — hizmet sürdü — ama DB `get` tepesi 1. adımdakinin kat kat üstünde (scriptin
+hükmü için en az iki katı) ve önbellek hatası sıfırdan büyük: Redis'e ulaşamayan her okuma DB'ye düştü (fail-open).
+Redis birkaç saniyede geri gelir ama boş doğar; DB yükü önbellek yeniden ısınana kadar yüksek kalır.
 
 **Grafana'da gör:** [`05 · Postgres`](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl04&from=now-15m&to=now&refresh=10s), [`04 · Cache`](http://grafana.localtest.me/d/ladder-cache?var-level=lvl04&from=now-15m&to=now&refresh=10s) ve [`15 · k6`](http://grafana.localtest.me/d/ladder-k6?var-level=lvl04&from=now-15m&to=now&refresh=10s) — script iki yük fazı koşar (önbellekli taban, sonra Redis silinmiş hâlde aynı yük); bitince aç (giriş: admin / ladder)
 - "Veritabanı sorguları (türe göre)" → `get` serisi ilk fazda yere yakın; Redis silindiği anda kat kat yükselir. Redis kısa sürede geri gelir ama **boş** doğar (kalıcılık kapalı), bu yüzden `get` önbellek yeniden ısınana kadar yüksek kalır. `increment_clicks` iki fazda aynı: o yük zaten hiç önbelleklenmiyordu.
-- "Önbellek yazma/okuma hatası" (Cache) → Redis yokken `get` ve `set` serileri belirir: uygulama Redis'e ulaşamıyor ve DB'ye düşüyor (fail-open). `load` 0'da kalır — DB sağlam. (`06 · Redis` → "redis_up" bu kesintiyi 0 olarak göstermez: exporter Redis'le aynı pod'da yan konteyner, pod'la birlikte ölür; çizgide yalnızca kısa bir boşluk görürsün.)
+- "Önbellek yazma/okuma hatası" (Cache) → Redis yokken `get` ve `set` serileri belirir: uygulama Redis'e ulaşamıyor ve DB'ye düşüyor (fail-open). `load` 0'da kalır — DB sağlam. (`06 · Redis` → "Redis ayakta mı" bu kesintiyi 0 olarak göstermez: exporter Redis'le aynı pod'da yan konteyner, pod'la birlikte ölür; çizgide yalnızca kısa bir boşluk görürsün.)
 - "Önbellek işlemleri (katman ve sonuca göre)" (Cache) → Redis ölünce `l2 hit` 0'a düşer, yerini `l2 miss` alır; Redis dönünce `l2 hit` yavaş yavaş geri gelir.
 - "Dönen durum kodları" (k6) → `302` çizgisi kesintisiz sürer, `5xx` çıkmaz: hizmet devam etti, bedeli kullanıcı değil DB ödedi. Kodlar için bkz. [Grafana'yı okumak](../README.md#grafanayı-okumak).
 
@@ -130,12 +188,32 @@ aramasının kendi süresi.
 [Topic · Konu: Takas, gecikme bütçesi]
 
 **Reproduce (adım adım):**
-1. `make repro P=P04-02` — ısıtır, sabit yük altında önbelleğe sormanın süresini ölçer
-   (`cache_lookup_duration_seconds{layer="l2"}`, 1 µs'den başlayan kovalar) ve aramaların ne kadarının
-   ağ katmanına gittiğini hesaplar. Hüküm: aramaların ≥%90'ı ağda **ve** p50 ≥ 50 µs (bellek içi bir
-   aramanın on katından fazla)
-2. **Karşılaştırma, aynı aletle:** 03 aynı histogramı `layer="l1"` için yayınlıyor. 03'te
-   `make load S=redirect` koşmuşsan (Prometheus ~6 sa saklar) script 03'ün L1 p50'sini de basar
+
+Otomatik — ölçer ve hüküm basar: `make repro P=P04-02` (ısıtır, sabit yük altında önbelleğe sormanın süresini
+`cache_lookup_duration_seconds{layer="l2"}` histogramından — 1 µs'den başlayan kovalar — ölçer ve aramaların ne
+kadarının ağ katmanına gittiğini hesaplar. Hüküm: aramaların ≥%90'ı ağda **ve** p50 ≥ 50 µs, yani bellek içi bir
+aramanın on katından fazla. 03 aynı histogramı `layer="l1"` için yayınlıyor: Prometheus'ta 03'ün bir koşusu duruyorsa
+script onun p50'sini de yanına basar — `make fresh` ve `make up` o seriyi de siler).
+
+Elle — sırayla yapıştır:
+
+1. Grafana'yı temizle, önbelleği ısıt:
+```bash
+make fresh
+make load S=redirect K6_ARGS="--vus 20 --duration 30s"
+```
+2. Sabit yük ver; sonra önbelleğe sormanın p50 ve p99'unu (mikrosaniye) ve aramaların ağ katmanına (`l2`) giden payını oku:
+```bash
+make load S=redirect K6_ARGS="--vus 20 --duration 45s"
+sleep 12
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=1e6 * histogram_quantile(0.50, sum(rate(cache_lookup_duration_seconds_bucket{namespace="lvl04",layer="l2"}[1m])) by (le))' | jq -r '.data.result[0].value[1]'
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=1e6 * histogram_quantile(0.99, sum(rate(cache_lookup_duration_seconds_bucket{namespace="lvl04",layer="l2"}[1m])) by (le))' | jq -r '.data.result[0].value[1]'
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum(rate(cache_lookup_duration_seconds_count{namespace="lvl04",layer="l2"}[1m])) / sum(rate(cache_lookup_duration_seconds_count{namespace="lvl04"}[1m]))' | jq -r '.data.result[0].value[1]'
+```
+
+**Terminalde ne görmelisin:** p50 yüzlerce mikrosaniye (scriptin eşiği 50 µs; 03'teki pod içi map araması ~1 µs),
+p99 ondan büyük; pay `1`: 04'te tek önbellek katmanı var ve her arama Redis'e, yani ağa gidiyor. k6 özet satırındaki
+`p95`/`p99` milisaniye cinsinden: bu fark orada görünmez (aşağıdaki ölçüm dersi).
 
 **Ölçüm dersi — uçtan uca p50 hükmü 03'ü de "reproduce" eder:** "Uçtan uca redirect p50'si 0.5 ms'yi
 geçiyor mu?" yanlış sorudur. HTTP histogramının en küçük kovası 1 ms — milisaniyenin altındaki bir fark
@@ -145,7 +223,7 @@ istediğin şeyin çözünürlüğü, farkın kendisinden ince olmalı* — ve �
 onu içinde taşıyan daha büyük bir sayı değil.
 
 **Grafana'da gör:** [`06 · Redis`](http://grafana.localtest.me/d/ladder-redis?var-level=lvl04&from=now-15m&to=now&refresh=10s), [`04 · Cache`](http://grafana.localtest.me/d/ladder-cache?var-level=lvl04&from=now-15m&to=now&refresh=10s) ve [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl04&from=now-15m&to=now&refresh=10s) — script bitince aç; asıl sayı hiçbir panelde yok, Explore'da (giriş: admin / ladder)
-- Explore'da: `histogram_quantile(0.5, sum by (le, namespace, layer) (rate(cache_lookup_duration_seconds_bucket{namespace=~"lvl03|lvl04"}[1m])))` → `lvl04 l2` çizgisi yüzlerce µs'de; zaman aralığı 03 koşunu da kapsıyorsa `lvl03 l1` çizgisi ~1 µs'de — aynı isabet, iki-üç büyüklük mertebesi farkı. Hiçbir panel bu metriği çizmiyor.
+- Explore'da: `histogram_quantile(0.5, sum by (le, namespace, layer) (rate(cache_lookup_duration_seconds_bucket{namespace=~"lvl03|lvl04"}[1m])))` → `lvl04 l2` çizgisi yüzlerce µs'de; Prometheus'ta 03'ün bir koşusu duruyorsa (`make fresh` ve `make up` onu da siler) `lvl03 l1` çizgisi ~1 µs'de — aynı isabet, iki-üç büyüklük mertebesi farkı. Hiçbir panel bu metriği çizmiyor.
 - "Komut / sn" (Redis) → redirect hızıyla birlikte artar: her isabet bir Redis `GET`, yani bir ağ çağrısı.
 - "İsabet oranı (toplam)" (Cache) → yüksek: fark ıskadan gelmiyor, isabetin **nerede** olduğundan geliyor.
 - "Gecikme (p50 / p95 / p99)" (App RED) → p50 çizgisi `lvl03` ile `lvl04` arasında ya hiç ya da ancak kabaca ayrışır: fark 1 ms'nin altında, histogramın en küçük kovası 1 ms ve p50'nin büyük kısmı iki seviyede de ortak olan tıklama UPDATE'i (P02-08). Bu panelden hüküm çıkmaz (yukarıdaki ölçüm dersi).
@@ -164,9 +242,34 @@ erişim tek bir çekirdeğin sınırına dayanır. Ölçeklenemeyen şey anahtar
 [Topic · Konu: Hot key, sharding'in sınırı]
 
 **Reproduce (adım adım):**
-1. `make repro P=P04-03` — Redis'in **tavanını doğrudan ölçer** (`redis-benchmark`: 100k anahtara
-   dağıtılmış GET vs **tek** anahtara GET), sonra `hot-key` yükünü verip uygulamanın o tavanın
-   yüzde kaçını kullandığını gösterir
+
+Otomatik — ölçer ve hüküm basar: `make repro P=P04-03` (Redis'in **tavanını doğrudan ölçer** — `redis-benchmark`: 100k
+anahtara dağıtılmış GET ve **tek** anahtara GET, pod içinde, ağ dışı —, sonra trafiğin %95'i tek linke giden `hot-key`
+yükünü verip uygulamanın o tavanın yüzde kaçını kullandığını basar. Hüküm: iki tavan birbirinin ±%30'u içinde).
+
+Elle — sırayla yapıştır:
+
+1. Grafana'yı temizle, Redis pod'unu bul ve tavanı iki kez ölç: 100 000 farklı anahtara dağıtılmış GET, sonra hep aynı
+   anahtara GET:
+```bash
+make fresh
+rpod=$(kubectl -n lvl04 get pod -l app.kubernetes.io/name=redis -o json | jq -r '[.items[] | select(.metadata.deletionTimestamp == null) | select(any(.status.containerStatuses[]?; .ready)) | .metadata.name][0]'); echo "redis pod: $rpod"
+kubectl -n lvl04 exec "$rpod" -c redis -- redis-benchmark -q -t get -n 100000 -c 50 -r 100000
+kubectl -n lvl04 exec "$rpod" -c redis -- redis-benchmark -q -t get -n 100000 -c 50 -r 0
+```
+2. Uygulamanın tarafı: trafiğin %95'ini tek linke gönder; sonra uygulamanın Redis'e yaptırdığı en yüksek komut hızını
+   (komut/sn) ve Redis'in en yüksek CPU'sunu (bir çekirdeğin %'si) oku:
+```bash
+HOT_SHARE=0.95 make load S=hot-key K6_ARGS="--vus 60 --duration 40s"
+sleep 12
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=max_over_time(sum(rate(redis_commands_processed_total{namespace="lvl04"}[30s]))[3m:15s])' | jq -r '.data.result[0].value[1]'
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=100 * max_over_time(sum(rate(container_cpu_usage_seconds_total{namespace="lvl04",pod=~"redis.*",image!="",image!~".*pause.*"}[30s]))[3m:15s])' | jq -r '.data.result[0].value[1]'
+```
+
+**Terminalde ne görmelisin:** 1. adımda iki `GET: … requests per second` satırı ve iki sayı birbirine yakın: sınır
+anahtarda değil, instance'ta — anahtarları dağıtmak (sharding) sıcak anahtarı kurtarmaz. 2. adımda uygulamanın komut
+hızı tek anahtar tavanının çok altında ve Redis CPU'su 100'ün (bir çekirdek) altında: bu kümede tavana çarpmıyoruz.
+Sorun "şu an yavaşız" değil, "büyüyünce çare yok".
 
 **Ölçüm dersi — "CPU arttı mı?" yanlış soru:** Dağıtık yük ile sıcak yükün Redis CPU'sunu kıyaslamak
 işe yaramaz: ikisi de **aynı sayıda komut** üretir; CPU da aynı çıkar ve hüküm "sorun yok" olur.
@@ -176,7 +279,7 @@ tavana çarpmıyoruz — ve bu dürüst bir sonuç: sorun "şu an yavaşız" de�
 
 **Grafana'da gör:** [`06 · Redis`](http://grafana.localtest.me/d/ladder-redis?var-level=lvl04&from=now-15m&to=now&refresh=10s) — script bitince aç; tavanın kendisi Grafana'da değil terminalde ölçülür (giriş: admin / ladder)
 - "Komutlar (türe göre)" → hot-key yükü boyunca `get` serisinde bir plato: uygulamanın Redis'e yaptırdığı GET hızı. Bunu script'in terminalde bastığı `TEK anahtar GET tavanı` ile kıyasla — script bu oranı "tavanın %…'i kullanılıyor" diye basar. Platonun başında görebileceğin kısa tepe, script'in pod içinde koştuğu `redis-benchmark`'tır, uygulama değil.
-- "Redis CPU" → sıcak yükte bile tek çekirdeğin (1.0) altında kalır: bu kümede tavana çarpmıyoruz. Sorun "şu an yavaşız" değil, "büyüyünce çare yok".
+- "Redis CPU" → sıcak yükte bile tek çekirdeğin %100'ünün altında kalır: bu kümede tavana çarpmıyoruz. Sorun "şu an yavaşız" değil, "büyüyünce çare yok".
 - "Komut / sn" → panelin içindeki küçük eğri yük boyunca aynı platoyu çizer; büyük rakam yalnızca son değeri gösterir (script bitince düşük okursun).
 
 **Nerede çözülüyor:** 14 (L1). **Redis cluster bu sorunu çözmez** — sıcak anahtar tek shard'a düşer.
@@ -192,9 +295,57 @@ anahtar hiç ağa çıkmaz) ya da CDN/edge (en popüler linkler uygulamaya hiç 
 **tek** önbellek var: tüm pod'lar aynı anahtarların aynı anda dolduğunu aynı anda görür. Dalga
 bölünmez, **birleşir**. [Topic · Konu: Korelasyon, paylaşılan kaynak]
 
-**Reproduce (adım adım):** `make repro P=P04-04` — TTL'i 30 sn'ye çeker, 300 kodluk kümeyi
-ısıtır, jitter açık/kapalı 150'şer saniye yük verip **tepe/ortalama** oranını kıyaslar (~8 dk).
-Saniyelik seriler `/tmp/p0404-jitter.txt` ve `/tmp/p0404-nojitter.txt`.
+**Reproduce (adım adım):**
+
+Otomatik — ölçer ve hüküm basar: `make repro P=P04-04` (TTL'i 30 sn'ye çeker, 300 kodluk kümeyi ısıtır, jitter
+açık/kapalı 150'şer saniye yük verip **tepe/ortalama** oranını kıyaslar, ~8 dk. Saniyelik seriler
+`/tmp/p0404-jitter.txt` ve `/tmp/p0404-nojitter.txt`. Hüküm: jitter'sız oran jitter'lının en az 1,8 katı ve 3'ten büyük).
+
+Elle — iki terminal gerekir; ikisi de `04-redis-cache` klasöründe. Sırayla yapıştır:
+
+1. Grafana'yı temizle, TTL'i 30 sn'ye çek (jitter açık, varsayılan ±%20; pod'lar yeniden başlar) ve örneklenecek hazır
+   pod'u seç:
+```bash
+make fresh
+make set E="CACHE_TTL=30s"
+pod=$(kubectl -n lvl04 get pod -l app.kubernetes.io/name=linkly -o json | jq -r '[.items[] | select(.metadata.deletionTimestamp == null) | select(any(.status.containerStatuses[]?; .ready)) | .metadata.name][0]'); echo "örneklenen pod: $pod"
+```
+2. İKİNCİ bir terminalde 300 linklik kümeyle 150 sn yük başlat:
+```bash
+SEED=300 make load S=redirect K6_ARGS="--vus 20 --duration 150s"
+```
+   Hemen ardından İLK terminalde pod'un kendi `/metrics` ucunu 150 kez, saniyede bir oku (Prometheus bu darbeyi
+   düzler); ıska sayacının saniyelik farkını dosyaya yaz ve ilk 35 sn'lik ısınmayı atlayıp tepe/ortalama oranını hesapla:
+```bash
+for i in $(seq 1 150); do kubectl -n lvl04 get --raw "/api/v1/namespaces/lvl04/pods/${pod}:8080/proxy/metrics" | awk '/^cache_ops_total\{.*result="miss"/ {s += $2} END {print s + 0}'; sleep 1; done > /tmp/p0404-jitter.raw
+awk 'NR > 1 {d = $1 - p; print (d < 0 ? 0 : d)} {p = $1}' /tmp/p0404-jitter.raw > /tmp/p0404-jitter.txt
+awk 'NR > 35 {n++; s += $1; if ($1 > m) m = $1} END {a = (n ? s / n : 0); printf "jitter açık: tepe=%d ort=%.1f tepe/ortalama=%.1f\n", m, a, (a ? m / a : 0)}' /tmp/p0404-jitter.txt
+```
+3. Jitter'ı kapat (tuzak; TTL 30 sn kalır, pod'lar yeniden başlar) ve yeni pod'u seç:
+```bash
+make set E="TRAP_NO_TTL_JITTER=true"
+pod=$(kubectl -n lvl04 get pod -l app.kubernetes.io/name=linkly -o json | jq -r '[.items[] | select(.metadata.deletionTimestamp == null) | select(any(.status.containerStatuses[]?; .ready)) | .metadata.name][0]'); echo "örneklenen pod: $pod"
+```
+   İKİNCİ terminalde aynı yükü tekrar başlat:
+```bash
+SEED=300 make load S=redirect K6_ARGS="--vus 20 --duration 150s"
+```
+   Hemen ardından İLK terminalde aynı örneklemeyi başka dosyalara yaz:
+```bash
+for i in $(seq 1 150); do kubectl -n lvl04 get --raw "/api/v1/namespaces/lvl04/pods/${pod}:8080/proxy/metrics" | awk '/^cache_ops_total\{.*result="miss"/ {s += $2} END {print s + 0}'; sleep 1; done > /tmp/p0404-nojitter.raw
+awk 'NR > 1 {d = $1 - p; print (d < 0 ? 0 : d)} {p = $1}' /tmp/p0404-nojitter.raw > /tmp/p0404-nojitter.txt
+awk 'NR > 35 {n++; s += $1; if ($1 > m) m = $1} END {a = (n ? s / n : 0); printf "jitter kapalı: tepe=%d ort=%.1f tepe/ortalama=%.1f\n", m, a, (a ? m / a : 0)}' /tmp/p0404-nojitter.txt
+```
+4. İki seriyi yan yana gör, sonra TTL'i ve tuzağı geri al:
+```bash
+paste /tmp/p0404-jitter.txt /tmp/p0404-nojitter.txt | head -90
+make reset
+```
+
+**Terminalde ne görmelisin:** `jitter kapalı` satırındaki tepe/ortalama oranı `jitter açık` satırındakinden belirgin
+biçimde büyük (scriptin hükmü için en az 1,8 katı ve 3'ten büyük). `paste` çıktısında her satır bir saniye ve tek
+pod'un ıska sayısı: sol sütun (jitter açık) küçük, dağınık sayılar; sağ sütun çoğunlukla 0 ve ~30 satırda bir büyük
+bir sayı — testere dişi: aynı anda dolan anahtarlar aynı saniyede yeniden DB'den okunuyor.
 
 **Ölçüm notu (P03-07 ile aynı):** Darbe 1-2 saniye sürüyor, Prometheus uygulamayı 10 sn'de bir kazıyor ve
 `rate()` onu düzlüyor. Script pod'un `/metrics` ucunu **saniyede bir** kendisi örnekliyor. Sayaç
@@ -223,8 +374,46 @@ Pencere normalde mikrosaniyeler; **küçük olması yok olduğu anlamına gelmez
 pencere er geç yakalanır. [Topic · Konu: Cache-aside'ın yapısal sınırı, yarış]
 
 **Reproduce (adım adım):**
-1. `make repro P=P04-05` — `TRAP_READ_FILL_DELAY_MS=1500` ile **okuma yolundaki** pencereyi
-   (DB'den al → önbelleğe yaz) ölçülebilir hâle getirir, tam ortasında siler, sonucu sayar
+
+Otomatik — ölçer ve hüküm basar: `make repro P=P04-05` (`TRAP_READ_FILL_DELAY_MS=1500` ile **okuma yolundaki**
+pencereyi — DB'den al → önbelleğe yaz — ölçülebilir hâle getirir, 6 kez tam ortasında siler ve kaçında silinmiş linkin
+hâlâ yönlendirdiğini sayar).
+
+Elle — sırayla yapıştır:
+
+1. Grafana'yı temizle, okuma yolunda DB'den alma ile önbelleğe yazma arasına 1,5 sn koy (pod'lar yeniden başlar; eski
+   pod'lar birkaç saniye daha cevap verebildiği için 10 sn bekle) ve Redis pod'unu bul:
+```bash
+make fresh
+make set E="TRAP_READ_FILL_DELAY_MS=1500"
+sleep 10
+rpod=$(kubectl -n lvl04 get pod -l app.kubernetes.io/name=redis -o json | jq -r '[.items[] | select(.metadata.deletionTimestamp == null) | select(any(.status.containerStatuses[]?; .ready)) | .metadata.name][0]'); echo "redis pod: $rpod"
+```
+2. 6 kez: yeni bir link oluştur; onu ilk kez okuyan (önbelleği ıskalayıp DB'den alan, 1,5 sn bekleyip sonra önbelleğe
+   yazacak) isteği arka planda başlat; 0,4 sn sonra linki sil; okumanın bitmesini bekle; linki tekrar iste ve Redis'teki
+   anahtarın kalan ömrüne (TTL, saniye) bak:
+```bash
+for i in 1 2 3 4 5 6; do
+  code=$(curl -s -XPOST http://lvl04.localtest.me/api/links -H 'Content-Type: application/json' -d "{\"url\":\"https://example.com/race/${i}/${RANDOM}\"}" | jq -r .code)
+  curl -s -o /dev/null http://lvl04.localtest.me/${code} &
+  sleep 0.4
+  curl -s -o /dev/null -w "deneme ${i}: kod=${code} silme=%{http_code}" -XDELETE http://lvl04.localtest.me/api/links/${code}
+  wait
+  sleep 1
+  curl -s -o /dev/null -w " sonra=%{http_code}" http://lvl04.localtest.me/${code}
+  echo " TTL=$(kubectl -n lvl04 exec "$rpod" -c redis -- redis-cli TTL "linkly:link:${code}")"
+done
+```
+3. Tuzağı kapat:
+```bash
+make reset
+```
+
+**Terminalde ne görmelisin:** çoğu satır `deneme 1: kod=… silme=204 sonra=302 TTL=…` biçiminde: `silme=204` link DB'den
+silindi demek, `sonra=302` ise silinmiş link hâlâ yönlendiriyor; TTL pozitif bir sayı (60 sn civarı, ±%20 jitter):
+okuma bayat kaydı geçersiz kılmadan SONRA önbelleğe yazdı ve kayıt TTL dolana kadar yaşayacak. `sonra=404` olan bir
+deneme pencereyi kaçırmıştır; onun TTL'i 10 sn civarındadır: "yok" cevabı negatif olarak önbelleklendi. Arka plan işi
+satırların arasına kabuğun iş (job) bildirimlerini de basar.
 
 **Ölçüm dersi — yanlış pencereyi büyütmek:** Gecikmeyi *silme ile geçersiz kılma* arasına koymak
 yanlış pencereyi büyütür (hele `defer` ile konursa ikisi de bittikten sonra çalışır). O pencerede anahtar
@@ -253,9 +442,50 @@ artık hiçbir işe yaramamaktadır — en sinsi arıza türü: görünürde sa�
 [Topic · Konu: Eviction politikası, sessiz bozulma]
 
 **Reproduce (adım adım):**
-1. `make repro P=P04-06` — `maxmemory`'yi deney süresince **4 MB**'a çeker, 1200 link × ~6 KB URL
-   üretip okur (20 paralel), `cache_errors_total{op="set"}` ile `redis_evicted_keys_total`'ı
-   karşılaştırır, sonunda ayarı geri alır
+
+Otomatik — ölçer ve hüküm basar: `make repro P=P04-06` (`maxmemory`'yi deney süresince **4 MB**'a çeker, 1200 link ×
+~6 KB URL üretip okur (20 paralel), `cache_errors_total{op="set"}` ile `redis_evicted_keys_total`'ı karşılaştırır,
+sonunda ayarı geri alıp önbelleği boşaltır).
+
+Elle — sırayla yapıştır:
+
+1. Grafana'yı temizle, Redis pod'unu bul ve mevcut ayarlara bak; sonra sınırı deney için 4 MB'a çek (politika
+   değişmiyor: `noeviction`) ve önbelleği boşalt:
+```bash
+make fresh
+rpod=$(kubectl -n lvl04 get pod -l app.kubernetes.io/name=redis -o json | jq -r '[.items[] | select(.metadata.deletionTimestamp == null) | select(any(.status.containerStatuses[]?; .ready)) | .metadata.name][0]'); echo "redis pod: $rpod"
+kubectl -n lvl04 exec "$rpod" -c redis -- redis-cli CONFIG GET maxmemory
+kubectl -n lvl04 exec "$rpod" -c redis -- redis-cli CONFIG GET maxmemory-policy
+kubectl -n lvl04 exec "$rpod" -c redis -- redis-cli CONFIG SET maxmemory 4mb
+kubectl -n lvl04 exec "$rpod" -c redis -- redis-cli FLUSHDB
+```
+2. Önbelleği doldur: 1200 link, her biri ~6 KB'lık bir URL; her linki oluştur ve bir kez oku (okuma onu önbelleğe
+   yazar), 20 paralel:
+```bash
+export PAD=$(head -c 6000 /dev/zero | tr '\0' 'x')
+seq 1 1200 | xargs -P 20 -n 1 sh -c 'c=$(curl -s -XPOST http://lvl04.localtest.me/api/links -H "Content-Type: application/json" -d "{\"url\":\"https://example.com/fill/$1?p=$PAD\"}" | jq -r .code); curl -s -o /dev/null --max-time 5 http://lvl04.localtest.me/$c' _
+```
+3. 15 sn bekle; Redis'in doluluğunu ve anahtar sayısını, önbellek SET hatalarını, Redis'in yer açmak için attığı
+   anahtarları ve uygulama logundaki OOM satırlarını oku:
+```bash
+sleep 15
+kubectl -n lvl04 exec "$rpod" -c redis -- redis-cli INFO memory | grep -E '^(used_memory|maxmemory):'
+kubectl -n lvl04 exec "$rpod" -c redis -- redis-cli DBSIZE
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum(increase(cache_errors_total{namespace="lvl04",op="set"}[10m]))' | jq -r '.data.result[0].value[1]'
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum(increase(redis_evicted_keys_total{namespace="lvl04"}[10m]))' | jq -r '.data.result[0].value[1]'
+kubectl -n lvl04 logs -l app.kubernetes.io/name=linkly --tail=400 | grep -ci 'OOM command not allowed'
+```
+4. Geri al: sınırı deploy/'daki 64 MB'a döndür ve önbelleği boşalt:
+```bash
+kubectl -n lvl04 exec "$rpod" -c redis -- redis-cli CONFIG SET maxmemory 64mb
+kubectl -n lvl04 exec "$rpod" -c redis -- redis-cli FLUSHDB
+```
+
+**Terminalde ne görmelisin:** 1. adımda `maxmemory` → `67108864` (64 MB), politika `noeviction`, ardından iki `OK`.
+3. adımda `used_memory` `maxmemory:4194304`'e dayanmış; `DBSIZE` 1200'ün altında (yalnızca sığanlar girdi); SET hatası
+sıfırdan büyük, atılan anahtar `0`; logdaki `OOM command not allowed` sayısı sıfırdan büyük. `eviction = 0` ile
+`SET hatası > 0` yan yana: politika `noeviction` — Redis dolu, yeni hiçbir şeyi kabul etmiyor ama ayakta ve okumaları
+cevaplıyor. 4. adımda iki `OK`.
 
 **Ölçüm dersi — deneyi ölçeğe uydur:** 6000 *küçük* link 64 MB'lık Redis'i dolduramaz: ~3 MB
 yazılır ve "doldurma gözlenmedi" sonucu çıkar. Ya veriyi büyüt ya sınırı küçült — burada
@@ -284,7 +514,53 @@ aynı anda sıçrar.
 Bir milyon anahtarda bu, saniyelerce tam durma demektir. [Topic · Konu: Bloklayan komutlar]
 
 **Reproduce (adım adım):**
-1. `make repro P=P04-07` — tuzağı açar, 4000 anahtar doldurur, yük altında `/debug/keys` çağırır
+
+Otomatik — ölçer ve hüküm basar: `make repro P=P04-07` (tuzağı açar, 4000 anahtar doldurur, aynı yükü iki kez 45'er sn
+verir — biri temiz, biri ortasında üç `/debug/keys` çağrısıyla — ve iki fazın pencere içi tepe p99'unu karşılaştırır.
+Hüküm: KEYS fazının tepesi tabanın 1,5 katından büyük).
+
+Elle — iki terminal gerekir; ikisi de `04-redis-cache` klasöründe. Sırayla yapıştır:
+
+1. Grafana'yı temizle, tuzağı aç (`GET /debug/keys` ucu `KEYS *` çalıştırır; pod'lar yeniden başlar):
+```bash
+make fresh
+make set E="TRAP_DEBUG_KEYS=true"
+```
+2. Önbelleği 4000 anahtarla doldur (oluştur + bir kez oku, 20 paralel; anahtar ne kadar çoksa kilit o kadar uzun) ve
+   Redis'teki anahtar sayısına bak:
+```bash
+rpod=$(kubectl -n lvl04 get pod -l app.kubernetes.io/name=redis -o json | jq -r '[.items[] | select(.metadata.deletionTimestamp == null) | select(any(.status.containerStatuses[]?; .ready)) | .metadata.name][0]'); echo "redis pod: $rpod"
+seq 1 4000 | xargs -P 20 -n 1 sh -c 'c=$(curl -s -XPOST http://lvl04.localtest.me/api/links -H "Content-Type: application/json" -d "{\"url\":\"https://example.com/k/$1\"}" | jq -r .code); curl -s -o /dev/null http://lvl04.localtest.me/$c' _
+kubectl -n lvl04 exec "$rpod" -c redis -- redis-cli DBSIZE
+```
+3. Taban: 45 sn yük ver, 20 sn bekle (son kazıma yükü kapsasın), pencere içi tepe redirect p99'unu (ms) oku:
+```bash
+make load S=redirect K6_ARGS="--vus 20 --duration 45s"
+sleep 20
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=1000 * max_over_time(histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace="lvl04",route="/{code}"}[30s])) by (le))[70s:15s])' | jq -r '.data.result[0].value[1]'
+```
+4. İKİNCİ terminalde aynı yükü başlat:
+```bash
+make load S=redirect K6_ARGS="--vus 20 --duration 45s"
+```
+   Yük başladıktan ~15 sn sonra İLK terminalde `/debug/keys`'i üç kez çağır; yük bitip 20 sn geçince (~50 sn) aynı
+   tepe p99'u oku:
+```bash
+for i in 1 2 3; do curl -s --max-time 30 http://lvl04.localtest.me/debug/keys; echo; done
+sleep 50
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=1000 * max_over_time(histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace="lvl04",route="/{code}"}[30s])) by (le))[70s:15s])' | jq -r '.data.result[0].value[1]'
+```
+5. Tuzağı kapat:
+```bash
+make reset
+```
+
+**Terminalde ne görmelisin:** 2. adımda `DBSIZE` binlerle ölçülür. 4. adımdaki her çağrı
+`{"count":…,"took_ms":…,"warning":"KEYS Redis'i bloklar; üretimde SCAN kullan"}` döner: `count` taranan
+`linkly:link:*` anahtarı — `DBSIZE`'dan küçük olabilir, çünkü anahtarların ömrü 60 sn ve taban fazı sürerken çoğunun
+süresi doluyor —, `took_ms` Redis'in o süre boyunca başka hiçbir komut çalıştırmadığı süre (anahtar sayısıyla doğru
+orantılı: birkaç bin anahtarda milisaniyeler, bir milyonda saniyeler). Son tepe p99, 3. adımdaki tabanın üstünde
+(scriptin hükmü için 1,5 katından fazla): tek iş parçacıklı Redis, `KEYS` sürerken GET'leri sıraya aldı.
 
 **Grafana'da gör:** [`06 · Redis`](http://grafana.localtest.me/d/ladder-redis?var-level=lvl04&from=now-15m&to=now&refresh=10s) ve [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl04&from=now-15m&to=now&refresh=10s) — script iki fazı (temiz, sonra ortasında `KEYS *`) 45'er sn koşar; bitince aç (giriş: admin / ladder)
 - "Komutlar (türe göre)" → `keys` serisi yalnızca ikinci fazda belirir. Hızı çok küçük (üç çağrı), `get`'in yanında çizgi görünmez; lejantta `keys`'e tıklayıp yalnız onu göster. Bu seri üretimde hiç var olmamalı — görünmesi alarmdır.

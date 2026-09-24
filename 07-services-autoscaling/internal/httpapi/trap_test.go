@@ -46,6 +46,34 @@ func TestTrapLivenessStrictPutsHealthBehindRateLimit(t *testing.T) {
 	}
 }
 
+// Probe istemciyle aynı IP'den gelmez: kubelet düğümün IP'sinden, trafik ingress üzerinden istemcinin IP'siyle
+// (X-Forwarded-For) gelir. TRAP açıkken kova pod başına tek olduğu için istemcinin yükü probe'un payını tüketir.
+func TestTrapLivenessStrictProbeFromOtherIPShares(t *testing.T) {
+	load := func() *http.Request {
+		r := httptest.NewRequest("GET", "/abcdefg", nil)
+		r.Header.Set("X-Forwarded-For", "203.0.113.9")
+		return r
+	}
+	probe := func() *http.Request {
+		r := httptest.NewRequest("GET", "/readyz", nil)
+		r.RemoteAddr = "10.0.0.5:41000"
+		return r
+	}
+	for _, tc := range []struct {
+		trap bool
+		want int
+	}{{false, http.StatusOK}, {true, http.StatusTooManyRequests}} {
+		h := handlerWith(t, func(c *config.Config) { c.TrapLivenessStrict = tc.trap }, 1, 1)
+		h.ServeHTTP(httptest.NewRecorder(), load())
+		h.ServeHTTP(httptest.NewRecorder(), load())
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, probe())
+		if w.Code != tc.want {
+			t.Fatalf("trap=%v: başka IP'den gelen probe %d almalıydı, %d geldi", tc.trap, tc.want, w.Code)
+		}
+	}
+}
+
 // TRAP_METRIC_LABEL_CODE: her kısa kod yeni zaman serisi (P01-06).
 func TestTrapMetricLabelCodeAddsSeriesPerCode(t *testing.T) {
 	h := handlerWith(t, func(c *config.Config) { c.TrapMetricLabelCode = true }, 100000, 100000)

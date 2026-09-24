@@ -45,7 +45,7 @@ for h in "${heads[@]}"; do
   [[ -n "$n" ]] || { err "README başlık eksik: $h"; continue; }
   (( n > prev )) || err "README başlık sırası bozuk: $h"; prev=$n
 done
-grep -q 'make up            # profil → build → push → deploy → rollout wait → smoke' "$D/README.md" || err "README §4 sabit metin değişmiş"
+grep -qF "make up            # profil → Grafana'yı temizle → build → push → deploy → rollout wait → smoke" "$D/README.md" || err "README §4 sabit metin değişmiş"
 grep -q 'Her seviyede aynı: \[docs/API.md\]' "$D/README.md" || err "README §5 sabit metin değişmiş"
 # 6a. Giriş bloğu: okuyucu §1'den önce ne yaşayacağını, seviye olmasa ne olacağını ve yeni araçları görür.
 for m in '> **Bu seviyede ne yaşayacaksın?**' '> **Bu seviye olmasa ne olur?**' '> **Yeni gelen teknolojiler:**'; do
@@ -280,6 +280,15 @@ done
 # TR: var olmayan panelleri anan ya da hiç panel anmayan bir sorun bölümü, okuyanı nereye
 #     bakacağını sormak zorunda bırakır. Ayrıntı: tools/lint-grafana.py.
 if ! out=$(python3 "$ROOT/tools/lint-grafana.py" "$D"); then
+  while IFS= read -r line; do echo "$line"; done <<<"$out"; fail=1
+fi
+
+# 19. HER SORUN, YAPIŞTIRILIP ÇALIŞTIRILABİLECEK SIRALI KOMUTLAR TAŞIMALI.
+# Okuyan, "link oluştur → pod'u sil → aynı kodu iste" gibi bir özeti komuta çevirmek zorunda kalmamalı:
+# §4'te seviyenin rehberi, her sorunda `make fresh` ile başlayan "Elle" blokları ve "Terminalde ne
+# görmelisin". Bloklarda yorum yoktur (varsayılan zsh'da `#` komutun argümanı olur). Ayrıntı:
+# tools/lint-guide.py.
+if ! out=$(python3 "$ROOT/tools/lint-guide.py" "$D"); then
   while IFS= read -r line; do echo "$line"; done <<<"$out"; fail=1
 fi
 

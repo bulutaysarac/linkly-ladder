@@ -38,6 +38,20 @@ func Chain(h http.Handler, log *slog.Logger, m *metrics.Metrics, rl *ratelimit.L
 	return h
 }
 
+// TrapChain — TRAP_LIVENESS_STRICT'in zinciri: Chain ile aynı sıra, tek farkla — hız sınırı pod başına
+// TEK kovadır. "Her şey tek zincirden geçsin" diyen kestirme, limiti de çoğu zaman böyle yazar ve iki
+// hata birbirini büyütür: IP başına bir kova probe'ları korurdu (kubelet düğümün IP'sinden gelir, kendi
+// kovası olur), tek kovada ise istemcinin yükü probe'un payını da tüketir → probe 429 → pod trafikten
+// düşer, uzun sürerse yeniden başlatılır (P01-07).
+func TrapChain(h http.Handler, log *slog.Logger, m *metrics.Metrics, rl *ratelimit.Limiter, handlerTimeout time.Duration) http.Handler {
+	h = rateLimitBy(h, m, rl, "pod", podBucket)
+	h = timeout(h, handlerTimeout)
+	h = accessLog(h, log, m)
+	h = requestID(h)
+	h = recoverPanic(h, log, m)
+	return h
+}
+
 func recoverPanic(next http.Handler, log *slog.Logger, m *metrics.Metrics) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
@@ -117,15 +131,21 @@ func timeout(next http.Handler, d time.Duration) http.Handler {
 }
 
 func rateLimit(next http.Handler, m *metrics.Metrics, rl *ratelimit.Limiter) http.Handler {
+	return rateLimitBy(next, m, rl, "ip", clientIP)
+}
+
+// podBucket — bütün istekler tek kova: sınır istemci başına değil pod başına uygulanır.
+func podBucket(*http.Request) string { return "pod" }
+
+func rateLimitBy(next http.Handler, m *metrics.Metrics, rl *ratelimit.Limiter, scope string, key func(*http.Request) string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ip := clientIP(r)
-		if !rl.Allow(ip) {
-			m.RateLimit.WithLabelValues("reject", "ip").Inc()
+		if !rl.Allow(key(r)) {
+			m.RateLimit.WithLabelValues("reject", scope).Inc()
 			w.Header().Set("Retry-After", "1")
 			http.Error(w, `{"error":"rate_limited"}`, http.StatusTooManyRequests)
 			return
 		}
-		m.RateLimit.WithLabelValues("allow", "ip").Inc()
+		m.RateLimit.WithLabelValues("allow", scope).Inc()
 		next.ServeHTTP(w, r)
 	})
 }

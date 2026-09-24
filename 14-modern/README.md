@@ -62,7 +62,7 @@ P13-06'nın maliyeti de düştü — ama düşmek ile bitmek farklı şeylerdir.
 Bu seviyenin platformdan istediği: **temel yığın (kind, ingress, Prometheus, Grafana) + Chaos Mesh, KEDA, CloudNativePG, Argo CD + Argo Rollouts, cert-manager + Kyverno**. `make up` ilk adımda (profil) bunları açar ve kullanılmayanları kapatır; bir bileşen kurulu değilse hangi komutla kurulacağını söyleyip durur.
 
 ```bash
-make up            # profil → build → push → deploy → rollout wait → smoke
+make up            # profil → Grafana'yı temizle → build → push → deploy → rollout wait → smoke
 code=$(curl -s -XPOST http://lvl14.localtest.me/api/links -H 'Content-Type: application/json' -H 'Authorization: Bearer acme-key-9f2c' -d '{"url":"https://example.com"}' | jq -r .code); echo "$code"
 curl -s -o /dev/null -w '%{http_code} → %{redirect_url}\n' http://lvl14.localtest.me/$code   # 302 → https://example.com
 make grafana       # Ladder klasörü, level=lvl14 — giriş: admin / ladder
@@ -73,6 +73,33 @@ make down          # seviyeyi kaldır · kümeyi durdurmak için: make -C ../pla
 ```
 
 Yönetim uçları kimlik ister (13'ten beri) — yukarıdaki POST bu yüzden anahtarlı (anahtarlar: `deploy/api-keys.yaml`).
+
+**Rehber — bu seviyeyi baştan sona, sırayla.** Komut bloklarında açıklama yok; her bloğu olduğu gibi yapıştırabilirsin.
+
+1. Önceki seviye açıksa kapat (aynı anda tek seviye çalışır), bu seviyeyi kur. `make up` Grafana'yı da temizler:
+```bash
+make -C ../13-security-tenancy down
+make up
+```
+2. 13'ün sorunlarını bu seviyede koş (~10 dk). Koşarken başka komut çalıştırma: aynı pod'lara dokunurlar.
+   14, 13'ün hiçbir sorununu çözdüğünü iddia etmez (§3, `problems/SOLVES`): `BEKLENEN` sütununda her satır
+   `(açık kalabilir)` der; P13-06'nın neden burada da açık kaldığını §3 anlatır. `SONUÇ` sütunu 13'ün
+   deneylerinin (kimlik, RLS, NetworkPolicy, Kyverno …) 14'ün ortamında ne verdiğini gösterir:
+```bash
+make verify-prev
+```
+3. §6'daki sorunları sırayla yaşa (P14-01 → P14-05). Her sorunda aynı düzen:
+   **Elle** bloklarını sırayla yapıştır (ilk komut `make fresh`: Grafana bu deneye boş başlar) →
+   **Terminalde ne görmelisin** ile karşılaştır → **Grafana'da gör** linklerini aç, her madde hangi panelde neyi
+   göreceğini söyler. İstersen aynı deneyi `make repro P=…` ile otomatik koş: ölçer ve hükmünü basar.
+   Her `/api/...` isteği `Authorization: Bearer acme-key-9f2c` taşır. redirect bir Argo Rollout'tur: P14-01 ve
+   P14-02'deki her ayar değişikliği bir canary dağıtımıdır ve `make wait` onun bitmesini bekler (~4 dk).
+   P14-05 (game day) yıkıcıdır ve ~6 dk sürer; adımlarını ve temizliğini atlama.
+4. Bitince açık kalan ayarları geri al ve seviyeyi kapat:
+```bash
+make reset
+make down
+```
 
 ## 5. API
 
@@ -99,11 +126,61 @@ Redis komutu sayılır. p50 farkı çoğu zaman histogram kovasından küçükt�
 **Neden:** En sıcak anahtarlar artık **hiç ağa çıkmıyor** — P04-02'deki RTT ve P04-03'teki tek
 çekirdek tavanı bu sayede geç geliyor. [Topic · Konu: Çok katmanlı önbellek]
 
-**Reproduce:** `make repro P=P14-01` — L1 kapalı/açık `hot-key` yükünde okuma yolundaki L2 erişimini,
-L1 isabet oranını ve p50/p99'u karşılaştırır. `L1_ENABLED` değişikliği bir canary dağıtımıdır: script
+**Reproduce (adım adım):**
+
+Otomatik — ölçer ve hüküm basar: `make repro P=P14-01` — L1 kapalı/açık `hot-key` yükünde okuma yolundaki L2
+erişimini, L1 isabet oranını ve p50/p99'u karşılaştırır. `L1_ENABLED` değişikliği bir canary dağıtımıdır: script
 her fazdan önce yeni sürümün stable olmasını bekler (`make wait` ölçütü: `Healthy` ve
 `stableRS == currentPodHash`, ~4 dk) ve 1. fazda L1'in gerçekten kapalı olduğunu doğrular — değilse
 ölçemediğini söyler (exit 2). Hüküm L1 isabetine ve L2 erişimindeki düşüşe bağlıdır, p50'ye değil.
+
+Elle — `14-modern` klasöründe, sırayla yapıştır (iki canary dağıtımı yüzünden ~10 dk):
+
+1. Grafana'yı temizle, L1'i yalnızca redirect'te kapat ve canary'nin bitmesini bekle:
+```bash
+make fresh
+make set E="L1_ENABLED=false" W=redirect
+make wait
+sleep 10
+```
+2. 1. faz (yalnızca L2, 04'ün davranışı): trafiğin %90'ı tek koda giden 40 sn'lik yük, sonra okuma yolundaki L2 ve L1
+   işlem hızını ve p50/p99'u (saniye) oku:
+```bash
+HOT_SHARE=0.9 make load S=hot-key K6_ARGS="--vus 40 --duration 40s"
+sleep 12
+for q in \
+  'sum(rate(cache_ops_total{namespace="lvl14",layer="l2"}[2m]))' \
+  'sum(rate(cache_ops_total{namespace="lvl14",layer="l1"}[2m]))' \
+  'histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{namespace="lvl14",route="/{code}"}[2m])) by (le))' \
+  'histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace="lvl14",route="/{code}"}[2m])) by (le))'
+do printf '%s → ' "$q"; curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode "query=$q" | jq -r '.data.result[0].value[1] // "0"'; done
+```
+3. L1'i geri aç: redirect'in ortamını manifestteki hâline döndür (`L1_ENABLED=true`) ve yine canary'yi bekle:
+```bash
+make reset W=redirect
+make wait
+sleep 10
+```
+4. 2. faz (L1+L2): aynı yük, aynı sayılar ve L1 isabet oranı:
+```bash
+HOT_SHARE=0.9 make load S=hot-key K6_ARGS="--vus 40 --duration 40s"
+sleep 12
+for q in \
+  'sum(rate(cache_ops_total{namespace="lvl14",layer="l2"}[2m]))' \
+  'sum(rate(cache_ops_total{namespace="lvl14",layer="l1"}[2m]))' \
+  'histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{namespace="lvl14",route="/{code}"}[2m])) by (le))' \
+  'histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace="lvl14",route="/{code}"}[2m])) by (le))' \
+  'sum(rate(cache_ops_total{namespace="lvl14",layer="l1",result="hit"}[2m])) / clamp_min(sum(rate(cache_ops_total{namespace="lvl14",layer="l1"}[2m])),0.001)'
+do printf '%s → ' "$q"; curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode "query=$q" | jq -r '.data.result[0].value[1] // "0"'; done
+```
+
+**Terminalde ne görmelisin:** 1. adımda `✔ rollout/redirect: L1_ENABLED=false`, ardından `make wait`'in
+`rollout.argoproj.io/redirect canary adımları sürüyor (Progressing)...` satırı (aşama adı farklı olabilir) ve ~4 dk sonra
+`rollout.argoproj.io/redirect sürüm tamam: …`. 2. adımda `layer="l2"` sıfırdan belirgin büyük (okumaların hepsi
+Redis'e gidiyor) ve `layer="l1"` **0** — 0 değilse L1 henüz kapanmamıştır, ölçüm geçersizdir (`make wait`'i tekrar
+koş). 3. adım 1. adımdaki gibi ~4 dk bekler. 4. adımda `layer="l1"` yüksek, `layer="l2"` 1. faza göre belirgin düşük;
+sorgu çıktısının son satırı (L1 isabet oranı) 0.5'in belirgin üstünde: trafiğin %90'ı tek sıcak koda gidiyor. p50 iki
+fazda aynı ya da 2. fazda biraz düşük: fark histogram kovasından küçük olabilir, hüküm bu yüzden p50'ye bakmaz.
 
 **Grafana'da gör:** [`04 · Cache`](http://grafana.localtest.me/d/ladder-cache?var-level=lvl14&from=now-30m&to=now&refresh=10s), [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl14&from=now-30m&to=now&refresh=10s) ve [`06 · Redis`](http://grafana.localtest.me/d/ladder-redis?var-level=lvl14&from=now-30m&to=now&refresh=10s) — iki faz var (önce L1 kapalı, sonra açık; her biri bir canary dağıtımı — ~4 dk — ve ardından 40 sn `hot-key` yükü), deney boyunca açık tut (giriş: admin / ladder)
 - "Önbellek işlemleri (katman ve sonuca göre)" → asıl kanıt bu panel. 1. fazda okumaların hepsi `l2` serilerinde; 2. fazda `l1` `hit` baskın olur ve `l2` serileri neredeyse sıfıra iner: sıcak okumalar artık ağa çıkmıyor. 1. fazda da `l1` serisi akıyorsa L1 gerçekten kapanmamıştır — `L1_ENABLED=false` bir canary dağıtımıyla gelir; script bunu bekler ve 1. fazda L1 işlemi görürse ölçümü geçersiz sayar.
@@ -121,7 +198,64 @@ L1 TTL'i boyunca yaşamaya devam ediyor — **03'teki P03-01'in aynısı**.
 **Neden:** L1 = gerçeğin N kopyası. 03 bu borcu ödememişti; 14 Redis pub/sub ile ödüyor.
 [Topic · Konu: Invalidation broadcast, en-iyi-çaba]
 
-**Reproduce:** `make repro P=P14-02`.
+**Reproduce (adım adım):**
+
+Otomatik — ölçer ve hüküm basar: `make repro P=P14-02` (deney süresince redirect'in `L1_TTL`'ini 90 sn'ye çıkarır —
+10 sn'lik pencere ölçüm döngüsünden kısa kalır ve biz bakmadan kapanır; en az iki redirect replikası olduğunu
+doğrular; yayın açık ve kapalıyken aynı "oluştur → 40 okuma → sil → 40 okuma" turunu koşar, bayat yönlendirmeleri
+sayar; bitince ayarları geri alır).
+
+Elle — sırayla yapıştır (üç canary dağıtımı yüzünden ~15 dk):
+
+1. Grafana'yı temizle, redirect'in L1 TTL'ini deney için 90 sn'ye çıkar, canary'yi bekle, replika sayısına bak (en
+   az 2 olmalı: tek pod'da bayatlayacak ikinci bir kopya yoktur):
+```bash
+make fresh
+make set E="L1_TTL=90s" W=redirect
+make wait
+sleep 10
+kubectl -n lvl14 get rollout redirect -o jsonpath='{.spec.replicas}'; echo
+```
+2. 1. faz (yayın açık): link oluştur, 40 okumayla bütün pod'ların L1'ine sok, sil, aynı kodu 40 kez daha iste; bir
+   kazıma bekleyip gönderilen/alınan geçersiz kılma mesajlarını say:
+```bash
+code=$(curl -s -XPOST http://lvl14.localtest.me/api/links -H 'Content-Type: application/json' -H 'Authorization: Bearer acme-key-9f2c' -d '{"url":"https://example.com/inval"}' | jq -r .code); echo "kod: $code"
+for i in $(seq 1 40); do curl -s -o /dev/null http://lvl14.localtest.me/$code; done
+curl -s -o /dev/null -w 'silme: %{http_code}\n' -XDELETE http://lvl14.localtest.me/api/links/$code -H 'Authorization: Bearer acme-key-9f2c'
+sleep 1
+for i in $(seq 1 40); do curl -s -o /dev/null -w '%{http_code} ' http://lvl14.localtest.me/$code; done; echo
+sleep 20
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum by (direction) (increase(cache_invalidation_messages_total{namespace="lvl14"}[2m]))' | jq -r '.data.result[] | .metric.direction + ": " + .value[1]'
+```
+3. Tuzağı yalnızca redirect'te aç (L1 var, yayın yok — 03'ün hâli) ve canary'yi bekle:
+```bash
+make set E="TRAP_NO_INVALIDATION_PUBSUB=true" W=redirect
+make wait
+sleep 10
+```
+4. 2. faz (yayın kapalı): aynı tur, yeni bir linkle:
+```bash
+code=$(curl -s -XPOST http://lvl14.localtest.me/api/links -H 'Content-Type: application/json' -H 'Authorization: Bearer acme-key-9f2c' -d '{"url":"https://example.com/inval"}' | jq -r .code); echo "kod: $code"
+for i in $(seq 1 40); do curl -s -o /dev/null http://lvl14.localtest.me/$code; done
+curl -s -o /dev/null -w 'silme: %{http_code}\n' -XDELETE http://lvl14.localtest.me/api/links/$code -H 'Authorization: Bearer acme-key-9f2c'
+sleep 1
+for i in $(seq 1 40); do curl -s -o /dev/null -w '%{http_code} ' http://lvl14.localtest.me/$code; done; echo
+sleep 20
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum by (direction) (increase(cache_invalidation_messages_total{namespace="lvl14"}[2m]))' | jq -r '.data.result[] | .metric.direction + ": " + .value[1]'
+```
+5. Geri al: redirect'in ortamını manifestteki hâline döndür (`L1_TTL=10s`, tuzak yok) ve son canary'yi bekle:
+```bash
+make reset
+make wait
+```
+
+**Terminalde ne görmelisin:** 1. adımda `✔ rollout/redirect: L1_TTL=90s`, ~4 dk sonra `… sürüm tamam: …` ve `3`.
+2. adımda `silme: 204`; silmeden sonraki 40 cevap `404` (en fazla birkaç `302`): yayını alan her pod kendi kopyasını
+sildi. Mesaj sayımında `sent` ve `received` ikisi de sıfırdan büyük, `received` daha büyük (her mesajı diğer
+pod'ların hepsi alır; `increase` tahmin olduğu için küsuratlı çıkabilir). 4. adımda yine `silme: 204`, ama sonraki
+40 cevabın çoğu `302`: link silindi, redirect pod'ları onu L1 TTL'i (90 sn) dolana kadar yönlendirmeye devam ediyor.
+Sayımda `sent` yine sıfırdan büyüktür (silmeyi yapan api yayını göndermeye devam ediyor), `received` ise neredeyse
+sıfırdır (redirect pod'ları o kanalı dinlemiyor).
 
 **Grafana'da gör:** [`04 · Cache`](http://grafana.localtest.me/d/ladder-cache?var-level=lvl14&from=now-30m&to=now&refresh=10s) ve [`03 · App Business`](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl14&from=now-30m&to=now&refresh=10s) — iki faz var (yayın açık, sonra kapalı; her faz bir canary dağıtımıyla başlar ve script onun bitmesini bekler, ~4 dk), deney boyunca açık tut (giriş: admin / ladder)
 - "Önbellekten çıkarılma sebepleri" → 1. fazda silme anında kısa bir `invalidate` tepesi: yayını alan her pod kendi kopyasını siler. 2. fazda redirect pod'larında bu tepe yok: kopyalar yayınla silinmez, ancak TTL dolunca düşer (deney süresince `L1_TTL` 90 sn).
@@ -143,7 +277,56 @@ atlamak (sıcak anahtar kazancını kaybedersin) · dayanıklı akışla yayın 
 tavanı vardı).
 [Topic · Konu: Partition, paralellik]
 
-**Reproduce:** `make repro P=P14-03`.
+**Reproduce (adım adım):**
+
+Otomatik — ölçer ve hüküm basar: `make repro P=P14-03` (topic'in partition sayısını ve KEDA tavanını okur, tüketiciyi
+KEDA'nın `paused-replicas` anotasyonuyla 3 replikaya sabitler, 60 sn `hot-key` yükü verir, kaç pod'un gerçekten kayıt
+işlediğini Prometheus'tan sayar ve anotasyonu kaldırır). Replikayı zorlamasının sebebi: `hot-key` yükünde lag 500
+eşiğinin çok altında kalır, KEDA tek pod'da durur ve yalnızca partition sayısına bakan bir hüküm paralelliği hiç
+göstermezdi.
+
+Elle — sırayla yapıştır:
+
+1. Grafana'yı temizle, broker pod'unun hazır olmasını bekle, `clicks` topic'inin partition'larına ve KEDA'nın
+   üst sınırına bak:
+```bash
+make fresh
+kubectl -n lvl14 wait --for=condition=Ready pod -l app.kubernetes.io/name=redpanda --timeout=180s
+rp=$(kubectl -n lvl14 get pod -l app.kubernetes.io/name=redpanda -o jsonpath='{.items[0].metadata.name}'); echo "broker: $rp"
+kubectl -n lvl14 exec "$rp" -- rpk topic describe clicks -p
+kubectl -n lvl14 get scaledobject analytics -o jsonpath='{.spec.maxReplicaCount}'; echo
+```
+2. Tüketiciyi 3 replikaya sabitle (KEDA duraklatılır) ve hazır olmasını bekle:
+```bash
+kubectl -n lvl14 annotate scaledobject analytics autoscaling.keda.sh/paused-replicas=3 --overwrite
+sleep 20
+kubectl -n lvl14 rollout status deploy/analytics
+```
+3. İKİNCİ bir terminalde `14-modern` klasöründe tüketici pod'larını canlı izle:
+```bash
+kubectl -n lvl14 get pods -l app.kubernetes.io/name=analytics -w
+```
+4. İLK terminalde 60 sn yük ver, bir kazıma bekle; iş yapan pod sayısını, pod başına işleme hızını ve tepe lag'i oku:
+```bash
+make load S=hot-key K6_ARGS="--vus 60 --duration 60s"
+sleep 20
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=count(count by (pod) (rate(consumer_records_total{namespace="lvl14",result="ok"}[3m]) > 0))' | jq -r '"iş yapan pod: " + (.data.result[0].value[1] // "0")'
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum by (pod) (rate(consumer_records_total{namespace="lvl14",result="ok"}[3m]))' | jq -r '.data.result[] | .metric.pod + ": " + .value[1]'
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=max_over_time(sum(redpanda_kafka_max_offset{namespace="lvl14"} - on(redpanda_topic, redpanda_partition) group_left redpanda_kafka_consumer_group_committed_offset{namespace="lvl14"})[5m:15s])' | jq -r '"tepe lag: " + (.data.result[0].value[1] // "0")'
+```
+5. Sabitlemeyi kaldır (KEDA yeniden devreye girer), ikinci terminaldeki izlemeyi Ctrl+C ile durdur:
+```bash
+kubectl -n lvl14 annotate scaledobject analytics autoscaling.keda.sh/paused-replicas- --overwrite
+```
+
+**Terminalde ne görmelisin:** 1. adımda `rpk` tablosunda `0`, `1`, `2` numaralı üç partition satırı ve KEDA üst sınırı
+`3` (partition sayısını aşmıyor — fazlası boşta otururdu). 2. adımda `scaledobject.keda.sh/analytics annotated` ve
+`deployment "analytics" successfully rolled out`. 3. adımda ikinci terminal üç `analytics-…` pod'unu `1/1 Running`
+listelemeli. 4. adımda
+k6 çıktısının sonundaki özet satırı (`k6 lvl14: reqs=… 5xx=… …`), ardından `iş yapan pod: 3` ve üç `analytics-…: …`
+satırı, üçü de sıfırdan büyük; biri belirgin yüksektir — anahtar kısa kod olduğu için sıcak kodun bütün olayları tek
+partition'a, yani tek pod'a gider. Tepe lag küçük kalır: tüketiciler yetişiyor. 5. adımda
+`scaledobject.keda.sh/analytics annotated`; KEDA'nın bekleme süresinden (`cooldownPeriod: 60`) sonra pod sayısı düşebilir.
 
 **Grafana'da gör:** [`08 · Stream (Redpanda)`](http://grafana.localtest.me/d/ladder-stream?var-level=lvl14&from=now-15m&to=now&refresh=10s) — tüketici 3 replikaya sabitlenip 60 sn'lik `hot-key` yükü başlayınca aç (giriş: admin / ladder)
 - "Onaylama / sn ve tüketici pod sayısı" → pod çizgisi deney boyunca 3'te (KEDA duraklatıldı), commit/s yükle birlikte yükselir; deney bitince KEDA yeniden devreye girer ve pod sayısı düşebilir.
@@ -162,12 +345,69 @@ için sıra garantisi kırılır. *"Partition artır" bir düğme değil, planla
 **Yöntem:** Tahmin değil ölçüm. Script tek pod kapasitesini `stairs` yüküyle ölçer, sonra modeli
 o sayıyla kurar. [Topic · Konu: Kapasite planlaması]
 
-**Reproduce:** `make repro P=P14-04` · tam model: [`docs-capacity.md`](docs-capacity.md)
+**Reproduce (adım adım):**
+
+Otomatik — ölçer ve hüküm basar: `make repro P=P14-04` (redirect'i tek pod'a indirir, `stairs` yükü verir — varsayılan
+`RATES=50,100,200,400`, basamak başına ~40 sn —, tepe kabul edilen rps'i, p99'u, CPU'yu, önbellek isabetini ve DB
+okumasını Prometheus'tan okur, 100 milyon redirect/gün modelini basar ve replikayı geri alır) · tam model:
+[`docs-capacity.md`](docs-capacity.md)
+
+Elle — sırayla yapıştır (~5 dk):
+
+1. Grafana'yı temizle, redirect'in replika sayısını not et (geri alırken lazım), tek pod'a indir ve hazır adresin
+   bire indiğini gör:
+```bash
+make fresh
+kubectl -n lvl14 get rollout redirect -o jsonpath='{.spec.replicas}'; echo
+kubectl -n lvl14 scale rollout/redirect --replicas=1
+sleep 15
+kubectl -n lvl14 get endpointslice -l kubernetes.io/service-name=redirect -o jsonpath='{.items[*].endpoints[?(@.conditions.ready==true)].targetRef.name}'; echo
+```
+2. Kademeli yük ver (~3 dk), bir kazıma bekle, tek pod'un ölçümlerini oku: tepe kabul edilen rps, önbellek isabet
+   oranı, tepe p99 (saniye), tepe CPU (çekirdek) ve DB okuması (sn başına):
+```bash
+make load S=stairs
+sleep 15
+rps=$(curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=max_over_time(sum(rate(http_requests_total{namespace="lvl14",route="/{code}",code!="429",code!="503"}[30s]))[6m:15s])' | jq -r '.data.result[0].value[1] // "0"'); echo "tepe kabul edilen rps: $rps"
+hit=$(curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum(rate(cache_ops_total{namespace="lvl14",result=~"hit|negative_hit"}[3m])) / clamp_min(sum(rate(cache_ops_total{namespace="lvl14"}[3m])),0.001)' | jq -r '.data.result[0].value[1] // "0"'); echo "önbellek isabet oranı: $hit"
+for q in \
+  'max_over_time(histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace="lvl14",route="/{code}"}[1m])) by (le))[6m:15s])' \
+  'max_over_time(sum(rate(container_cpu_usage_seconds_total{namespace="lvl14",pod=~"redirect.*",image!="",image!~".*pause.*"}[30s]))[6m:15s])' \
+  'sum(rate(db_queries_total{namespace="lvl14",op="get"}[3m]))'
+do printf '%s → ' "$q"; curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode "query=$q" | jq -r '.data.result[0].value[1] // "0"'; done
+```
+3. Modeli ölçülen sayıyla kur (scriptin hesabının aynısı: 100 milyon redirect/gün, tepe = ortalamanın 3 katı):
+```bash
+awk -v rps="$rps" -v hit="$hit" 'BEGIN{avg=100000000/86400; peak=avg*3; printf "ortalama = %.0f rps · tepe (3x) = %.0f rps\n", avg, peak; if (rps>0) printf "gereken pod = %.0f (ölçülen %.0f rps/pod) + yedeklilik + burst tamponu\n", peak/rps+0.999, rps; printf "DB okuma (hit %.0f%%) = %.0f/s · SOĞUK anda = %.0f/s\n", hit*100, peak*(1-hit), peak}'
+```
+4. İstersen merdiveni tek pod'un tavanının üstüne uzat (`stairs.js`: bu kümede tek seviyenin redirect kapasitesi
+   ~650 rps; daha yukarısı ölçüm değil yıkım üretir), ölçümü ve modeli tekrarla:
+```bash
+RATES=100,200,400,800 make load S=stairs
+sleep 15
+rps=$(curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=max_over_time(sum(rate(http_requests_total{namespace="lvl14",route="/{code}",code!="429",code!="503"}[30s]))[6m:15s])' | jq -r '.data.result[0].value[1] // "0"'); echo "tepe kabul edilen rps: $rps"
+hit=$(curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum(rate(cache_ops_total{namespace="lvl14",result=~"hit|negative_hit"}[3m])) / clamp_min(sum(rate(cache_ops_total{namespace="lvl14"}[3m])),0.001)' | jq -r '.data.result[0].value[1] // "0"'); echo "önbellek isabet oranı: $hit"
+awk -v rps="$rps" -v hit="$hit" 'BEGIN{avg=100000000/86400; peak=avg*3; printf "ortalama = %.0f rps · tepe (3x) = %.0f rps\n", avg, peak; if (rps>0) printf "gereken pod = %.0f (ölçülen %.0f rps/pod) + yedeklilik + burst tamponu\n", peak/rps+0.999, rps; printf "DB okuma (hit %.0f%%) = %.0f/s · SOĞUK anda = %.0f/s\n", hit*100, peak*(1-hit), peak}'
+```
+5. Replikayı 1. adımda not ettiğin sayıya (manifestte `3`) geri al ve hazır olmasını bekle:
+```bash
+kubectl -n lvl14 scale rollout/redirect --replicas=3
+make wait
+```
+
+**Terminalde ne görmelisin:** 1. adımda `3`, `rollout.argoproj.io/redirect scaled` ve tek bir `redirect-…` pod adı.
+2. adımda k6 çıktısının sonundaki özet satırı (`k6 lvl14: reqs=… 5xx=… …`); `tepe kabul edilen rps` son basamağa
+(400) yakınsa pod doymamıştır ve ölçtüğün tavan değil verdiğin yüktür (4. adım); belirgin altındaysa tek pod'un
+tavanı odur. İsabet oranı yüksek (200 tohum link önbelleğe sığar), p99 saniye cinsinden küçük bir değer, CPU
+sıfırdan büyük bir çekirdek kesri — `01 · Pods & Resources` → "CPU kullanımı (bir çekirdeğin %'si)" aynı değeri
+yüzle çarpar (0.31 çekirdek = %31) —, DB okuması isabet oranı yüksek olduğu için düşük. 3. adımda `ortalama = 1157 rps · tepe (3x) = 3472 rps`,
+`gereken pod = …` ve `DB okuma (hit …%) = …/s · SOĞUK anda = 3472/s`: önbellek soğukken DB tepe trafiğin tamamını
+görür. 5. adımda `rollout.argoproj.io/redirect hazır: 3/3` ve `… sürüm tamam: …`.
 
 **Grafana'da gör:** [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl14&from=now-15m&to=now&refresh=10s), [`01 · Pods & Resources`](http://grafana.localtest.me/d/ladder-pods?var-level=lvl14&from=now-15m&to=now&refresh=10s) ve [`04 · Cache`](http://grafana.localtest.me/d/ladder-cache?var-level=lvl14&from=now-15m&to=now&refresh=10s) — redirect tek pod'a indirilip `stairs` yükü başlayınca aç (~3 dk sürer) (giriş: admin / ladder)
 - "İstek / saniye (uç noktaya göre)" → `/{code}` basamak basamak yükselir (varsayılan `RATES=50,100,200,400`, her basamak ~40 sn). Son basamakta çizgi hedefin altında kalıyorsa tek pod doymuştur — o tavan, modelin "pod başına rps"i.
 - "Gecikme (p50 / p95 / p99)" → alt basamaklarda düz; pod doymaya yaklaşınca p99 yukarı kıvrılır. Kıvrılmıyorsa ölçtüğün tepe kapasite değil, verdiğin yüktür: `RATES` ile üstüne çık.
-- "CPU kullanımı (çekirdek)" → tek redirect pod'unun çizgisi basamaklarla birlikte tırmanır; script bunun sıfırdan büyük olmasını "yük gerçekten koştu" kanıtı sayar.
+- "CPU kullanımı (bir çekirdeğin %'si)" → tek redirect pod'unun çizgisi basamaklarla birlikte tırmanır; script bunun sıfırdan büyük olmasını "yük gerçekten koştu" kanıtı sayar.
 - "İsabet oranı (toplam)" → yüksek; modelin "DB okuma = tepe × (1 − hit)" satırı buradan gelir. Soğuk anda bu oran 0'dır ve DB tepe trafiğin tamamını görür (P03-02).
 
 **Modelin en kritik satırı:** önbellek **soğukken** DB tepe trafiğin tamamını görür (P03-02).
@@ -183,8 +423,99 @@ ve sonuncusu (tek primary'ye yazma) **aşılmadı**, sharding ister.
 **Beklenen:** Sistem **kısmen** bozulur, tamamen değil. Her koruma kendi işini yapar.
 [Topic · Konu: Chaos engineering, prova]
 
-**Reproduce:** `CONFIRM=1 make repro P=P14-05` — erişilebilirliği, breaker durumunu, yük atmayı,
-retry'ı ve kalan hata bütçesini raporlar.
+**Reproduce (adım adım):**
+
+Otomatik — ölçer ve hüküm basar: `CONFIRM=1 make repro P=P14-05` — 30 sn'lik taban ölçümünden sonra sabit 300 istek/sn
+`steady` yükü altında üç arızayı üst üste bindirir, erişilebilirliği, breaker durumunu, yük atmayı, retry'ı ve kalan
+hata bütçesini raporlar; arızaları kendisi kaldırır ve ortamın toparlanmasını bekler. Kontrol düzlemi deney
+sırasında yeniden başladıysa hüküm vermez (sonuç kümeyi ölçer, uygulamayı değil).
+
+Elle — sırayla yapıştır. **Yıkıcı ve uzun:** toplam ~6 dk (taban ~1 dk, game day 150 sn yük, ölçüm ~30 sn, temizlik ve
+toparlanma genelde 1–2 dk). lvl14'te Redis'e 200 ms gecikme, Postgres pod'larına %30 paket kaybı enjekte edilir ve
+bir redirect pod'u zorla silinir; kümenin başka bir namespace'ine dokunulmaz. Arızaları 4. adımın bloğu kendisi
+kaldırır; blok yarıda kesilirse (Ctrl+C, terminal kapandı) arızalar kümede kalır — **6. adımı her durumda koş.**
+
+1. Grafana'yı temizle; game day'den önce korumaların dinlenmede olduğunu (breaker ve degrade `0`) ve kontrol düzlemi
+   pod'larının yeniden başlatma sayılarını gör (6. adımda karşılaştıracaksın):
+```bash
+make fresh
+for q in 'max(breaker_state{namespace="lvl14"})' 'max(degraded_mode{namespace="lvl14"})'; do printf '%s → ' "$q"; curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode "query=$q" | jq -r '.data.result[0].value[1] // "seri yok"'; done
+kubectl -n kube-system get pods -l tier=control-plane -o jsonpath='{range .items[*]}{.metadata.name}{" restart="}{.status.containerStatuses[0].restartCount}{"\n"}{end}'
+```
+2. Taban: her şey sağlıklıyken 30 sn sabit 300 istek/sn (muafiyet jetonlu yük girişi), sonra p99'u (saniye) oku:
+```bash
+RATE=300 make load S=steady K6_ARGS="--duration 30s"
+sleep 10
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace="lvl14",route="/{code}"}[2m])) by (le))' | jq -r '"taban p99: " + (.data.result[0].value[1] // "0")'
+```
+3. Game day yükü: İKİNCİ bir terminalde `14-modern` klasöründe 150 sn sabit 300 istek/sn başlat:
+```bash
+RATE=300 make load S=steady K6_ARGS="--duration 150s"
+```
+4. Yük başlar başlamaz İLK terminalde zaman çizelgesini yapıştır. Blok ~1 dk 50 sn sürer: 00:15'te Redis'e 200 ms
+   gecikme, 00:45'te Postgres'e %30 paket kaybı, 01:15'te hazır bir redirect pod'u (scriptin `pod_name` seçimi) zorla
+   silinir, 01:45'te iki arıza da kaldırılır. Pod öldüğünde ondaki istekler askıda kalabilir; yükün kalan ~75 sn'si
+   k6'nın 60 sn'lik zaman aşımına yeter:
+```bash
+sleep 15
+echo "[00:15] Redis'e 200 ms gecikme"
+make chaos C=redis-delay-200ms
+sleep 30
+echo "[00:45] Postgres'e %30 paket kaybı"
+make chaos C=pg-loss-30
+kubectl -n lvl14 get networkchaos
+sleep 30
+victim=$(kubectl -n lvl14 get pod -l app.kubernetes.io/name=redirect -o json | jq -r '[.items[] | select(.metadata.deletionTimestamp == null) | select(any(.status.containerStatuses[]?; .ready)) | .metadata.name][0] // empty'); echo "[01:15] öldürülen: $victim"
+kubectl -n lvl14 delete pod "$victim" --force --grace-period=0
+sleep 30
+echo "[01:45] arızalar kaldırılıyor"
+make unchaos C=redis-delay-200ms
+make unchaos C=pg-loss-30
+```
+5. İkinci terminalde k6'nın özet satırı çıkınca İLK terminalde sonuçları oku: uygulamanın saydığı istek, 5xx ve 429,
+   limiter muafiyeti, breaker/degrade tepesi, yük atma, retry, bağımlılık p99 tepeleri (saniye) ve kalan hata bütçesi:
+```bash
+sleep 12
+for q in \
+  'sum(increase(http_requests_total{namespace="lvl14",service=~"redirect|api"}[3m]))' \
+  'sum(increase(http_requests_total{namespace="lvl14",service=~"redirect|api",code=~"5.."}[3m]))' \
+  'sum(increase(http_requests_total{namespace="lvl14",service=~"redirect|api",code="429"}[3m]))' \
+  'sum(increase(ratelimit_decisions_total{namespace="lvl14",decision="exempt"}[3m]))' \
+  'max_over_time(max(breaker_state{namespace="lvl14"})[5m:15s])' \
+  'max_over_time(max(degraded_mode{namespace="lvl14"})[5m:15s])' \
+  'sum(increase(load_shed_total{namespace="lvl14"}[5m]))' \
+  'sum(increase(retry_total{namespace="lvl14"}[5m]))' \
+  'max_over_time(histogram_quantile(0.99, sum(rate(dependency_request_duration_seconds_bucket{namespace="lvl14",dep="redis"}[1m])) by (le))[5m:15s])' \
+  'max_over_time(histogram_quantile(0.99, sum(rate(dependency_request_duration_seconds_bucket{namespace="lvl14",dep="postgres"}[1m])) by (le))[5m:15s])' \
+  'slo:period_error_budget_remaining:ratio{namespace="lvl14",sloth_slo="redirect-availability"}'
+do printf '%s\n    → ' "$q"; curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode "query=$q" | jq -r '.data.result[0].value[1] // "seri yok"'; done
+```
+6. Temizlik — her durumda koş: kalan bütün chaos nesnelerini sil (takılı finalizer'ları da düşürür), kalmadığını
+   doğrula, veritabanı, Redis ve redirect hazır olana kadar bekle, kontrol düzlemi sayılarını 1. adımla karşılaştır:
+```bash
+make unchaos
+kubectl -n lvl14 get networkchaos
+make wait
+kubectl -n kube-system get pods -l tier=control-plane -o jsonpath='{range .items[*]}{.metadata.name}{" restart="}{.status.containerStatuses[0].restartCount}{"\n"}{end}'
+```
+
+**Terminalde ne görmelisin:** 1. adımda iki satır da `→ 0` ve her kontrol düzlemi pod'u için bir `restart=` sayısı.
+2. adımda k6 çıktısının sonundaki özet satırı ve `taban p99: …` (saniye; küçük bir değer). 4. adımda
+`networkchaos.chaos-mesh.org/redis-delay-200ms created`, `networkchaos.chaos-mesh.org/pg-loss-30 created`, ikisini
+listeleyen `kubectl get networkchaos` tablosu, `[01:15] öldürülen: redirect-…` ve `pod "redirect-…" force deleted`;
+`make unchaos C=…` sessizdir. İkinci terminaldeki özet satırında (`k6 lvl14: reqs=… 5xx=… 404=… …`) `5xx` sıfırdan
+büyük ama `reqs`'in küçük bir payı: erişilebilirlik (1 − 5xx/reqs) scriptin hükmü için %50'nin üstünde olmalı —
+kısmi bozulma, tam çöküş değil. Öldürülen pod'da askıda kalan istekler için birkaç `request timeout` uyarısı da
+görebilirsin. 5. adımda uygulamanın 5xx sayısı genelde k6'nınkinden küçük ya da eşit (aradaki fark ingress'in ya da hazır
+pod'u kalmamış servisin cevabı), 429 ~0 ve muafiyet sayısı sıfırdan büyük (yük limiter'ı gerçekten atladı; 0 ise
+ölçülen limiter'lardır). Breaker tepesi `0`, `1` ya da `2` (yalnızca `postgres`'in breaker'ı hareket edebilir),
+yük atma çoğu zaman `0` (`SHED_MAX_INFLIGHT=200`'e ulaşılmaz), `dep="redis"` p99 tepesi ~0.2 (enjekte edilen
+200 ms ± 50 ms jitter; 0.15'in altındaysa gecikme Redis'e ulaşmamış demektir), `dep="postgres"` p99 tepesi tabandan
+yüksek; kalan hata bütçesi aşağı iner, eksi bile olabilir (aşağıdaki Explore maddesi nedenini söyler). 6. adımda `make unchaos` ne kaldıysa
+siler, `kubectl get networkchaos` → `No resources found in lvl14 namespace.`, `make wait` →
+`cluster.postgresql.cnpg.io/pg hazır: 2/2`, `rollout.argoproj.io/redirect hazır: 3/3` ve `… sürüm tamam: …`;
+kontrol düzlemi sayıları 1. adımdakiyle aynı. Artmışsa deney sırasında kontrol düzlemi yeniden başlamıştır: sonuç
+kümeyi ölçüyor, uygulamayı değil — game day'i küme sakinken tekrar et.
 
 **Grafana'da gör:** [`11 · Resilience`](http://grafana.localtest.me/d/ladder-resilience?var-level=lvl14&from=now-15m&to=now&refresh=10s), [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl14&from=now-15m&to=now&refresh=10s), [`06 · Redis`](http://grafana.localtest.me/d/ladder-redis?var-level=lvl14&from=now-15m&to=now&refresh=10s) ve [`15 · k6`](http://grafana.localtest.me/d/ladder-k6?var-level=lvl14&from=now-15m&to=now&refresh=10s) — game day başlamadan aç; arızalar 00:15 (Redis +200 ms), 00:45 (Postgres %30 paket kaybı) ve 01:15 (pod öldürme) anlarında gelir, 01:45'te kalkar (giriş: admin / ladder)
 - "Devre kesici durumu (0 kapalı · 1 yarı açık · 2 açık)" → game day başlamadan **0** olmalı (değilse script uyarır: trafik almayan pod'un breaker'ı açıldığı anda donar). `redis` ve `kafka` çizgileri hep 0'da durur (etraflarında breaker yok); hareket edebilen tek çizgi `postgres`: yalnızca önbellek ıskaları veritabanına gittiği için paket kaybı ancak o sorguları düşürürse 1–2'ye çıkar, çıkmıyorsa önbellek yükü emmiştir — bu da bir sonuçtur.

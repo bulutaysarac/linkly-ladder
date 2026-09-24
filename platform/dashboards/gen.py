@@ -34,13 +34,73 @@ def panel(kind, title, targets, unit="short", w=12, h=8, desc="", extra=None):
     if extra: p.update(extra)
     return p
 
-def ts(title, exprs, unit="short", w=12, h=8, desc="", stacked=False):
-    p = panel("timeseries", title, [target(e, l) for e, l in exprs], unit, w, h, desc)
-    if stacked: p["fieldConfig"]["defaults"]["custom"] = {"stacking": {"mode": "normal"}, "fillOpacity": 20}
+# İşlemci, BİR ÇEKİRDEĞİN YÜZDESİ olarak gösterilir (top gibi): %100 = bir çekirdeğin tamamı,
+# iki çekirdek kullanan süreç %200. Kubernetes'in birimiyle karşılığı: 50m = %5, 1 = %100.
+CPU_PCT = "percent"
+
+# SAYMA PANELLERİ: pod, restart, replika, kullanıcı gibi değerler tam sayıdır. Eksen tam sayı
+# gösterir ve çizgi basamaklıdır: 1'den 0'a inen bir değer arada 0.5 olmaz, o anda iner.
+COUNTS = {
+    "Yeniden başlatma (toplam)", "Pod sayısı", "Yeniden başlatma sayısı",
+    "Pod durumları", "Hazır pod adresi (endpoint) sayısı", "Goroutine sayısı",
+    "Kayıtlı link sayısı (pod'a göre)", "Önbellekteki kayıt (pod'a göre)", "Kuyruk doluluğu (pod'a göre)",
+    "Redis ayakta mı", "Broker ayakta mı", "Otomatik ölçekleyici: istenen / mevcut pod", "Yer bekleyen pod",
+    "Düğüm başına pod", "Devre kesici durumu (0 kapalı · 1 yarı açık · 2 açık)", "Şu an işlenen istek (pod'a göre)",
+    "Dağıtım aşaması (Argo Rollouts)", "Sanal kullanıcı (zaman içinde)",
+    "Sanal kullanıcı", "Açık bağlantı", "Şu an işlenen istek", "Önbellekteki kayıt", "Kayıtlı link sayısı",
+}
+
+def as_count(p):
+    d = p["fieldConfig"]["defaults"]
+    d["decimals"] = 0
+    if p["type"] == "timeseries":
+        d["min"] = 0
+        d.setdefault("custom", {})["lineInterpolation"] = "stepAfter"
     return p
 
+# EKSEN SIFIRDAN BAŞLAR. Grafana ekseni verinin aralığına sığdırır: 4.63 → 4.72 MiB'lik %2'lik
+# oynama uçurum, 0.002 → 0.005 m'lik gürültü dalga gibi görünür. Büyüklük gösteren her panel
+# 0'dan başlar; yalnızca 1'e yakın oranlar (küçük düşüşün kendisi haberdir) ve eksiye inebilen
+# değerler yakınlaştırılır.
+ZOOMED = {"Erişilebilirlik (5xx olmayan isteklerin oranı)", "Kalan hata bütçesi"}
+# İşlemci panelleri en az %10'luk eksenle çizilir: boştaki binde birlik gürültü düz görünür,
+# gerçek yük (yüzde onlar) eksenin kendisini büyütür.
+CPU_SOFT_MAX = 10
+
+def ts(title, exprs, unit="short", w=12, h=8, desc="", stacked=False):
+    p = panel("timeseries", title, [target(e, l) for e, l in exprs], unit, w, h, desc)
+    d = p["fieldConfig"]["defaults"]
+    if stacked: d["custom"] = {"stacking": {"mode": "normal"}, "fillOpacity": 20}
+    if title not in ZOOMED: d["min"] = 0
+    if unit == CPU_PCT and "CPU" in title: d.setdefault("custom", {})["axisSoftMax"] = CPU_SOFT_MAX
+    return as_count(p) if title in COUNTS else p
+
 def stat(title, expr, unit="short", w=6, h=4, desc=""):
-    return panel("stat", title, [target(expr)], unit, w, h, desc)
+    p = panel("stat", title, [target(expr)], unit, w, h, desc)
+    return as_count(p) if title in COUNTS else p
+
+def threshold_pct(p, warn, crit):
+    """0-100 ölçeği ve kesikli eşik çizgileri: 'sınıra ne kadar yakın' tek bakışta okunur."""
+    d = p["fieldConfig"]["defaults"]
+    d.update(min=0, max=100, thresholds={"mode": "absolute", "steps": [
+        {"color": "green", "value": None}, {"color": "yellow", "value": warn}, {"color": "red", "value": crit}]})
+    d.setdefault("custom", {})["thresholdsStyle"] = {"mode": "dashed"}
+    return p
+
+def reasons(p):
+    """Değeri hep 1 olan 'sebep' serilerini çizgi yerine ad olarak göster: 'pod: Error'."""
+    p["options"].update(textMode="name", graphMode="none", colorMode="background", justifyMode="center")
+    p["fieldConfig"]["defaults"]["color"] = {"mode": "fixed", "fixedColor": "orange"}
+    p["fieldConfig"]["overrides"] += [{"matcher": {"id": "byRegexp", "options": f".*: {r}"},
+        "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": c}}]}
+        for r, c in (("OOMKilled", "red"), ("Completed", "green"))]
+    return p
+
+def colors(p, by_name):
+    """Seri adına sabit renk: aynı anlam her dashboard'da aynı renkte görünür."""
+    p["fieldConfig"]["overrides"] += [{"matcher": {"id": "byName", "options": n},
+        "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": c}}]} for n, c in by_name.items()]
+    return p
 
 def text(md, w=24, h=3):
     return panel("text", "", md, w=w, h=h)
@@ -107,18 +167,21 @@ D["00-overview"] = dashboard("overview", "00 · Overview (tüm seviyeler)", [
 
 D["01-pods-resources"] = dashboard("pods", "01 · Pods & Resources", [
     text("Pod'lar yaşıyor mu, ne kadar kaynak yiyor? Veri uygulamadan değil Kubernetes'ten gelir; bu yüzden **00'da da doludur** (Go çalışma zamanı satırları 01'den itibaren). Her panelin (i) simgesi ne göstereceğini anlatır."),
-    ts("CPU kullanımı (çekirdek)", [(f'sum(rate(container_cpu_usage_seconds_total{{{APP}}}[2m])) by (pod)', "{{pod}}")], "short", 8,
-       desc="Pod başına kullanılan işlemci; 1 = bir çekirdeğin tamamı. Yükle birlikte yükselir."),
+    ts("CPU kullanımı (bir çekirdeğin %'si)", [(f'sum(rate(container_cpu_usage_seconds_total{{{APP}}}[2m])) by (pod) * 100', "{{pod}}")], CPU_PCT, 8,
+       desc="Pod başına kullanılan işlemci, bir çekirdeğin yüzdesi: %100 = bir çekirdeğin tamamı, iki çekirdek kullanan pod %200. Kubernetes birimiyle 50m = %5. Yükle birlikte yükselir; boşta %0 civarı normaldir. Son 2 dakikanın ortalamasıdır ve küme metrikleri 30 sn'de bir toplanır: 30 sn'den kısa yaşayan bir konteynerin CPU'su hiç görünmez."),
     ts("CPU kısıtlama (throttling)", [(f'sum(rate(container_cpu_cfs_throttled_seconds_total{{{APP}}}[2m])) by (pod)', "{{pod}}")], "short", 8,
        desc="Pod CPU sınırına dayandığı için bekletildiği süre (saniye/saniye). UYARI: bu kurulumda (cgroup v1) bu metrik üretilmiyor — panel boş kalır (P07-04, ortam sınırı)."),
-    ts("Bellek kullanımı", [(f'sum by (pod) (container_memory_working_set_bytes{{{APP}}})', "{{pod}}"), (f'max(kube_pod_container_resource_limits{{{NS},resource="memory"}}) by (pod)', "sınır: {{pod}}")], "bytes", 8,
-       desc="Pod'un gerçekten kullandığı bellek (Kubernetes'te 'working set') ve üst sınırı. Kullanım sınır çizgisine değerse pod OOMKilled ile öldürülür (bkz. 'Son sonlanma nedeni')."),
+    ts("Bellek kullanımı", [(f'sum by (pod) (container_memory_working_set_bytes{{{APP}}})', "{{pod}}")], "bytes", 8,
+       desc="Pod'un gerçekten kullandığı bellek (Kubernetes'te 'working set'). Eksen kullanıma göre ölçeklenir, büyüme şekli burada okunur; sınıra ne kadar yakın olduğu 'Bellek: sınırın yüzde kaçı' panelinde."),
+    threshold_pct(ts("Bellek: sınırın yüzde kaçı", [(f'100 * sum by (pod) (container_memory_working_set_bytes{{{APP}}}) / sum by (pod) (kube_pod_container_resource_limits{{{NS},resource="memory"}})', "{{pod}}")], "percent", 8,
+       desc="Kullanılan bellek, pod'un bellek sınırının yüzde kaçı. %100'e değen konteyner OOMKilled ile öldürülür (bkz. 'Son sonlanma nedeni'); sarı çizgi %80, kırmızı %100. Sınır tanımlı değilse panel boş kalır."), 80, 100),
     ts("Yeniden başlatma sayısı", [(f'kube_pod_container_status_restarts_total{{{NS}}}', "{{pod}}")], "short", 8,
        desc="Konteynerin kaç kez yeniden başladığı. Basamak basamak artıyorsa pod ölüp diriliyor; sebebi yandaki panelde ve pod'un --previous logunda."),
-    ts("Son sonlanma nedeni", [(f'kube_pod_container_status_last_terminated_reason{{{NS}}}', "{{pod}}: {{reason}}")], "short", 8,
-       desc="Pod en son NEDEN öldü: Error = süreç kendisi çöktü · OOMKilled = bellek sınırı aşıldı · Completed = düzgün kapandı (rollout, silme)."),
-    ts("Pod durumları", [(f'sum(kube_pod_status_phase{{{NS}}}) by (phase)', "{{phase}}")], "short", 8, stacked=True,
-       desc="Kaç pod hangi aşamada: Running (çalışıyor) · Pending (yer bekliyor) · Failed · Succeeded (iş bitti, ör. migration)."),
+    reasons(panel("stat", "Son sonlanma nedeni", [target(f'kube_pod_container_status_last_terminated_reason{{{NS}}}', "{{pod}}: {{reason}}")], "short", 8, 8,
+       desc="Her pod en son NEDEN öldü, düz metin: Error = süreç kendisi çöktü (turuncu) · OOMKilled = bellek sınırı aşıldı (kırmızı) · Completed = düzgün kapandı, ör. rollout ya da silme (yeşil). Hiç ölmemiş pod burada görünmez.")),
+    colors(ts("Pod durumları", [(f'sum(kube_pod_status_phase{{{NS}}}) by (phase) > 0', "{{phase}}")], "short", 8,
+       desc="Kaç pod hangi aşamada; yalnızca o an pod'u olan aşamalar çizilir: Running (çalışıyor) · Pending (başlamayı bekliyor) · Failed · Succeeded (iş bitti, ör. migration Job'ı). Dikkat: çöküp yeniden başlatılan (CrashLoopBackOff) bir pod burada hâlâ Running görünür — aşama pod'un, çöküş konteynerin durumudur; çöküşü 'Yeniden başlatma sayısı' ve 'Son sonlanma nedeni' gösterir."),
+       {"Running": "green", "Pending": "yellow", "Failed": "red", "Succeeded": "blue", "Unknown": "purple"}),
     ts("Goroutine sayısı", [(f'go_goroutines{{{NS}}}', "{{pod}}")], "short", 8,
        desc="Go uygulamasının eşzamanlı iş parçacığı sayısı (01+). Sürekli artıyorsa asılı kalan bağlantılar/istekler birikiyor."),
     ts("Heap bellek (Go)", [(f'go_memstats_heap_alloc_bytes{{{NS}}}', "{{pod}}")], "bytes", 8,
@@ -204,8 +267,8 @@ D["05-postgres"] = dashboard("postgres", "05 · Postgres", [
     ts("Bağlantılar ve üst sınır", [(PG(f'sum(pg_stat_activity_count{{{NS}}}) by (state)', f'sum(cnpg_backends_total{{{NS}}}) by (state)'), "{{state}}"),
                                    (PG(f'max(pg_settings_max_connections{{{NS}}})', f'max(cnpg_pg_settings_setting{{{NS},name="max_connections"}})'), "üst sınır")], "short", 12, stacked=False,
        desc="Duruma göre bağlantılar (active = sorgu çalıştırıyor · idle = boşta) ve üst sınır. Sınıra yapışınca yeni bağlantılar 'too many clients' ile reddedilir (P02-02)."),
-    ts("Veritabanı CPU", [(f'sum(rate(container_cpu_usage_seconds_total{{{DBPODS}}}[2m])) by (pod)', "{{pod}}")], "short", 12,
-       desc="Postgres (ve 09+'da bağlantı havuzu) pod'larının işlemci kullanımı, çekirdek. Her yönlendirme DB'ye gidiyorsa yükle birlikte tırmanır (P02-01)."),
+    ts("Veritabanı CPU", [(f'sum(rate(container_cpu_usage_seconds_total{{{DBPODS}}}[2m])) by (pod) * 100', "{{pod}}")], CPU_PCT, 12,
+       desc="Postgres (ve 09+'da bağlantı havuzu) pod'larının işlemci kullanımı, bir çekirdeğin yüzdesi (%100 = bir çekirdek). Her yönlendirme DB'ye gidiyorsa yükle birlikte tırmanır (P02-01)."),
     ts("Uygulama havuzu: bağlantı bekleme (p99)", [(f'histogram_quantile(0.99, sum(rate(db_pool_acquire_duration_seconds_bucket{{{NS}}}[1m])) by (le, pod))', "{{pod}}")], "s", 12,
        desc="Uygulamanın havuzdan boş bağlantı almak için beklediği süre. Havuz doluysa büyür."),
     ts("Uygulama havuzu: boş bağlantı bulunamadı / sn", [(f'sum(rate(db_pool_empty_acquire_total{{{NS}}}[1m])) by (pod)', "{{pod}}")], "reqps", 12,
@@ -232,8 +295,8 @@ D["06-redis"] = dashboard("redis", "06 · Redis", [
     ts("Bellek ve üst sınır", [(f'sum(redis_memory_used_bytes{{{NS}}})', "kullanılan"), (f'max(redis_memory_max_bytes{{{NS}}})', "üst sınır")], "bytes", 12, desc="Kullanım sınıra değince yeni yazmalar reddedilebilir (P04-06)."),
     ts("Silinen / süresi dolan anahtar", [(f'sum(rate(redis_evicted_keys_total{{{NS}}}[1m]))', "yer açmak için silindi"), (f'sum(rate(redis_expired_keys_total{{{NS}}}[1m]))', "süresi doldu")], "ops", 12,
        desc="Yer açmak için atılanlar ve TTL'i dolanlar."),
-    ts("Redis CPU", [(f'sum(rate(container_cpu_usage_seconds_total{{{REDISPODS}}}[2m])) by (pod)', "{{pod}}")], "short", 12,
-       desc="Redis pod'unun işlemci kullanımı (çekirdek). Redis tek çekirdek kullanır: 1'e yaklaşınca tavandadır (sıcak anahtar, P04-03)."),
+    ts("Redis CPU", [(f'sum(rate(container_cpu_usage_seconds_total{{{REDISPODS}}}[2m])) by (pod) * 100', "{{pod}}")], CPU_PCT, 12,
+       desc="Redis pod'unun işlemci kullanımı, bir çekirdeğin yüzdesi. Redis komutları tek çekirdekte işler: %100'e yaklaşınca tavandadır (sıcak anahtar, P04-03)."),
     ts("Komutlar (türe göre)", [(f'sum(rate(redis_commands_total{{{NS}}}[1m])) by (cmd)', "{{cmd}}")], "ops", 12, stacked=True,
        desc="get / set / del … KEYS görünüyorsa alarm: tüm anahtarları tarar ve Redis'i kilitler (P04-07)."),
     ts("Uygulama → Redis gecikmesi (p99)", [(f'histogram_quantile(0.99, sum(rate(dependency_request_duration_seconds_bucket{{{NS},dep="redis"}}[1m])) by (le))', "p99")], "s", 12,
@@ -383,6 +446,10 @@ D["15-k6"] = dashboard("k6", "15 · k6 (client tarafı)", [
     ts("Senaryoya özel ölçüler", [('k6_ryw_violations_total{level="$level"}', "read-your-writes ihlali"), ('k6_normal_client_latency_p99{level="$level"}', "normal kullanıcı p99")], "short", 12,
        desc="Belirli senaryoların özel ölçüleri: read-your-writes ihlali (09) ve normal kullanıcının gecikmesi (08)."),
 ])
+
+# COUNTS'taki bir başlık yazım hatasıyla hiçbir panele denk gelmezse tam sayı biçimi sessizce kaybolur.
+_titles = {q["title"] for d in D.values() for q in d["panels"]}
+assert COUNTS <= _titles, f"COUNTS'ta panelsiz başlık: {sorted(COUNTS - _titles)}"
 
 OUT.mkdir(exist_ok=True)
 for f in OUT.glob("*.json"): f.unlink()

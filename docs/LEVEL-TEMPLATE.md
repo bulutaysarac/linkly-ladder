@@ -37,7 +37,7 @@ flowchart LR
 Bu seviyenin platformdan istediği: **<profile.sh'taki bileşenler>**. `make up` ilk adımda (profil) bunları açar ve kullanılmayanları kapatır; bir bileşen kurulu değilse hangi komutla kurulacağını söyleyip durur.
 
 ```bash
-make up            # profil → build → push → deploy → rollout wait → smoke
+make up            # profil → Grafana'yı temizle → build → push → deploy → rollout wait → smoke
 code=$(curl -s -XPOST http://lvlNN.localtest.me/api/links -H 'Content-Type: application/json' -d '{"url":"https://example.com"}' | jq -r .code); echo "$code"
 curl -s -o /dev/null -w '%{http_code} → %{redirect_url}\n' http://lvlNN.localtest.me/$code   # 302 → https://example.com
 make grafana       # Ladder klasörü, level=lvlNN — giriş: admin / ladder
@@ -45,6 +45,27 @@ make load S=mixed  # aynı senaryolar her seviyede: create redirect mixed hot-ke
 make repro P=PNN-01   # §6'daki bir sorunu otomatik üret → REPRODUCED / NOT-REPRODUCED
 make env           # açık ayar/tuzaklar · değiştir: make set E="KEY=değer" · hepsini geri al: make reset (§7)
 make down          # seviyeyi kaldır · kümeyi durdurmak için: make -C ../platform stop
+```
+
+**Rehber — bu seviyeyi baştan sona, sırayla.** Komut bloklarında açıklama yok; her bloğu olduğu gibi yapıştırabilirsin.
+
+1. Önceki seviye açıksa kapat (aynı anda tek seviye çalışır), bu seviyeyi kur. `make up` Grafana'yı da temizler:
+```bash
+make -C ../<önceki-seviye-klasörü> down
+make up
+```
+2. Önceki seviyenin sorunlarını bu seviyede koş. Koşarken başka komut çalıştırma: aynı pod'lara dokunurlar.
+   Çıktıdaki `BEKLENEN` sütunu `NOT-REPRODUCED` diyorsa bu seviye o sorunu çözmüş olmalı:
+```bash
+make verify-prev
+```
+3. §6'daki sorunları sırayla yaşa (PNN-01 → …). Her sorunda aynı düzen: **Elle** bloklarını sırayla yapıştır
+   (ilk komut `make fresh`: Grafana bu deneye boş başlar) → **Terminalde ne görmelisin** ile karşılaştır →
+   **Grafana'da gör** linklerini aç. İstersen aynı deneyi `make repro P=…` ile otomatik koş.
+4. Bitince açık kalan ayarları geri al ve seviyeyi kapat:
+```bash
+make reset
+make down
 ```
 
 ## 5. API
@@ -64,8 +85,23 @@ Her sorun için alt bölüm (docs/PROBLEM-TEMPLATE.md kalıbı):
 **Belirti:** …
 **Neden:** …
 **Reproduce (adım adım):**
-  1. …
-  2. …
+
+Otomatik — ölçer ve hüküm basar: `make repro P=PNN-01` (yıkıcı adım varsa `CONFIRM=1` ile; scriptin ne yaptığı, tek cümle).
+
+Elle — sırayla yapıştır (bloklarda yorum YOK: varsayılan zsh `#`'i komutun argümanı yapar; açıklama adım metninde):
+
+1. <adımın açıklaması>:
+```bash
+make fresh
+<komutlar — host açık: http://lvlNN.localtest.me; değişkenler bu sorunun bloklarında tanımlı>
+```
+2. <açıklama; ayar/tuzak açıldıysa son adım geri alır: make reset · replika geri · make unchaos · kubectl uncordon>:
+```bash
+<komutlar>
+```
+
+**Terminalde ne görmelisin:** <her adımın çıktısında görülecek somut dizeler/sayılar: HTTP kodları, `k6 lvlNN: reqs=… 5xx=… 404=… 429=… p99=…`, kubectl çıktısı>
+(tools/lint-guide.py: Otomatik + Elle + ilk komut `make fresh` + "Terminalde ne görmelisin", yorumsuz ve `bash -n`/`zsh -n` temiz bloklar)
 **Grafana'da gör:** [`<NN · dashboard>`](http://grafana.localtest.me/d/<uid>?var-level=lvlNN&from=now-15m&to=now&refresh=10s) — <ne zaman aç> (giriş: admin / ladder)
 - "<panelin TAM başlığı>" → <okuyucu ne görecek: yön/şekil/değer ve ne anlama geldiği>
 - Explore'da: `<promql>` → <ne göreceksin>   (yalnızca hiçbir panel göstermiyorsa)
