@@ -119,7 +119,7 @@ func TestShedderRejectsAboveLimitButNeverHealth(t *testing.T) {
 	s := NewShedder(1, true, m)
 	block := make(chan struct{})
 	// Yalnızca iş yolundaki istekler bloklansın; sağlık ucu serbest kalsın, yoksa test kendi
-	// kendini kilitler (ilk yazımda tam olarak bu oldu).
+	// kendini kilitler: /healthz çağrısı da bloklanır ve close(block) satırına hiç ulaşılmaz.
 	h := s.Middleware(blockingExcept(block, "/healthz", "/readyz", "/metrics"))
 
 	go func() { h.ServeHTTP(newRecorder(), newRequest("/abc")) }()

@@ -7,7 +7,11 @@
   3. Tetikleyici: `kubectl …` / `make chaos C=…` / `TRAP_… =1`
   4. Gözlem: ne göreceksin, kaç saniye içinde
   5. `make repro P=PNN-XX` aynı adımları otomatik koşar; son satır REPRODUCED / NOT-REPRODUCED
-**Grafana:** `<dashboard>` → "<panel>" (level=lvlNN); PromQL: `…`
+**Grafana'da gör:** [`<NN · dashboard>`](http://grafana.localtest.me/d/<uid>?var-level=lvlNN&from=now-15m&to=now&refresh=10s) — <ne zaman aç> (giriş: admin / ladder)
+- "<panelin TAM başlığı>" → <okuyucu ne görecek: yön/şekil/değer ve ne anlama geldiği>
+- Explore'da: `<promql>` → <ne göreceksin>   (yalnızca hiçbir panel göstermiyorsa)
+  Grafana'da görülemiyorsa: `**Grafana'da gör:** Grafana'da görünmez — <neden>. Kanıt terminalde:` + `- \`<komut>\` → <beklenen çıktı>`
+  (tools/lint-grafana.py: dashboard ve panel adları GERÇEKTEN var olmalı)
 **Nerede çözülüyor:** Seviye NN+k (ne ile). Geçici çare varsa ve neden yetmediği.
 
 ---
@@ -55,10 +59,10 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 8. Metrik adının var olduğunu **varsayma**: yoksa `promq` sessizce `0` döner ve script "sorun yok" der.
 9. **Tuzağın koda bağlı olduğunu doğrula.** Config'de tanımlı ama hiçbir yerde okunmayan bir
    `TRAP_*`, deneyi bir tiyatroya çevirir: bayrak açılır, sistem değişmez, script yine karar
-   basar. `tools/lint-skeleton.sh` bunu artık yakalıyor — ama önce sen yakala.
+   basar. `tools/lint-skeleton.sh` bunu yakalar — ama önce sen yakala.
 10. **Düşemeyen bir deney, deney değildir.** Kararı yazdıktan sonra şu soruyu sor: *iddiam yanlış
-   olsaydı bu ölçü ne gösterirdi?* Cevap "aynı şeyi" ise ölçüyü değiştir. (P08-04 tuzağı hiç
-   açmıyordu; P11-08 "metriklerde görünmez" tezini metrik farkıyla sınıyordu.)
+   olsaydı bu ölçü ne gösterirdi?* Cevap "aynı şeyi" ise ölçüyü değiştir. (Tipik iki örnek:
+   tuzağı hiç açmayan bir script; "metriklerde görünmez" tezini metrik farkıyla sınayan bir script.)
 11. **Cevabı kendi yapılandırmanla sabitlenmiş soruyu sorma.** Seviye `hot_standby_feedback=on`
    diyorsa "çakışma oldu mu?" sorusunun cevabı zaten hayırdır; pazarlığın **ödenen** tarafını ölç
    (P09-04).
@@ -75,6 +79,5 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 `problems/SOLVES`, "bir önceki seviyenin şu sorunları artık reproduce OLMAMALI" listesidir ve
 `make verify-prev` bunu zorlar. Bir sorun `TRAP_` bayrağıyla üretiliyorsa (script tuzağı kendisi
 açıyorsa) o sorun **her seviyede reproduce olur** — tuzak orada durduğu sürece. Böyle bir ID'yi
-SOLVES'a yazmak, doğrulamayı kalıcı olarak kırmış olmak demektir (08, P07-06 ile tam olarak bunu
-yaptı). TRAP'ler seviye içi alıştırmadır; kalıcı çözüm geldiğinde tuzağın KENDİSİ kaldırılır ve
+SOLVES'a yazmak, doğrulamayı kalıcı olarak kırmış olmak demektir. TRAP'ler seviye içi alıştırmadır; kalıcı çözüm geldiğinde tuzağın KENDİSİ kaldırılır ve
 sorun zaten listelenemez hâle gelir.

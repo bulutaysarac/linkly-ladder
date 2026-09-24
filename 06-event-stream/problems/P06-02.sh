@@ -43,7 +43,7 @@ for _ in $(seq 1 40); do
   sleep 3
 done
 final=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0') || true
-grafana_hint "08 · Stream → 'consumer lag by partition' + 'produced vs consumed vs written'"
+grafana_hint "08 · Stream → 'Tüketici gecikmesi (bölüme göre)' + 'Üretilen ve tüketilen olaylar (toplam)'"
 note "elle açtıktan sonra son sayım: $(( final - before )) / $N — veri KAYBOLMADI, sadece bekledi"
 note "Lag bir HATA değil bir ÖLÇÜDÜR: 'ne kadar geriden geliyoruz'. Alarm eşiği bir ürün kararıdır."
 note "07: KEDA lag'i ölçekleme sinyali yapacak — tüketici sayısı otomatik artacak."

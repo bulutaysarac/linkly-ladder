@@ -50,19 +50,19 @@ spec:
       path: /metrics
       interval: 15s
 ---
-# Kyverno'nun KENDİ metrikleri — panel vardı, veri yoktu.
+# Kyverno'nun KENDİ metrikleri — panelin verisi buradan gelir.
 #
 # EN: level 13's dashboard has a "Kyverno policy results" panel and P13-07 points the reader at
 #     it. Kyverno exposes `kyverno_policy_results_total` on its metrics Service, but nothing
-#     scraped it, so the panel was permanently empty. A panel that is always empty is worse than
-#     a missing panel: the reader concludes "no policy violations" instead of "no data".
-#     Same failure shape as Loki/Alloy above — the tool ships metrics, the cluster just never
-#     asked for them.
+#     scrapes it unless asked, and the panel would stay permanently empty. A panel that is always
+#     empty is worse than a missing panel: the reader concludes "no policy violations" instead of
+#     "no data". Same failure shape as Loki/Alloy above — the tool ships metrics, the cluster
+#     has to ask for them.
 # TR: 13'ün dashboard'unda "Kyverno policy sonuçları" paneli var ve P13-07 okuyucuyu oraya
-#     yönlendiriyor. Kyverno `kyverno_policy_results_total`'ı metrik Service'inde yayınlıyor ama
-#     kimse kazımıyordu, yani panel kalıcı olarak boştu. HER ZAMAN boş olan bir panel, olmayan
-#     bir panelden kötüdür: okuyucu "ihlal yok" diye okur, "veri yok" diye değil.
-#     Yukarıdaki Loki/Alloy ile aynı arıza biçimi — araç metrik üretiyor, küme hiç sormuyor.
+#     yönlendiriyor. Kyverno `kyverno_policy_results_total`'ı metrik Service'inde yayınlar ama
+#     istenmedikçe kimse kazımaz ve panel kalıcı olarak boş kalır. HER ZAMAN boş olan bir panel,
+#     olmayan bir panelden kötüdür: okuyucu "ihlal yok" diye okur, "veri yok" diye değil.
+#     Yukarıdaki Loki/Alloy ile aynı arıza biçimi — araç metrik üretir, küme onu istemek zorundadır.
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:

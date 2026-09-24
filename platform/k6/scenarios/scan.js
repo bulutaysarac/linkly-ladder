@@ -8,7 +8,7 @@ function randomCode(n) { let s = ''; for (let i = 0; i < n; i++) s += alphabet[M
 // KEYS: SINIRLI bir "yok olan kod" havuzu. Varsayılan (0) sınırsızdır ve her istek YENİ bir kod
 // üretir — bu, enumeration/tarama senaryosudur. Ama NEGATİF ÖNBELLEĞİN faydasını ölçmek için
 // sınırsız havuz YANLIŞ bir yüktür: aynı eksik anahtar hiç tekrarlanmazsa önbellekte tutulacak
-// bir cevap da yoktur, yani deney iddiasını sınayamaz (P03-06 tam olarak böyle ters sonuç verdi).
+// bir cevap da yoktur, yani deney iddiasını sınayamaz ve ters sonuç verir (P03-06 KEYS ile koşar).
 // EN: an unbounded pool never repeats a missing key, so a negative cache has nothing to serve —
 // the wrong load for measuring it. KEYS=N replays N missing codes so the cache can actually hit.
 export function setup() {

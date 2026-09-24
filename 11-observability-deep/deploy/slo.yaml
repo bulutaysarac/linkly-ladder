@@ -43,6 +43,9 @@ spec:
     - name: linkly-slo-sli
       interval: 30s
       rules:
+        # `namespace` ETİKETİ ŞART: `sum(...)` onu düşürür ve dashboard `namespace="$level"` filtreler —
+        # etiket olmadan 12 · SLO'nun her paneli BOŞ kalır (alarmlar da namespace'siz ateşler).
+        # EN: sum() drops `namespace`; the dashboard filters on it, so without it every SLO panel is empty.
         # SLI: hata oranı. Her pencere için ayrı bir kayıt kuralı — alarmlar bunları kullanır,
         # böylece sorgu tek yerde tanımlı kalır ve alarmlar okunabilir olur.
         - record: slo:sli_error:ratio_rate5m
@@ -50,30 +53,36 @@ spec:
             sum(rate(http_requests_total{namespace="lvl11",route="/{code}",code=~"5.."}[5m]))
             /
             clamp_min(sum(rate(http_requests_total{namespace="lvl11",route="/{code}"}[5m])), 0.001)
-          labels: { sloth_slo: redirect-availability }
+          labels: { sloth_slo: redirect-availability, namespace: lvl11 }
         - record: slo:sli_error:ratio_rate30m
           expr: |
             sum(rate(http_requests_total{namespace="lvl11",route="/{code}",code=~"5.."}[30m]))
             /
             clamp_min(sum(rate(http_requests_total{namespace="lvl11",route="/{code}"}[30m])), 0.001)
-          labels: { sloth_slo: redirect-availability }
+          labels: { sloth_slo: redirect-availability, namespace: lvl11 }
         - record: slo:sli_error:ratio_rate1h
           expr: |
             sum(rate(http_requests_total{namespace="lvl11",route="/{code}",code=~"5.."}[1h]))
             /
             clamp_min(sum(rate(http_requests_total{namespace="lvl11",route="/{code}"}[1h])), 0.001)
-          labels: { sloth_slo: redirect-availability }
+          labels: { sloth_slo: redirect-availability, namespace: lvl11 }
         - record: slo:sli_error:ratio_rate6h
           expr: |
             sum(rate(http_requests_total{namespace="lvl11",route="/{code}",code=~"5.."}[6h]))
             /
             clamp_min(sum(rate(http_requests_total{namespace="lvl11",route="/{code}"}[6h])), 0.001)
-          labels: { sloth_slo: redirect-availability }
+          labels: { sloth_slo: redirect-availability, namespace: lvl11 }
         # Hata bütçesi: 1 - hedef. %99.9 → 0.001
         - record: slo:error_budget:ratio
           expr: vector(0.001)
-          labels: { sloth_slo: redirect-availability }
+          labels: { sloth_slo: redirect-availability, namespace: lvl11 }
         # Kalan bütçe (30 günlük pencere) — panelde yüzde olarak gösterilir.
+        # DİKKAT: bu kurulumda Prometheus yalnızca 6 SAAT saklıyor (platform/helm/kube-prometheus-stack
+        # .values.yaml → retention: 6h). `[30d]` penceresi elinde olan veriyle yetinir: "30 günlük
+        # bütçe" burada fiilen SON 6 SAATİN trafiğidir. Az trafikli bir laboratuvarda tek bir sıçrama
+        # bütçeyi büyük ölçüde — hatta sıfırın altına kadar — yiyebilir; üretimde bu pencere 30 gün
+        # veriyle dolar ve aynı sıçrama bütçenin küçük bir kırıntısıdır.
+        # EN: Prometheus keeps 6 h here, so the 30 d window is effectively the last 6 h of traffic.
         - record: slo:period_error_budget_remaining:ratio
           expr: |
             1 - (
@@ -81,7 +90,7 @@ spec:
                / clamp_min(sum(increase(http_requests_total{namespace="lvl11",route="/{code}"}[30d])), 1))
               / 0.001
             )
-          labels: { sloth_slo: redirect-availability }
+          labels: { sloth_slo: redirect-availability, namespace: lvl11 }
 
     - name: linkly-slo-alerts
       rules:

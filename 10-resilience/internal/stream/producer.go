@@ -2,6 +2,7 @@ package stream
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync/atomic"
 	"time"
@@ -43,6 +44,9 @@ type Producer struct {
 }
 
 func NewProducer(brokers []string, topic string, maxBuffered int, m *ProducerMetrics, log *slog.Logger) (*Producer, error) {
+	if maxBuffered < 1 {
+		maxBuffered = 1
+	}
 	cl, err := kgo.NewClient(
 		kgo.SeedBrokers(brokers...),
 		kgo.DefaultProduceTopic(topic),
@@ -59,6 +63,20 @@ func NewProducer(brokers []string, topic string, maxBuffered int, m *ProducerMet
 		kgo.ProducerLinger(20*time.Millisecond),
 		kgo.RecordRetries(5),
 		kgo.RetryTimeout(10*time.Second),
+		// EN: franz-go has its OWN buffer limit — 10,000 records by default — and at that limit
+		//     Produce BLOCKS. Our limit (PRODUCER_MAX_BUFFERED, 50,000) is above that default, so
+		//     with the default left in place a long broker outage makes the library block first:
+		//     Record() stalls the redirect request and our drop counter can never fire. The app's
+		//     limit must be the effective one; the client's is only a safety net above it (and
+		//     TryProduce below never blocks on it).
+		// TR: franz-go'nun KENDİ tampon sınırı var — varsayılan 10.000 kayıt — ve o sınırda
+		//     Produce BLOKLAR. Bizim sınırımız (PRODUCER_MAX_BUFFERED, 50.000) bu varsayılanın
+		//     üstünde; varsayılan yerinde kalırsa uzun bir broker kesintisinde önce kütüphane
+		//     bloklar: Record() redirect isteğini bekletir, bizim düşürme sayacımız hiç
+		//     tetiklenemez. Geçerli sınır uygulamanınki
+		//     olmalı; istemcininki onun üstünde yalnızca bir güvenlik ağı (aşağıdaki TryProduce
+		//     ona çarpsa bile bloklamaz).
+		kgo.MaxBufferedRecords(2*maxBuffered),
 	)
 	if err != nil {
 		return nil, err
@@ -68,39 +86,52 @@ func NewProducer(brokers []string, topic string, maxBuffered int, m *ProducerMet
 
 // Record — istek yolundan çağrılır ve ASLA bloklamaz.
 //
-// EN: franz-go's Produce is already asynchronous, but "asynchronous" is not the same as "bounded".
+// EN: franz-go's Produce is asynchronous, but "asynchronous" is not the same as "never waits".
 //
-//	If the broker is down, records pile up in the client's buffer until memory runs out — the
-//	unbounded-queue mistake of P05-02, moved one layer down. So we keep our own counter and
-//	DROP past a limit. A broker outage must degrade analytics, never the redirect.
+//	Its buffer is bounded (10,000 records by default) and when it is full Produce BLOCKS the
+//	caller — here, the redirect request. A bound without a drop policy only moves the waiting
+//	somewhere else: P05-02's lesson, one layer down. So we keep our own counter, DROP past it,
+//	and enqueue with TryProduce, which fails instead of waiting. A broker outage must degrade
+//	analytics, never the redirect.
 //
-// TR: franz-go'nun Produce'u zaten asenkron, ama "asenkron" ile "sınırlı" aynı şey değil. Broker
+// TR: franz-go'nun Produce'u asenkron, ama "asenkron" ile "hiç beklemez" aynı şey değil. Tamponu
 //
-//	düşerse kayıtlar istemci tamponunda bellek bitene kadar birikir — P05-02'deki sınırsız kuyruk
-//	hatasının bir kat aşağı taşınmış hâli. Bu yüzden kendi sayacımızı tutup sınırı aşınca
-//	DÜŞÜRÜYORUZ. Bir broker kesintisi analitiği bozabilir, redirect'i ASLA.
+//	sınırlı (varsayılan 10.000 kayıt) ve dolduğunda Produce çağıranı BLOKLAR — burada redirect
+//	isteğini. Düşürme politikası olmayan bir sınır, beklemeyi yalnızca başka yere taşır:
+//	P05-02'nin dersi, bir kat aşağıda. Bu yüzden kendi sayacımızı tutup sınırı aşınca
+//	DÜŞÜRÜYORUZ ve kaydı beklemek yerine hata veren TryProduce ile ekliyoruz. Bir broker
+//	kesintisi analitiği bozabilir, redirect'i ASLA.
 //
 // [Topic · Konu: Back pressure, bağımlılık izolasyonu]
 func (p *Producer) Record(code string) {
-	if p.buffered.Load() >= p.maxBuf {
+	// Önce yer AYIR, sonra üret. "Oku, sınırın altındaysa ekle" iki eşzamanlı isteği aynı son
+	// boşluğa sokabilir; Add'in dönüş değeri sınırı kesin kılar.
+	if p.buffered.Add(1) > p.maxBuf {
+		p.buffered.Add(-1)
 		p.m.Records.WithLabelValues("dropped").Inc()
 		return
 	}
+	p.m.Buffered.Set(float64(p.buffered.Load()))
 	ev := NewClickEvent(code)
 	val, err := ev.Marshal()
 	if err != nil {
+		p.buffered.Add(-1)
+		p.m.Buffered.Set(float64(p.buffered.Load()))
 		p.m.Records.WithLabelValues("error").Inc()
 		return
 	}
 	start := time.Now()
-	p.buffered.Add(1)
-	p.m.Buffered.Set(float64(p.buffered.Load()))
 	// Anahtar = kısa kod: aynı linkin olayları aynı partition'a gider, yani SIRA korunur.
 	// Bedeli: sıcak bir link tek partition'a yüklenir (P06-03 ile aynı madalyonun iki yüzü).
-	p.cl.Produce(context.Background(), &kgo.Record{Key: []byte(code), Value: val},
+	// TryProduce, Produce'un aksine istemcinin tamponu doluyken BEKLEMEZ: hemen ErrMaxBuffered döner.
+	p.cl.TryProduce(context.Background(), &kgo.Record{Key: []byte(code), Value: val},
 		func(_ *kgo.Record, err error) {
 			p.buffered.Add(-1)
 			p.m.Buffered.Set(float64(p.buffered.Load()))
+			if errors.Is(err, kgo.ErrMaxBuffered) {
+				p.m.Records.WithLabelValues("dropped").Inc()
+				return
+			}
 			p.m.Latency.Observe(time.Since(start).Seconds())
 			if err != nil {
 				p.m.Records.WithLabelValues("error").Inc()

@@ -48,22 +48,21 @@ return {1, math.floor(estimated) + 1}
 
 // TRAP_FIXED_WINDOW — sabit pencere sayacı: önceki pencereyi HİÇ hesaba katmaz.
 //
-// EN: This trap was declared in config and read NOWHERE. P08-04 claims "a fixed window lets 2x
+// EN: P08-04 claims "a fixed window lets 2x through at the boundary"; this Lua script is what
 //
-//	through at the boundary" and then measured only the sliding window, so the claim was never
-//	put to the test — the script could not have failed. A trap that is not wired to code is a
-//	comment pretending to be an experiment.
+//	lets the claim be measured instead of asserted. A trap that is not wired to code is a
+//	comment pretending to be an experiment — the script could never fail.
 //	The failure it models is real and famous: with a 10s/300 limit, 300 requests at t=9.9s and
-//	300 more at t=10.1s both pass. 600 requests in 0.2 seconds, and every single check said
-//	"within the limit", because each one looked at a different window.
+//	300 more at t=10.1s both pass. 600 requests in 0.2 seconds, and every single check says
+//	"within the limit", because each one looks at a different window.
 //
-// TR: Bu tuzak config'de tanımlıydı ve HİÇBİR YERDE okunmuyordu. P08-04 "sabit pencere sınırda
+// TR: P08-04 "sabit pencere sınırda 2x geçirir" der; bu Lua betiği iddianın varsayılmak yerine
 //
-//	2x geçirir" diyor ve yalnızca kayan pencereyi ölçüyordu; yani iddia hiç sınanmadı — script
-//	düşemezdi. Koda bağlanmamış bir tuzak, deney taklidi yapan bir yorumdur.
+//	ÖLÇÜLMESİNİ sağlar. Koda bağlanmamış bir tuzak, deney taklidi yapan bir yorumdur — script
+//	hiç düşemez.
 //	Modellediği arıza gerçek ve meşhur: 10 sn/300 limitte, t=9.9'da 300 ve t=10.1'de 300 daha
-//	geçer. 0.2 saniyede 600 istek ve her kontrol "limit içinde" dedi, çünkü her biri BAŞKA bir
-//	pencereye baktı.
+//	geçer. 0.2 saniyede 600 istek ve her kontrol "limit içinde" der, çünkü her biri BAŞKA bir
+//	pencereye bakar.
 const fixedWindowLua = `
 local key_cur = KEYS[1]
 local limit   = tonumber(ARGV[1])
@@ -97,7 +96,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	}
 	// AYNI METRİĞİ İKİ PAKET SAHİPLENİYOR: `ratelimit_decisions_total` hem burada (dağıtık
 	// limiter) hem internal/metrics'te (süreç içi yedek limiter, Redis yokken kullanılıyor)
-	// tanımlı. MustRegister ikinci kayıtta PANİKLİYOR ve api-svc hiç açılmıyordu
+	// tanımlı. MustRegister ikinci kayıtta PANİKLER ve api-svc hiç açılmaz
 	// ("duplicate metrics collector registration attempted"). Prometheus'un bunun için bir
 	// sözleşmesi var: kayıt hatası AlreadyRegisteredError ise VAR OLAN collector'ı kullan.
 	// Ders: bir metriğin adı bir SÖZLEŞMEDİR; iki sahip varsa çakışmayı yutup tek seriye yaz.

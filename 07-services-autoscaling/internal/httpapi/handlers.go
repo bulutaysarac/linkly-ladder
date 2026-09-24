@@ -124,11 +124,11 @@ func (a *API) handleRedirect(w http.ResponseWriter, r *http.Request) {
 	// EN: This is the whole point of level 05. The redirect no longer writes to the database; it
 	//     drops an event into a bounded in-process queue and returns. Record() never blocks and
 	//     never fails — if the queue is full the click is DROPPED and counted as dropped.
-	//     What used to be a row lock on the hottest row (P02-08) is now a channel send.
+	//     At levels 02–04 this was a row lock on the hottest row (P02-08); here it is a channel send.
 	// TR: 05'in bütün mesele bu. Redirect artık veritabanına yazmıyor; sınırlı bir süreç içi kuyruğa
 	//     bir olay bırakıp dönüyor. Record() ne bloklar ne de hata döndürür — kuyruk doluysa tıklama
-	//     DÜŞÜRÜLÜR ve düşürülmüş olarak sayılır. Eskiden en sıcak satırdaki bir satır kilidi olan
-	//     şey (P02-08), artık bir kanal gönderimi.
+	//     DÜŞÜRÜLÜR ve düşürülmüş olarak sayılır. 02–04'te en sıcak satırdaki bir satır kilidi olan
+	//     şey (P02-08), burada bir kanal gönderimi.
 	// [Topic · Konu: Okuma/yazma yolu ayrımı, asenkronizm]
 	a.clicks.Record(code)
 

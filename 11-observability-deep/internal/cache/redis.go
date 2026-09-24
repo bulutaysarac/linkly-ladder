@@ -7,7 +7,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bulutaysarac/linkly-ladder/11-observability-deep/internal/tracing"
 	"github.com/redis/go-redis/v9"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // Redis — L2: pod'ların DIŞINDA, paylaşılan önbellek.
@@ -36,19 +38,18 @@ type Redis[V any] struct {
 	// Bu seviyede HER ZAMAN true — ama 04'te bunun bedeli ölçülüyor (P04-01): DB o yükü kaldırabilmeli.
 	failOpen bool
 	rnd      func() float64
-	// POD İÇİ SINGLEFLIGHT — 04'te YANLIŞLIKLA DÜŞMÜŞTÜ.
-	// EN: the comment on GetOrLoad said "per-pod singleflight (kept below)" and there was no
-	//     singleflight below. L1 (the in-process LRU of level 03) had it; when the cache moved to
-	//     Redis the guard was not carried over, and TRAP_NO_SINGLEFLIGHT — which P03-05 toggles to
-	//     prove the guard exists — was left unread in config. So from level 04 on, the stampede
-	//     protection was absent AND unmeasurable, while a comment asserted it was there.
-	//     A comment is not an implementation, and a trap nobody reads cannot contradict it.
-	// TR: GetOrLoad'ın yorumu "pod içi singleflight (aşağıda korunuyor)" diyordu ve aşağıda
-	//     singleflight YOKTU. L1'de (03'ün süreç içi LRU'su) vardı; önbellek Redis'e taşınınca
-	//     koruma taşınmadı ve P03-05'in korumanın varlığını kanıtlamak için açtığı
-	//     TRAP_NO_SINGLEFLIGHT config'de okunmadan kaldı. Yani 04'ten itibaren izdiham koruması
-	//     hem YOKTU hem de ÖLÇÜLEMEZDİ, üstelik bir yorum var olduğunu iddia ediyordu.
-	//     Yorum bir gerçekleştirim değildir ve kimsenin okumadığı bir tuzak onu yalanlayamaz.
+	// POD İÇİ SINGLEFLIGHT — önbellek Redis'e taşınınca da yerinde kalır.
+	// EN: L1 (the in-process LRU of level 03) has a singleflight guard, and moving the cache to
+	//     Redis does not make it unnecessary: without it, N concurrent misses on one pod are still
+	//     N loads. TRAP_NO_SINGLEFLIGHT — which P03-05 toggles to prove the guard exists — is read
+	//     here too, so the stampede protection stays present AND measurable.
+	//     A comment is not an implementation; a trap that actually switches the code off is what
+	//     keeps the comment honest.
+	// TR: L1'de (03'ün süreç içi LRU'su) singleflight koruması var ve önbelleği Redis'e taşımak
+	//     onu gereksiz kılmaz: koruma olmadan bir pod'daki N eşzamanlı miss yine N yüklemedir.
+	//     P03-05'in korumanın varlığını kanıtlamak için açtığı TRAP_NO_SINGLEFLIGHT burada da
+	//     okunur; izdiham koruması hem VAR hem de ÖLÇÜLEBİLİR kalır.
+	//     Yorum bir gerçekleştirim değildir; yorumu dürüst tutan, kodu gerçekten kapatan tuzaktır.
 	mu      sync.Mutex
 	flights map[string]*flight[V]
 }
@@ -89,28 +90,51 @@ func (c *Redis[V]) ttl(base time.Duration) time.Duration {
 //	ıskayı birleştirir ki faydanın çoğu budur; kalan pod'lar arası izdiham istek hızıyla değil
 //	REPLİKA SAYISIYLA sınırlıdır. Kilit satın almadan önce hangi izdihama sahip olduğunu bil.
 func (c *Redis[V]) GetOrLoad(ctx context.Context, k string, load func(context.Context) (V, bool, error)) (V, error) {
+	// 11: önbellek adımı kendi span'i: Redis çağrıları (guard.redis) ve ıskada yükleme
+	// (guard.postgres → db.get) bunun çocukları. cache.result isabet/ıska/hatayı söyler.
+	ctx, span := tracing.Start(ctx, "cache.get", attribute.String("cache.layer", c.cfg.Layer))
+	result := "miss"
+	defer func() {
+		span.SetAttributes(attribute.String("cache.result", result))
+		span.End()
+	}()
 	var zero V
-	raw, err := c.rdb.Get(ctx, c.key(k)).Result()
+	var raw string
+	miss := false
+	err := c.call(ctx, func(ctx context.Context) error {
+		v, e := c.rdb.Get(ctx, c.key(k)).Result()
+		if errors.Is(e, redis.Nil) {
+			// Iska bir ARIZA DEĞİLDİR (Postgres'teki ErrNotFound gibi): devre kesiciyi tetiklememeli.
+			miss = true
+			return nil
+		}
+		raw = v
+		return e
+	})
 	switch {
-	case err == nil:
+	case err == nil && !miss:
 		if raw == negativeMarker {
 			c.m.Ops.WithLabelValues(c.cfg.Layer, "negative_hit").Inc()
+			result = "negative_hit"
 			return zero, ErrNegative
 		}
 		var v V
 		if jsonErr := json.Unmarshal([]byte(raw), &v); jsonErr != nil {
 			// Bozuk kayıt: önbelleği gerçeğin kaynağı sanma. Sil, DB'den yükle, devam et.
 			c.m.Errors.WithLabelValues("decode").Inc()
-			c.rdb.Del(ctx, c.key(k))
+			_ = c.call(ctx, func(ctx context.Context) error { return c.rdb.Del(ctx, c.key(k)).Err() })
 			break
 		}
 		c.m.Ops.WithLabelValues(c.cfg.Layer, "hit").Inc()
+		result = "hit"
 		return v, nil
-	case errors.Is(err, redis.Nil):
+	case err == nil && miss:
 		c.m.Ops.WithLabelValues(c.cfg.Layer, "miss").Inc()
 	default:
-		// Redis arızası. Önbellek YOK sayılır ve DB'ye düşülür (fail-open).
+		// Redis arızası — ya da Redis guard'ı çağrıyı hiç yapmadı (devre açık / bulkhead dolu).
+		// İkisinde de önbellek YOK sayılır ve DB'ye düşülür (fail-open, degrade "no_cache").
 		c.m.Errors.WithLabelValues("get").Inc()
+		result = "redis_error"
 		if !c.failOpen {
 			return zero, err
 		}
@@ -151,14 +175,18 @@ func (c *Redis[V]) loadAndStore(ctx context.Context, k string, load func(context
 	}
 	if !found {
 		if !c.cfg.NoNegative {
-			if err := c.rdb.Set(ctx, c.key(k), negativeMarker, c.ttl(c.cfg.NegativeTTL)).Err(); err != nil {
+			if err := c.call(ctx, func(ctx context.Context) error {
+				return c.rdb.Set(ctx, c.key(k), negativeMarker, c.ttl(c.cfg.NegativeTTL)).Err()
+			}); err != nil {
 				c.m.Errors.WithLabelValues("set").Inc()
 			}
 		}
 		return zero, ErrNegative
 	}
 	if b, err := json.Marshal(v); err == nil {
-		if err := c.rdb.Set(ctx, c.key(k), b, c.ttl(c.cfg.TTL)).Err(); err != nil {
+		if err := c.call(ctx, func(ctx context.Context) error {
+			return c.rdb.Set(ctx, c.key(k), b, c.ttl(c.cfg.TTL)).Err()
+		}); err != nil {
 			// SET başarısızlığı SESSİZ kalmamalı: önbellek yazamıyorsa her istek DB'ye iner ve
 			// sistem "önbellekli" görünmeye devam eder. P04-06 tam olarak bu durumu üretiyor.
 			c.m.Errors.WithLabelValues("set").Inc()
@@ -168,11 +196,20 @@ func (c *Redis[V]) loadAndStore(ctx context.Context, k string, load func(context
 }
 
 func (c *Redis[V]) Invalidate(ctx context.Context, k string) {
-	if err := c.rdb.Del(ctx, c.key(k)).Err(); err != nil {
+	if err := c.call(ctx, func(ctx context.Context) error { return c.rdb.Del(ctx, c.key(k)).Err() }); err != nil {
 		c.m.Errors.WithLabelValues("del").Inc()
 	} else {
 		c.m.Evictions.WithLabelValues("invalidate").Inc()
 	}
 }
 
+// Ping — guard'dan GEÇMEZ: sağlık kontrolü ham gerçeği görmeli (store.Guarded.Ping ile aynı sebep).
 func (c *Redis[V]) Ping(ctx context.Context) error { return c.rdb.Ping(ctx).Err() }
+
+// call — tek bir Redis çağrısı; guard verilmişse onun üzerinden (devre kesici, bulkhead, timeout).
+func (c *Redis[V]) call(ctx context.Context, fn func(context.Context) error) error {
+	if c.cfg.Guard == nil {
+		return fn(ctx)
+	}
+	return c.cfg.Guard(ctx, fn)
+}

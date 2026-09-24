@@ -20,8 +20,15 @@ used=$(promq "sum(pg_stat_activity_count{namespace=\"$NS\"})")
 e5=$(k6_5xx); fr=$(k6_failed_rate)
 errs=$(promq "sum(increase(db_queries_total{namespace=\"$NS\",result=\"error\"}[5m]))")
 empty=$(promq "sum(increase(db_pool_empty_acquire_total{namespace=\"$NS\"}[5m]))")
-grafana_hint "05 · Postgres → 'connections vs max' (tavana yapışma) + 'App pool: empty acquire/s'"
+# YEREL HAVUZ NE KADAR DOLDU? "Boş bağlantı bulunamadı" sayacı yalnızca bir pod'un havuzu TAVANDAYKEN
+# (25/25) artar. 80 VU 10 pod'a bölününce pod başına ~8 eşzamanlı istek düşer; hiçbir havuz tavana
+# yaklaşmaz ve o panel düz kalır. Bunu varsayma, ölç: en dolu pod havuzu kaç bağlantıya çıktı?
+# EN: the empty-acquire counter only moves when a pod's pool is at MaxConns; with ~8 concurrent
+# requests per pod it cannot. Measure the fullest pool instead of assuming it.
+fullest=$(promq "max(max_over_time(db_pool_total_conns{namespace=\"$NS\"}[5m]))")
+grafana_hint "05 · Postgres → 'Bağlantılar ve üst sınır' (tavana yapışma) + 'Uygulama havuzu: boş bağlantı bulunamadı / sn' (düz kalır)"
 note "PG aktif bağlantı: ${used%%.*} / ${maxconn%%.*} · havuz boş bekleme: ${empty%%.*} · DB hatası: ${errs%%.*} · k6 5xx: $e5"
+note "en dolu pod havuzu: ${fullest%%.*} / ${poolper%%.*} — tavan yerel havuzda değil, Postgres'te"
 note "Kanıt logda: kubectl -n $NS logs -l app.kubernetes.io/name=linkly | grep -i 'too many clients'"
 note "Asıl ders: havuz boyutu YEREL bir karar gibi görünür ama GLOBAL bir kaynağı tüketir."
 note "Doğru cevap pool'u küçültmek değil (o da kuyruk yaratır) — araya bir havuz yöneticisi koymak: 09, PgBouncer."

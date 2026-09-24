@@ -144,11 +144,26 @@ func (a *API) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 }
 
+// routeOf — metrik etiketi olarak ŞABLON rota (gerçek yol değil: kardinalite).
+//
+// EN: The stats case must come before the `/api/links/{code}` prefix case. If `/stats` falls into
+//
+//	that case, the stats endpoint has no series of its own and the "İstatistik ucu süresi (p99)"
+//	panel — which filters route="/api/links/{code}/stats" — stays empty. A panel that is empty
+//	because the label never exists looks exactly like a fast endpoint.
+//
+// TR: stats dalı, `/api/links/{code}` önek dalından ÖNCE gelmeli. `/stats` o dala düşerse stats
+//
+//	ucunun kendi serisi olmaz ve route="/api/links/{code}/stats" süzen "İstatistik ucu süresi
+//	(p99)" paneli boş kalır. Etiket hiç oluşmadığı için boş kalan bir panel, hızlı bir uçla
+//	birebir aynı görünür.
 func routeOf(r *http.Request) string {
 	p := r.URL.Path
 	switch {
 	case p == "/api/links":
 		return "/api/links"
+	case strings.HasPrefix(p, "/api/links/") && strings.HasSuffix(p, "/stats"):
+		return "/api/links/{code}/stats"
 	case strings.HasPrefix(p, "/api/links/"):
 		return "/api/links/{code}"
 	case p == "/":
@@ -162,7 +177,7 @@ func shortCodeOf(r *http.Request) string {
 	// Yalnızca TRAP_METRIC_LABEL_CODE açıkken kullanılır.
 	p := strings.TrimPrefix(r.URL.Path, "/")
 	if strings.HasPrefix(p, "api/links/") {
-		return strings.TrimPrefix(p, "api/links/")
+		return strings.TrimSuffix(strings.TrimPrefix(p, "api/links/"), "/stats")
 	}
 	return p
 }

@@ -42,7 +42,9 @@ spec:
       containers:
         - name: redirect
           image: localhost:5001/linkly-ladder/11-redirect-svc:IMAGE_TAG
-          ports: [{ name: http, containerPort: 8080 }]
+          # pprof: İÇ port (P11-08). Service yalnızca `http`'yi gösteriyor, Ingress de Service'i —
+          # yani 6060'a yalnızca küme içinden (port-forward / API sunucusunun pod proxy'si) ulaşılır.
+          ports: [{ name: http, containerPort: 8080 }, { name: pprof, containerPort: 6060 }]
           envFrom: [{ secretRef: { name: postgres } }]
           env:
             - { name: SERVICE_NAME, value: redirect }

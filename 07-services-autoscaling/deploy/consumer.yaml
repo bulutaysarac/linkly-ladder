@@ -61,7 +61,7 @@ spec:
               value: "10"          # kendi havuzu: uygulamanınkinden AYRI ve daha küçük
             - name: SHUTDOWN_GRACE
               value: "20s"
-            # TRAP'ler varsayılan kapalı: TRAP_COMMIT_BEFORE_WRITE · TRAP_NO_DLQ
+            # TRAP'ler varsayılan kapalı: TRAP_COMMIT_BEFORE_WRITE · TRAP_NO_DLQ · TRAP_COMMIT_DELAY_MS
           resources:
             requests: { cpu: 100m, memory: 64Mi }
             limits: { memory: 256Mi }

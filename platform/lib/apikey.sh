@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # Bu seviyede API anahtarı zorunlu mu? Zorunluysa hangisi?
 #
-# EN: From level 13 on, `POST /api/links` requires `Authorization: Bearer <key>`. Nothing that
-#     drives the app from outside knew that: `make up`'s smoke test got 401 and reported "could
-#     not create a link", and every k6 scenario that creates links would have produced a wall of
-#     401s that the scripts would have read as "the level is broken". The lesson is small and
+# EN: From level 13 on, `POST /api/links` requires `Authorization: Bearer <key>`. Everything that
+#     drives the app from outside has to know that: without the key `make up`'s smoke test gets
+#     401 and reports "could not create a link", and every k6 scenario that creates links produces
+#     a wall of 401s that the scripts read as "the level is broken". The lesson is small and
 #     expensive: when you put a gate in front of the app, every tool that is not a browser —
 #     smoke tests, load generators, probes, runbooks — is now a client that must authenticate,
 #     and each one fails in a way that does not mention authentication.
 #     The key is read FROM THE CLUSTER, never hardcoded: the manifest stays the single source.
 # TR: 13'ten itibaren `POST /api/links` `Authorization: Bearer <anahtar>` istiyor. Uygulamayı
-#     dışarıdan süren hiçbir şey bunu bilmiyordu: `make up`'ın smoke testi 401 alıp "link
-#     oluşturulamadı" dedi ve link oluşturan her k6 senaryosu, scriptlerin "seviye bozuk" diye
-#     okuyacağı bir 401 duvarı üretecekti. Ders küçük ve pahalı: uygulamanın önüne bir kapı
+#     dışarıdan süren her şey bunu bilmek zorunda: anahtar olmadan `make up`'ın smoke testi 401
+#     alıp "link oluşturulamadı" der ve link oluşturan her k6 senaryosu, scriptlerin "seviye bozuk"
+#     diye okuduğu bir 401 duvarı üretir. Ders küçük ve pahalı: uygulamanın önüne bir kapı
 #     koyduğunda, tarayıcı olmayan HER araç — smoke testleri, yük üreteçleri, probe'lar,
 #     runbook'lar — artık kimlik doğrulaması gereken bir istemcidir ve her biri, kimlik
 #     doğrulamadan HİÇ BAHSETMEYEN bir biçimde başarısız olur.

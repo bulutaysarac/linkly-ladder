@@ -27,7 +27,7 @@ done
 t1=$(date +%s)
 wait $kpid || true
 e5=$(k6_5xx); reqs=$(k6_reqs)
-grafana_hint "05 · Postgres → 'connections vs max' + replication lag · 02 · App RED → 5xx"
+grafana_hint "05 · Postgres → 'Bağlantılar ve üst sınır' + 'Replikasyon gecikmesi' · 02 · App RED → '5xx (uç noktaya göre)'"
 note "yeni primary: ${newp:-?} · terfi süresi: ~$((t1-t0)) sn"
 note "yük: $reqs istek, $e5 tanesi 5xx (~%$(awk -v a="$e5" -v b="$reqs" 'BEGIN{printf "%.1f", (b>0? a*100/b : 0)}'))"
 note "02 ile fark: orada kesinti İNSAN müdahalesine kadar sürüyordu; burada ~$((t1-t0)) sn."

@@ -26,7 +26,7 @@ sleep 5
 trapped=$(try 'http://localtest.me/')
 note "  özel ağa çözülen ad   → $trapped  (201 ise kontrol atlatıldı)"
 rej=$(promq "sum(increase(create_rejected_unsafe_total{namespace=\"$NS\"}[5m]))")
-grafana_hint "14 · Security → 'unsafe URL reddi by reason' (private_address_resolved)"
+grafana_hint "14 · Security → 'Tehlikeli URL reddi (sebebe göre)' (private_address_resolved) · 03 · App Business → 'Oluşturma sonuçları'"
 note "toplam güvenlik reddi: ${rej%%.*}"
 note "KAPATILAMAYAN BOŞLUK (TOCTOU): biz oluşturma anında çözüyoruz, tarayıcı tıklama anında"
 note "çözecek. Arada DNS kaydı değişebilir — DNS rebinding. Azaltmalar var ve hiçbiri bedava değil:"

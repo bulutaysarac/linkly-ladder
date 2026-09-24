@@ -25,7 +25,7 @@ step "Pod yaşına göre p99 (en genç pod'lar en yavaş olmalı)"
 curl -sG "$PROM_URL/api/v1/query" --data-urlencode \
   "query=topk(6, histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le, pod)))" \
   | jq -r '.data.result[] | "    \(.metric.pod): \((.value[1]|tonumber*1000)|floor) ms"' 2>/dev/null | head -8
-grafana_hint "09 · Autoscaling → 'Pod yaşı vs p99' · 04 · Cache → 'hit ratio by pod'"
+grafana_hint "09 · Autoscaling → 'p99 süre (pod'a göre; yeni pod soğuk)' · 04 · Cache → 'İsabet oranı (pod'a göre)'"
 note "ısınmış p99=$(awk -v v="$warm" 'BEGIN{printf "%.1f", v*1000}') ms · ölçekleme sonrası TEPE p99=$(awk -v v="$peak" 'BEGIN{printf "%.1f", v*1000}') ms"
 note "Soğuk pod'un maliyeti bu seviyede küçük çünkü önbellek PAYLAŞIMLI (04) — L2 zaten sıcak."
 note "03'te (pod içi önbellek) aynı deney çok daha sert olurdu: her yeni pod boş bellekle doğuyordu."
@@ -35,12 +35,12 @@ note "preStop+readiness ile trafiği kademeli al (slow start — ingress-nginx't
 # SIFIR BİR TABAN HER ŞEYİ ARTIŞ GİBİ GÖSTERİR.
 # EN: `warm` comes from a Prometheus query; when that query fails `promq` returns 0 — and then
 #     "p > w" is true for ANY peak, so a broken measurement reports REPRODUCED and looks like
-#     proof of a cold-start effect. It happened: the query failed, warm printed as 0.0 ms and the
-#     verdict passed on a number that was never measured. A baseline of zero is not a baseline.
+#     proof of a cold-start effect: warm prints as 0.0 ms and the verdict rests on a number that
+#     was never measured. A baseline of zero is not a baseline.
 # TR: `warm` bir Prometheus sorgusundan gelir; sorgu başarısız olduğunda `promq` 0 döndürür ve
 #     "p > w" HERHANGİ bir tepe için doğru olur — yani bozuk bir ölçüm REPRODUCED basar ve soğuk
-#     başlangıç kanıtı gibi görünür. Gerçekte oldu: sorgu patladı, ısınmış p99 "0.0 ms" yazıldı
-#     ve hüküm hiç ölçülmemiş bir sayının üstüne kuruldu. Sıfır bir taban, taban değildir.
+#     başlangıç kanıtı gibi görünür: ısınmış p99 "0.0 ms" yazılır ve hüküm hiç ölçülmemiş bir
+#     sayının üstüne kurulur. Sıfır bir taban, taban değildir.
 awk -v w="$warm" -v p="$peak" 'BEGIN{exit !(w > 0 && p > w)}' \
   && reproduced "ölçekleme anında p99 $(awk -v v="$warm" 'BEGIN{printf "%.1f", v*1000}') → $(awk -v v="$peak" 'BEGIN{printf "%.1f", v*1000}') ms'e çıktı — soğuk pod'lar trafiğe girdi"
 not_reproduced "soğuk başlangıç etkisi ölçülemedi (paylaşılan önbellek sayesinde küçük olabilir)"

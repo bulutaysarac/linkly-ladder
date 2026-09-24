@@ -1,6 +1,15 @@
 # NN — <ad> · "<slogan>"
 
-<!-- Her seviyenin README'si bu 10 başlığı bu sırada taşır. 4 ve 5 SABİT METİN: kelimesi kelimesine aynı. -->
+> **Bu seviyede ne yaşayacaksın?**
+> - Okuyucunun bu seviyede kendi gözüyle göreceği 3-5 şey; her biri ilgili sorunun kimliğiyle (PNN-XX)
+>
+> **Bu seviye olmasa ne olur?** Bu seviyenin kapattığı acı, önceki seviyenin sorun kimlikleriyle.
+>
+> **Yeni gelen teknolojiler:** Bu seviyede ilk kez sahneye çıkan araçlar ([her biri tek cümleyle](../README.md#kullanılan-teknolojiler)).
+
+<!-- Her seviyenin README'si başlıktan hemen sonra yukarıdaki giriş bloğunu, ardından bu 10 başlığı bu sırada taşır.
+     4 ve 5 SABİT METİN: kelimesi kelimesine aynı. Girişte adı geçen her araç kök README'nin
+     "Kullanılan teknolojiler" tablosunda bir satıra sahip olmalı. -->
 
 ## 1. Bu seviye ne?
 
@@ -57,7 +66,11 @@ Her sorun için alt bölüm (docs/PROBLEM-TEMPLATE.md kalıbı):
 **Reproduce (adım adım):**
   1. …
   2. …
-**Grafana:** `<dashboard>` → "<panel>"; PromQL: `…`
+**Grafana'da gör:** [`<NN · dashboard>`](http://grafana.localtest.me/d/<uid>?var-level=lvlNN&from=now-15m&to=now&refresh=10s) — <ne zaman aç> (giriş: admin / ladder)
+- "<panelin TAM başlığı>" → <okuyucu ne görecek: yön/şekil/değer ve ne anlama geldiği>
+- Explore'da: `<promql>` → <ne göreceksin>   (yalnızca hiçbir panel göstermiyorsa)
+  Grafana'da görülemiyorsa: `**Grafana'da gör:** Grafana'da görünmez — <neden>. Kanıt terminalde:` + `- \`<komut>\` → <beklenen çıktı>`
+  (tools/lint-grafana.py: dashboard ve panel adları GERÇEKTEN var olmalı)
 **Nerede çözülüyor:** NN+1 (…). Geçici çare: …
 
 ## 7. Seviye içi alıştırmalar (TRAP_ bayrakları)

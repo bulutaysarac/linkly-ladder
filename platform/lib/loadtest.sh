@@ -3,16 +3,16 @@
 #
 # EN: From level 08 on, the public ingress carries two limiters (nginx 400 rps answering 503,
 #     the app's 30 rps per IP). Every load experiment in this ladder comes from ONE client IP, so
-#     through the public entrance it measured the limiters, not the system: P14-05 reported 4.37%
-#     availability while the application itself had returned almost no errors. Load goes to the
+#     through the public entrance it measures the limiters, not the system: availability drops to
+#     a few percent while the application itself returns almost no errors. Load goes to the
 #     `linkly-load` ingress with the token from `linkly-loadtest`; scripts that TEST the limiters
 #     call `limits_enforced` (repro.sh) and stay on the public entrance without the token.
 #     Both values come from the level's manifest, never from here: an empty answer means "this
 #     level has no load entrance" (before 08) and the public entrance is used unchanged.
 # TR: 08'den itibaren herkese açık ingress'te iki limiter var (nginx 400 rps ve 503 döner,
 #     uygulama IP başına 30 rps). Merdivendeki her yük deneyi TEK bir istemci IP'sinden gelir; bu
-#     yüzden herkese açık girişten geçen deney sistemi değil limiter'ları ölçtü: P14-05 %4.37
-#     erişilebilirlik raporladı, uygulama ise neredeyse hiç hata dönmemişti. Yük `linkly-load`
+#     yüzden herkese açık girişten geçen deney sistemi değil limiter'ları ölçer: erişilebilirlik
+#     yüzde birkaça düşer, uygulama ise neredeyse hiç hata dönmez. Yük `linkly-load`
 #     ingress'ine, `linkly-loadtest` Secret'ındaki jetonla gider; limiter'ları SINAYAN scriptler
 #     `limits_enforced` (repro.sh) çağırır ve jetonsuz, herkese açık girişte kalır.
 #     İki değer de seviyenin manifest'inden gelir, buradan değil: boş cevap "bu seviyenin yük

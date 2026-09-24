@@ -4,11 +4,10 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # Sabit pencere basit ve yanlıştır: 10 sn'lik pencerede 300 limit varsa, 9.9. saniyede 300 ve
 # 10.1. saniyede 300 daha geçer — 0.2 saniyede 600. Kayan pencere bunu ağırlıklı toplamla düzeltir.
 #
-# ÖLÇÜM NOTU (bu scriptin kendi tarihi):
-# İlk hâli tuzağı HİÇ AÇMIYORDU: yalnızca kayan pencereyi ölçüp "sabit pencere olsaydı 2x geçerdi"
-# diye bir NOT basıyordu. Tuzak da config'de tanımlı ama kodda okunmuyordu — yani iddia iki
-# taraftan birden sınanamaz durumdaydı ve script düşemezdi. Düşemeyen bir deney, deney değildir.
-# Artık iki pencere de GERÇEKTEN koşuluyor ve tepe kabul hızı KARŞILAŞTIRILIYOR.
+# ÖLÇÜM NOTU: yalnızca kayan pencereyi ölçüp "sabit pencere olsaydı 2x geçerdi" diye bir NOT
+# basmak iddiayı sınamaz — script düşemez ve düşemeyen bir deney, deney değildir. Bu yüzden iki
+# pencere de GERÇEKTEN koşulur (TRAP_FIXED_WINDOW gerçek Lua betiğini değiştirir) ve tepe kabul
+# hızı KARŞILAŞTIRILIR.
 limits_enforced   # bu script limiter'ı sınıyor — yük girişi ve muafiyet jetonu KULLANILMAZ
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
@@ -29,8 +28,8 @@ on_cleanup "scale 2"   # manifest 2 replika ilan ediyor
 kubectl -n "$NS" scale "$(wl redirect)" --replicas=1 >/dev/null; wait_endpoints 1; sleep 3
 # LİMİT, DENEYİN BİR PARAMETRESİDİR. Tek pod bu kümede 400 rps'i servis edemiyor; yük limitin
 # (300/10 sn = 30 rps) ÜSTÜNE hiç çıkmıyor ve reddedilen istek 0 kalıyor — yani pencere sınırı
-# davranışı gözlenemiyor (ölçüldü: kabul=558, reddedilen=0). Pod'u hızlandıramayız; limiti
-# indirebiliriz. Ölçmek istediğin rejimi kuramıyorsan, sistemi o rejime SOK.
+# davranışı gözlenemiyor. Pod'u hızlandıramayız; limiti indirebiliriz. Ölçmek istediğin rejimi
+# kuramıyorsan, sistemi o rejime SOK.
 # EN: one pod cannot serve 400 rps here, so the offered load never exceeds the limit and nothing
 # is ever denied — the boundary behaviour cannot be observed. We cannot make the pod faster; we
 # can lower the limit. If you cannot reach the regime you want to measure, move the regime.
@@ -41,7 +40,7 @@ LIM=${LIM_TEST:-60}
 note "deney için IP limiti geçici olarak $LIM/${WIN_S}s yapıldı (manifest değeri ${lim:-300})"
 
 # Tepe kabul hızını ÖLÇ: pencere uzunluğu kadar bir aralıkta kaç istek KABUL edildi?
-# Prometheus'un çözünürlüğü (30 sn scrape) pencere sınırındaki 0.2 saniyelik sıçramayı yutar,
+# Prometheus'un çözünürlüğü (uygulama için 10 sn scrape) pencere sınırındaki 0.2 saniyelik sıçramayı yutar,
 # bu yüzden sayaç farkını doğrudan pod'un /metrics ucundan, saniyede bir örnekleyerek alıyoruz.
 measure_peak() {
   local pod out
@@ -89,16 +88,16 @@ step "(2) TRAP_FIXED_WINDOW: sabit pencere sayacı"
 setenv "$(wl redirect)" TRAP_FIXED_WINDOW=true
 # `rollout status` YENİ NESLİ BEKLEMEYEBİLİR (bkz. repro.sh → settle_rollout). Beklemezse
 # `measure_peak` ESKİ, sonlanmakta olan pod'u seçer, örnekleme "pod not found" ile delik deşik
-# olur ve faz "0 kabul" raporlar — ölçüldü: sabit pencere fazı 0 çıktı, oysa limiter çalışıyordu.
+# olur ve faz, limiter sorunsuz çalışırken bile "0 kabul" raporlar.
 # EN: without waiting for the new generation, `measure_peak` picks the OLD terminating pod, the
-# sampling fails and the phase reports "0 accepted" while the limiter was working fine.
+# sampling fails and the phase reports "0 accepted" while the limiter works fine.
 settle_rollout "$(wl redirect)"
 read -r fixed fixed_tot fixed_n <<< "$(measure_peak)"
 fixed_deny=$(denies)
 note "sabit: ${WIN_S} sn'lik en yoğun aralıkta kabul edilen istek = $fixed (limit $LIM)"
 note "       koşu boyunca kabul=$fixed_tot · reddedilen=${fixed_deny%%.*} · örnek=$fixed_n/68"
 
-grafana_hint "10 · Rate limit → 'Kabul edilen rps (sınır testi)' + 'decisions by key type'"
+grafana_hint "10 · Rate limit → 'Kararlar (anahtar türüne göre)' + 'Sınırdan geçen istek / sn (10 sn çözünürlük)'"
 note "Sabit pencerede iki komşu pencerenin sınırı ÜST ÜSTE binebilir: her kontrol kendi penceresinde"
 note "'limit içinde' der ve toplamda limitin iki katına kadar istek geçer. Kayan pencere sayacı,"
 note "önceki pencerenin sayımını pencerede ne kadar ilerlediğine göre AĞIRLIKLANDIRARAK bunu kapatır"

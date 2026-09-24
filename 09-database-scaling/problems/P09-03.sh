@@ -25,7 +25,7 @@ sleep 10
 err_on=$(promq "sum(increase(db_queries_total{namespace=\"$NS\",result=\"error\"}[3m]))")
 e5_on=$(k6_5xx)
 logs=$(kubectl -n "$NS" logs -l app.kubernetes.io/name=redirect --tail=200 2>/dev/null | grep -ci 'prepared statement' || true)
-grafana_hint "05 · Postgres → 'DB queries by op' (result=error) · 02 · App RED → 5xx"
+grafana_hint "03 · App Business → 'Yönlendirme sonuçları' (error) · 02 · App RED → '5xx (uç noktaya göre)'"
 note "prepared açık: DB hatası=${err_on%%.*} · 5xx=$e5_on · logda 'prepared statement' geçen satır=$logs"
 note "Genel ders: bağlantıları ÇOĞULLAYAN bir proxy, 'bağlantı'nın ne demek olduğunu değiştirir."
 note "Bağlantı kimliğine dayanan HER özellik yeniden gözden geçirilmelidir:"

@@ -23,15 +23,16 @@ sleep 10
 # UYGULAMANIN ERİŞİLEBİLİRLİĞİNİ ÖLÇ, TOPLAM 5xx'İ DEĞİL.
 # EN: `kubectl drain` evicts EVERY pod on the node — including the single Postgres at level 02.
 #     The app then returns 5xx because the DATABASE is gone, which is P02-03's problem, not this
-#     one; the verdict read those 5xx as "no safe maintenance for the app" and reproduced at a
-#     level that had already fixed app redundancy. A measurement must be scoped to the claim it
-#     supports: here the claim is about the APP's redundancy, so the measure is the app's ready
-#     endpoint count — did it ever reach zero?
+#     one; a verdict built on total 5xx reads them as "no safe maintenance for the app" and
+#     reproduces even at a level that has app redundancy. A measurement must be scoped to the
+#     claim it supports: here the claim is about the APP's redundancy, so the measure is the
+#     app's ready endpoint count — did it ever reach zero?
 # TR: `kubectl drain` node'daki HER pod'u tahliye eder — 02'deki tek Postgres dahil. Uygulama o
-#     zaman VERİTABANI gittiği için 5xx döner; bu P02-03'ün sorunudur, bunun değil. Hüküm o
-#     5xx'leri "uygulama için güvenli bakım yok" diye okuyup, uygulama yedekliliğini zaten çözmüş
-#     bir seviyede REPRODUCED dedi. Ölçü, desteklediği iddiaya göre daraltılmalı: iddia
-#     UYGULAMANIN yedekliliği hakkında, o hâlde ölçü hazır endpoint sayısıdır — hiç sıfıra indi mi?
+#     zaman VERİTABANI gittiği için 5xx döner; bu P02-03'ün sorunudur, bunun değil. Toplam 5xx'e
+#     dayanan bir hüküm bunları "uygulama için güvenli bakım yok" diye okur ve uygulama
+#     yedekliliği olan bir seviyede de REPRODUCED der. Ölçü, desteklediği iddiaya göre
+#     daraltılmalı: iddia UYGULAMANIN yedekliliği hakkında, o hâlde ölçü hazır endpoint sayısıdır
+#     — hiç sıfıra indi mi?
 EPS=$(mktemp); on_cleanup "rm -f '$EPS'"
 ( while :; do
     kubectl -n "$NS" get endpointslice -l "kubernetes.io/service-name=$(app_name)" \
@@ -78,14 +79,14 @@ note "Karşılaştırma: aynı script 02'de (3 replika, minAvailable=2) drain'i 
 # DRAIN'İN ÇIKIŞ KODU DA KİRLİ BİR SİNYALDİR.
 # EN: `kubectl drain` must evict EVERY pod on the node. At level 02 the same node also carries
 #     the single Postgres, whose eviction can exceed the 40s timeout — the drain then "fails" for
-#     a reason that has nothing to do with the APP's disruption budget, and the verdict read that
-#     as "no safe maintenance for the app". Ask the question directly instead: does the app's PDB
+#     a reason that has nothing to do with the APP's disruption budget, and a verdict built on the
+#     exit code reads that as "no safe maintenance for the app". Ask the question directly: does the app's PDB
 #     ALLOW a voluntary disruption, and did the app stay up while one happened? Everything else
 #     (drain exit code, total 5xx) is context, not evidence.
 # TR: `kubectl drain` node'daki HER pod'u tahliye etmek zorundadır. 02'de aynı node tek Postgres'i
 #     de taşıyor ve onun tahliyesi 40 sn'lik süreyi aşabiliyor; drain o zaman UYGULAMANIN kesinti
-#     bütçesiyle ilgisi olmayan bir sebepten "başarısız" oluyor ve hüküm bunu "uygulama için
-#     güvenli bakım yok" diye okuyordu. Soruyu doğrudan sor: uygulamanın PDB'si gönüllü bir
+#     bütçesiyle ilgisi olmayan bir sebepten "başarısız" oluyor ve çıkış koduna dayanan bir hüküm
+#     bunu "uygulama için güvenli bakım yok" diye okur. Soruyu doğrudan sor: uygulamanın PDB'si gönüllü bir
 #     kesintiye İZİN VERİYOR MU ve kesinti olurken uygulama ayakta kaldı mı? Gerisi (drain çıkış
 #     kodu, toplam 5xx) kanıt değil bağlamdır.
 note "drain sonucu: $([[ $blocked == true ]] && echo 'bloke/başarısız' || echo 'geçti') — bu, node'daki DİĞER pod'lardan da etkilenir, hükümde kanıt sayılmaz"

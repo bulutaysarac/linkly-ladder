@@ -36,13 +36,14 @@ type Metrics struct {
 	Unsafe     *prometheus.CounterVec
 	RateLimit  *prometheus.CounterVec // decision, key_type // reason
 	trapByCode bool
-	// TRAP_TENANT_LABEL: kiracıyı metrik label'ı yapmak (P11-06). Config'de VARDI ama hiçbir
-	// yerde OKUNMUYORDU — yani deney tuzağı açıyor, hiçbir şey değişmiyor ve script yine
-	// "REPRODUCED" diyordu (kararı Prometheus'un toplam seri sayısına bakarak veriyordu; o sayı
-	// yoğun bir kümede zaten sürekli oynar). Ölçülen şey tuzak değil, gürültüydü.
-	// EN: the trap existed in config and was read NOWHERE. The experiment flipped a flag that did
-	// nothing, and the script still said REPRODUCED because it judged by Prometheus's TOTAL head
-	// series — a number that drifts on its own in a busy cluster. It measured noise, not the trap.
+	// TRAP_TENANT_LABEL: kiracıyı metrik label'ı yapmak (P11-06). Bir tuzak ancak bir kod yolu onu
+	// okuduğunda deneydir: burada okunur ve `http_requests_total`'a `tenant` etiketini ekler.
+	// Deneyin kararı da bu metriğin kendi serilerine bakar, Prometheus'un toplam seri sayısına
+	// değil — o sayı yoğun bir kümede kendiliğinden oynar ve ona bakan bir karar tuzağı değil
+	// gürültüyü ölçer.
+	// EN: a trap is an experiment only when a code path reads it: here it adds the `tenant` label
+	// to `http_requests_total`. The verdict looks at this metric's own series, not at Prometheus's
+	// TOTAL head series — a number that drifts on its own in a busy cluster and measures noise.
 	trapByTenant bool
 }
 
@@ -75,9 +76,10 @@ func New(trapByCode, trapByTenant bool) *Metrics {
 	m.Unsafe = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "create_rejected_unsafe_total", Help: "Güvenlik nedeniyle reddedilen hedef"}, []string{"reason"})
 	m.RateLimit = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ratelimit_decisions_total", Help: "Hız sınırı kararı"}, []string{"decision", "key_type"})
 	// NOT: `ratelimit_decisions_total` AYNI ZAMANDA internal/ratelimit paketinin: 08'de limiter Redis'e
-	// taşındı ve kendi Metrics'ini kuruyor. İkisi birden kaydedilince Prometheus
-	// "duplicate metrics collector registration attempted" ile PANİKLİYOR ve api-svc hiç
-	// açılmıyordu. Bir metriğin SAHİBİ tek bir paket olmalı; taşıdığın şeyin eski kaydını da taşı.
+	// taşındı ve kendi Metrics'ini kuruyor. İkisi de MustRegister ile kaydedilse Prometheus
+	// "duplicate metrics collector registration attempted" ile PANİKLERDİ ve api-svc açılmazdı;
+	// bu yüzden internal/ratelimit, AlreadyRegisteredError'da buradaki collector'ı kullanır.
+	// Bir metriğin adı bir sözleşmedir: iki sahibi varsa ikisi de TEK seriye yazar.
 
 	reg.MustRegister(m.Requests, m.Duration, m.InFlight, m.Panics, m.Redirect, m.Create, m.Unsafe, m.RateLimit)
 	m.preRegisterZero()
@@ -186,9 +188,9 @@ func (m *Metrics) Handler() http.Handler {
 	//     With this flag false — the default — promhttp serves the classic text format, which has
 	//     no place to put an exemplar, so every one of them is silently dropped at the door.
 	//     Prometheus then stores no exemplars, /api/v1/query_exemplars returns nothing, and
-	//     P11-01's "jump from the metric to the trace" step reported "no exemplar found" while
-	//     both sides of the bridge were fully implemented. A feature that is built, wired and
-	//     then dropped by a serialization default is indistinguishable from a feature nobody wrote.
+	//     P11-01's "jump from the metric to the trace" step says "no exemplar found" while both
+	//     sides of the bridge are fully implemented. A feature that is built, wired and then
+	//     dropped by a serialization default is indistinguishable from a feature nobody wrote.
 	// TR: Yukarıdaki kod her histogram gözlemine özenle bir trace_id exemplar'ı iliştiriyor.
 	//     Bu bayrak false iken — ki VARSAYILAN budur — promhttp klasik metin formatını servis
 	//     eder; o formatta exemplar'ı koyacak yer YOKTUR, yani hepsi kapıda sessizce düşer.

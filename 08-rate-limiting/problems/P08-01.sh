@@ -35,7 +35,7 @@ closed_429=$(k6_429); closed_reqs=$(k6_reqs)
 note "fail-closed: $closed_reqs istekten $closed_429 tanesi 429 (%$(awk -v a="$closed_429" -v b="$closed_reqs" 'BEGIN{printf "%.0f", (b>0? a*100/b : 0)}'))"
 note "→ koruma ÇALIŞTI ama hizmet YOK: normal kullanıcılar da reddedildi."
 kubectl -n "$NS" scale statefulset redis --replicas=1 >/dev/null
-grafana_hint "10 · Rate limit → 'limiter backend hata/s' + 'decisions by key type' · 06 · Redis → redis_up"
+grafana_hint "10 · Rate limit → 'Sınırlayıcı arka uç hatası / sn' + 'Kararlar (anahtar türüne göre)' · 06 · Redis → 'Redis ayakta mı'"
 note "Seçim bizim: fail-open + ALARM. Gerekçe: korumayı kaybetmek telafi edilebilir (kötü client"
 note "bir süre geçer), hizmeti kaybetmek edilemez (herkes reddedilir)."
 note "Ama bu seçim bir BORÇ yaratır: 'limiter devre dışı' alarmı OLMAK ZORUNDA, yoksa korumasız"

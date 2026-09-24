@@ -129,14 +129,14 @@ func (m *Metrics) BindRedisStats(fn func() (hits, misses uint32)) {
 
 func (m *Metrics) Handler() http.Handler {
 	// EnableOpenMetrics: EXEMPLAR'LARIN TEK KAPISI.
-	// EN: The code above carefully attaches a trace_id exemplar to every histogram observation.
+	// EN: From level 11 on, every histogram observation carries a trace_id exemplar.
 	//     With this flag false — the default — promhttp serves the classic text format, which has
 	//     no place to put an exemplar, so every one of them is silently dropped at the door.
 	//     Prometheus then stores no exemplars, /api/v1/query_exemplars returns nothing, and
-	//     P11-01's "jump from the metric to the trace" step reported "no exemplar found" while
-	//     both sides of the bridge were fully implemented. A feature that is built, wired and
+	//     P11-01's "jump from the metric to the trace" step reports "no exemplar found" even
+	//     though both sides of the bridge are implemented. A feature that is built, wired and
 	//     then dropped by a serialization default is indistinguishable from a feature nobody wrote.
-	// TR: Yukarıdaki kod her histogram gözlemine özenle bir trace_id exemplar'ı iliştiriyor.
+	// TR: 11'den itibaren her histogram gözlemi bir trace_id exemplar'ı taşır.
 	//     Bu bayrak false iken — ki VARSAYILAN budur — promhttp klasik metin formatını servis
 	//     eder; o formatta exemplar'ı koyacak yer YOKTUR, yani hepsi kapıda sessizce düşer.
 	//     Prometheus hiç exemplar saklamaz, /api/v1/query_exemplars boş döner ve P11-01'in

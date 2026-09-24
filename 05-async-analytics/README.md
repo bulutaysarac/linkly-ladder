@@ -1,5 +1,15 @@
 # 05 — async-analytics · "Yazmayı okuma yolundan çıkar"
 
+> **Bu seviyede ne yaşayacaksın?**
+> - Tıklama sayacı istek yolundan çıkınca sıcak satır kilidinin kalkması (P02-08 kapanır)
+> - Pod sert öldürülünce tampondaki tıklamaların kaybolması (P05-01); kuyruk dolunca tıklamaların düşürülmesi — ve beklemenin neden daha kötü olduğu (P05-02)
+> - Yazıcının okumayla aynı süreci ve bağlantı havuzunu paylaşması (P05-03); günlük toplamanın ölçeklenip ayrıntının ölçeklenmemesi (P05-04)
+> - Kısa `terminationGracePeriodSeconds`'ın boşaltmayı yarıda kesmesi (P05-05); tuzak: 301'in tarayıcıda sayılamayan tıklama üretmesi (P05-06)
+>
+> **Bu seviye olmasa ne olur?** Popüler bir linkin her tıklaması aynı satırı kilitler ve her redirect bu yazmayı bekler (P02-08).
+>
+> **Yeni gelen teknolojiler:** Go channel ile sınırlı kuyruk, toplu (batch) yazıcı, `clicks_daily` toplama tablosu, `07 · Analytics` paneli ([her biri tek cümleyle](../README.md#kullanılan-teknolojiler)).
+
 ## 1. Bu seviye ne?
 
 Tıklama sayacı redirect'in içinden çıktı. Artık her yönlendirme, sınırlı bir süreç içi kuyruğa bir
@@ -68,12 +78,12 @@ garantinin kendisi kadar önemlidir.*
 
 | ID | Sorun | Reproduce | Grafana'da | Çözüm |
 |---|---|---|---|---|
-| P05-01 | At-most-once: sert ölümde tampon kaybolur | `CONFIRM=1 make repro P=P05-01` | Analytics → events by result | 06 |
-| P05-02 | Kuyruk dolunca düşürme (ve sınırsızın daha kötü olması) | `make repro P=P05-02` | Analytics → queue depth, dropped | 06 · 07 |
-| P05-03 | Yazıcı, okumayla aynı süreç ve havuzu paylaşıyor | `make repro P=P05-03` | Postgres → acquire wait | 06 · 07 |
-| P05-04 | Toplama ölçeklenir, ayrıntı ölçeklenmez | `make repro P=P05-04` | Analytics → stats p99 | 09 (partition) |
-| P05-05 | Kısa grace → drain yarıda kalır | `CONFIRM=1 make repro P=P05-05` | Analytics → written | seviye içi |
-| P05-06 | **TRAP** 301 → sayılamayan tıklama | `make repro P=P05-06` | App Business → redirect ok/s | seviye içi |
+| P05-01 | At-most-once: sert ölümde tampon kaybolur | `CONFIRM=1 make repro P=P05-01` | görünmez — kanıt terminalde ↓ | 06 |
+| P05-02 | Kuyruk dolunca düşürme (ve sınırsızın daha kötü olması) | `make repro P=P05-02` | [07 · Analytics](http://grafana.localtest.me/d/ladder-analytics?var-level=lvl05&from=now-15m&to=now&refresh=10s) · [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl05&from=now-15m&to=now&refresh=10s) → "Kuyruk doluluğu (pod'a göre)" | 06 · 07 |
+| P05-03 | Yazıcı, okumayla aynı süreç ve havuzu paylaşıyor | `make repro P=P05-03` | [05 · Postgres](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl05&from=now-15m&to=now&refresh=10s) · [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl05&from=now-15m&to=now&refresh=10s) → "Veritabanı sorguları (türe göre)" | 06 · 07 |
+| P05-04 | Toplama ölçeklenir, ayrıntı ölçeklenmez | `make repro P=P05-04` | [05 · Postgres](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl05&from=now-15m&to=now&refresh=10s) · [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl05&from=now-15m&to=now&refresh=10s) → "Sorgu süresi p99 (türe göre)" | 09 (partition) |
+| P05-05 | Kısa grace → drain yarıda kalır | `CONFIRM=1 make repro P=P05-05` | görünmez — kanıt terminalde ↓ | seviye içi |
+| P05-06 | **TRAP** 301 → sayılamayan tıklama | `make repro P=P05-06` | görünmez — kanıt terminalde ↓ | seviye içi |
 
 ---
 
@@ -95,7 +105,10 @@ zaman boş yakalarsın ve deney "kayıp yok" der. Bu, tasarımın güvenli oldu�
 olduğunu gösterir. Pencereyi bilerek açmak, olayı görünür kılmanın meşru yoludur — yeter ki neyi
 değiştirdiğini söyleyesin.
 
-**Grafana:** `07 · Analytics` → "events by result", "k6 tıklama − DB tıklama" farkı.
+**Grafana'da gör:** Grafana'da görünmez — kaybolan tıklamalar öldürülen pod'un belleğindeydi ve o pod'un sayaçları da onunla birlikte öldü: son kazımadan sonraki artışlar Prometheus'a hiç ulaşmaz. Tamponun kendisi de hiçbir panelde yok: `07 · Analytics` → "Kuyrukta bekleyen" yalnızca kanalda bekleyeni sayar, yazıcının topladığı ama henüz yazmadığı parti orada görünmez. Script tıklamaları k6 ile değil `curl` ile ürettiği için "Kaybolan tıklamalar: k6'nın gönderdiği − veritabanına yazılan" paneli de bu deneyi saymaz. Gerçeğin tek kaynağı DB. Kanıt terminalde:
+- `CONFIRM=1 make repro P=P05-01` → `sert ölüm: 400 tıklama üretildi, kaydedilen … → KAYIP …` satırında büyük bir kayıp, `graceful: … → KAYIP …` satırında sıfır ya da sıfıra çok yakın
+- `curl -s http://lvl05.localtest.me/api/links/<kod>/stats | jq .clicks` (kodu script çıktısından ya da kendi oluşturduğun linkten al) → sert ölümden sonra gönderdiğin tıklama sayısının altında kalır ve bir daha yükselmez
+
 **Nerede çözülüyor:** 06 — olay süreç belleğinden çıkıp **dayanıklı bir loga** yazılacak
 (en az bir kez) ve tüketici idempotent olacak. Orada yeni sorun **çift sayma** olacak:
 *garanti seçmek, sorun seçmektir.*
@@ -116,11 +129,18 @@ redirect'i yine DB'ye bağlardı — görünmez biçimde, yalnızca yük altınd
 2. Alternatifi gör: `kubectl -n lvl05 set env deploy/linkly TRAP_UNBOUNDED_QUEUE=true` → düşürme
    sıfırlanır, working set tırmanır, sonunda **OOMKilled** ve tampondaki her şey gider
 
-**Grafana:** `07 · Analytics` → "events by result", "queue depth by pod"; `02 · App RED` → p99.
-**Ölçüm dersi — deneyin SIRASI da bir değişkendir:** İlk hâlde gecikme yükten önce enjekte
-ediliyordu; k6'nın `setup()` aşaması 100 link oluşturuyor ve her INSERT 2 sn sürdüğü için setup
-zaman aşımına uğrayıp yük hiç koşmuyordu. Script "düşürme olmadı" dedi — ölçtüğü şey kuyruk değil,
-kendi kurulum sırasıydı. Bir deney kurarken *hazırlık* adımlarının da arızadan etkilendiğini unutma.
+**Grafana'da gör:** [`07 · Analytics`](http://grafana.localtest.me/d/ladder-analytics?var-level=lvl05&from=now-15m&to=now&refresh=10s), [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl05&from=now-15m&to=now&refresh=10s) ve [`01 · Pods & Resources`](http://grafana.localtest.me/d/ladder-pods?var-level=lvl05&from=now-15m&to=now&refresh=10s) — script önce ısıtır, sonra Postgres'i yavaşlatıp 45 sn yük verir; bitince aç (giriş: admin / ladder)
+- "Kuyruk doluluğu (pod'a göre)" → `capacity` çizgisi deney süresince 20 000'den **500**'e iner (script kuyruğu küçültüyor) ve pod çizgileri ona dayanıp tavanda gezinir: kuyruk dolu. Eksen 20 000'e göre çizildiği için lejantta bir pod'a tıkla — eksen yeniden ölçeklenir.
+- "Tıklama olayları (sonuca göre)" → `dropped` serisi belirir ve yük boyunca sürer; `written` yükle birlikte artmaz, yazıcının hızında (her parti ~2 sn) takılı kalır.
+- "p99 süre (uç noktaya göre)" (App RED) → `/{code}` çizgisi düşük kalır: yazıcı boğulurken okuma yolu etkilenmedi — tasarımın vaadi. `/api/links` (link oluşturma) ise yükselir: yükün başında oluşturulan link DB'ye 2 sn gecikmeyle yazılıyor.
+- "Bellek kullanımı" (Pods) → yalnızca 2. adımda (`TRAP_UNBOUNDED_QUEUE=true`, yazıcı yine yavaşken): düşürme yerine bellek büyür ve limit çizgisine tırmanır.
+- "Son sonlanma nedeni" (Pods) → 2. adımın sonunda `OOMKilled`: tampondaki her şey gitti.
+
+**Ölçüm dersi — deneyin SIRASI da bir değişkendir:** Gecikme yükten önce enjekte edilirse k6'nın
+`setup()` aşaması 100 link oluştururken her INSERT 2 sn sürer, setup zaman aşımına uğrar ve yük hiç
+koşmaz. Script o zaman "düşürme olmadı" der — ölçtüğü şey kuyruk değil, kendi kurulum sırasıdır; bu
+yüzden önce ısıtır, sonra gecikmeyi enjekte eder. Bir deney kurarken *hazırlık* adımlarının da
+arızadan etkilendiğini unutma.
 
 **Ders:** *Gördüğün bir düşüş bir karardır; göremediğin bir bloklama, trafiği bekleyen bir
 kesintidir.* Sınırsız kuyruk bir emniyet ağı değil, **ertelenmiş bir çöküştür** — "hiç düşürmeyelim"
@@ -130,14 +150,32 @@ isteği sonunda her şeyi düşürmekle biter.
 
 ### P05-03 · Yazıcı, okumayla aynı süreci ve havuzu paylaşıyor
 
-**Belirti:** Yoğun tıklama trafiğinde redirect p99'u ve havuz bekleme süresi yükselir.
+**Belirti:** Tıklamaları veritabanına yazan iş, redirect'i servis eden pod'ların **içinde** koşuyor:
+`write_clicks` sorguları uygulama pod'larından, onların bağlantı havuzundan çıkıyor. Yazıcıyı ayrı
+ölçekleyemez, ayrı sınırlayamaz, redirect'e dokunmadan yeniden başlatamazsın; yazıcının CPU'su,
+bağlantısı ve veritabanı yükü redirect'i servis eden sürecin hesabına yazılır.
 **Neden:** Yazma istek yolundan çıktı ama **süreçten** çıkmadı: aynı pod CPU'su, aynı `pgxpool`,
 aynı veritabanı. İzolasyon kısmi. [Topic · Konu: Kaynak izolasyonu, bulkhead]
 
-**Reproduce (adım adım):** `make repro P=P05-03` — yalnız-okuma tabanı ile yoğun tıklama altındaki
-p99'u ve havuz bekleme süresini karşılaştırır.
+**Reproduce (adım adım):** `make repro P=P05-03` — **aynı** yükü (`hot-key`, 80 VU, 45 sn) iki kez,
+taze pod'larla verir. Değişen tek şey yazıcının veritabanı işi: A fazında durdurulmuş
+(`ANALYTICS_FLUSH_INTERVAL=1h`, `ANALYTICS_BATCH_SIZE=100000000` — tıklamalar yine kuyruğa girip
+toplanıyor, yalnızca yazılmıyor), B fazında varsayılan. Hüküm: B'de `write_clicks` uygulama
+pod'larından çıkıyor mu, A'da sıfırlanıyor mu (A'da yazma sürüyorsa script hüküm vermez, exit 2).
+İki fazın redirect p99'unu ve havuz bekleme p99'unu da yan yana basar — bedel, hükme bağlı değil.
 
-**Grafana:** `07 · Analytics` → "batch write latency p99"; `05 · Postgres` → "App pool: acquire wait p99".
+**Ölçüm dersi — iki değişkenli karşılaştırma:** "Yalnız okuma" tabanını 30 VU `redirect` ile, yoğun
+fazı 80 VU `hot-key` ile ölçmek iki fazda hem senaryoyu hem yükü değiştirir; üstelik taban da tıklama
+yazar (her redirect bir tıklamadır). p99 artışı yazıcıdan mı, 2.7 kat yükten mi geldi — ayırt
+edilemez. Bu yüzden script iki fazda aynı yükü verir ve yalnızca yazıcının veritabanı işini değiştirir.
+*Tek değişkeni değiştir ve o değişkenin gerçekten değiştiğini de ölç.*
+
+**Grafana'da gör:** [`05 · Postgres`](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl05&from=now-15m&to=now&refresh=10s) ve [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl05&from=now-15m&to=now&refresh=10s) — script iki fazı (A: yazıcı durdu, B: yazıcı çalışıyor) aynı yükle 45'er sn koşar, fazlar arasında pod'lar yeniden başlar; bitince aç (giriş: admin / ladder)
+- "Veritabanı sorguları (türe göre)" → `write_clicks` katmanı A fazında sıfıra iner (panel 1 dk'lık ortalama çizdiği için önceki pod'ların son yazmaları fazın başında sönümlenerek görünür) ve B fazında yeniden belirir: yazıcı açıkken bu sorgular redirect'i servis eden pod'lardan çıkıyor. `get` ve `create` iki fazda da yalnızca fazın başında, k6 yeni linklerini kurup önbelleğe alırken görünür.
+- "Uygulama havuzu: bağlantı bekleme (p99)" → iki fazda benzer: fazın başında taze pod'ların havuzu yeni bağlantı açarken kısa bir tepe olabilir, sonra düşük ve düz (A'da havuza neredeyse hiç istek uğramadığı için çizgi kesilebilir). Bu panel her bağlantı alımının gerçek beklemesini ölçer (P02-06) ve söylediği şu: yazıcı pod başına tek bağlantı tutuyor, okumalar Redis'ten dönüyor — havuz paylaşılıyor ama bu ölçekte dar boğaz değil. Paylaşımın bedeli havuz beklemesinde değil, süreç ve veritabanında.
+- "p99 süre (uç noktaya göre)" (App RED) → `/{code}` çizgisi iki fazda yakın kalabilir; fark varsa yazıcının aynı süreçteki bedelidir ve script iki p99'u yan yana basar. Bu ölçekte küçük bir fark gürültüden ayırt edilemez — hükmün p99'a değil yapıya bakmasının sebebi bu.
+- Explore'da: `sum by (pod) (rate(db_queries_total{namespace="lvl05",op="write_clicks"}[1m]))` → B fazında her seri bir **uygulama** pod'u (`linkly-…`): yazma sorgularını redirect'i servis eden süreçler atıyor. 06'da yazıcı ayrı bir deployment olunca bu seriler uygulama pod'larından kalkar.
+
 **Nerede çözülüyor:** 06 + 07 — tüketici ayrı bir **süreç** ve ayrı bir deployment olacak: kendi
 havuzu, kendi CPU limiti, kendi ölçeklenmesi. *İzolasyon bir arayüz meselesi değil, bir süreç meselesidir.*
 
@@ -153,11 +191,18 @@ tablosu kursaydık aynı cevap için 2 milyon satır taranırdı.
 **Reproduce (adım adım):** `make repro P=P05-04` — geçici bir `clicks_detail` tablosu kurup 2 M satır
 üretir, iki sorgunun planını ve süresini karşılaştırır, sonra tabloyu düşürür.
 
-**Grafana:** `07 · Analytics` → "stats endpoint p99"; `05 · Postgres` → "DB query p99 by op" (`op=stats`).
+**Grafana'da gör:** [`05 · Postgres`](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl05&from=now-15m&to=now&refresh=10s), [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl05&from=now-15m&to=now&refresh=10s) ve [`07 · Analytics`](http://grafana.localtest.me/d/ladder-analytics?var-level=lvl05&from=now-15m&to=now&refresh=10s) — script bitince aç; asıl karşılaştırma terminalde, çünkü `clicks_detail`'i uygulama değil script (`psql`) sorguluyor ve hiçbir uygulama paneli o sorguyu görmez (giriş: admin / ladder)
+- "Sorgu süresi p99 (türe göre)" → `stats` serisi düşük: kaç tıklama olursa olsun toplama tablosu kod başına gün başına tek satır okur. Script `stats`'ı yalnızca bir kez çağırdığı için değer bir dakika kadar görünür.
+- "İstatistik ucu süresi (p99)" (Analytics) → scriptin tek `stats` çağrısı: düşük, bir dakika kadar görünür. Panel `route="/api/links/{code}/stats"` serisini okur; uygulama `stats` isteğine `/api/links/{code}`'dan ayrı kendi etiketini verir (`internal/httpapi/server.go · routeOf`). İki ucu tek etikette birleştirmek birini gizler, ikisinin gecikmesini de karıştırır.
+- "p99 süre (uç noktaya göre)" (App RED) → aynı çağrı `/api/links/{code}/stats` çizgisi olarak görünür: düşük.
+- "Veritabanı CPU" → deneyin ortasında postgres pod'unda belirgin bir tepe: 2 M satırlık `clicks_detail`'i üretmek ve taramak. Ayrıntının bedeli yazarken de ödenir.
+- Terminalde, script çıktısındaki iki plan: `clicks_detail` için `Seq Scan` (çoğunlukla `Parallel Seq Scan`) 2 M satırı tarar; `clicks_daily` planı tek satır okur ve kat kat kısa sürer.
+
 **Nerede çözülüyor:** Ayrıntı gerçekten gerekiyorsa 09 (RANGE partition by day + eski partition'ları
 düşürme). **Ama asıl karar ürün kararıdır:** ayrıntıyı ancak birileri cevapladığı soruyu
-adlandırabiliyorsa sakla. Ayrıntıyı sonradan eklemek, toplamayı sonradan eklemekten ucuzdur —
-tersi değil (veri zaten yazılmıştır).
+adlandırabiliyorsa sakla. Ama iki yön simetrik değil: ayrıntıdan toplam her zaman sonradan türetilir,
+yalnızca toplam yazılmışsa kaybolan ayrıntı geri gelmez — ayrıntıyı sonradan eklemek, toplamayı
+sonradan eklemekten pahalıdır (veri zaten yazılmıştır).
 
 ---
 
@@ -170,7 +215,10 @@ tersi değil (veri zaten yazılmıştır).
 **Reproduce (adım adım):** `CONFIRM=1 make repro P=P05-05` — mevcut ayarla ve `grace=3s` (+`preStop=1s`) ile
 kaybı ölçüp karşılaştırır.
 
-**Grafana:** `07 · Analytics` → "events by result" (`written`); `01 · Pods` → "Son sonlanma nedeni".
+**Grafana'da gör:** Grafana'da görünmez — drain sunucu kapandıktan **sonra** çalışır (doğru sıra, bkz. §10), yani drain'in yazdığı `written` artışları `/metrics` ucu çoktan kapanmışken sayılır ve Prometheus'a hiç ulaşmaz; SIGKILL'le kesilen drain'in eksiği de aynı yüzden görünmez. `01 · Pods & Resources` → "Son sonlanma nedeni" de bu deneyden bir şey göstermez: rollout eski pod'ları yeniden başlatmaz, siler — o panel yalnızca aynı pod içinde yeniden başlayan konteynerleri gösterir. Kanıt terminalde:
+- `CONFIRM=1 make repro P=P05-05` → iki `kayıp: … tıklama` satırı; `grace=3s` fazındaki mevcut ayardakinden büyük
+- `kubectl -n lvl05 logs -f -l app.kubernetes.io/name=linkly --prefix` (ikinci terminalde, script bir fazın tıklamalarını üretirken başlat) → mevcut ayarda kapanan her pod'un akışı `analitik kuyruğu boşaltılıyor` ve `temiz kapandı` ile biter; `grace=3s` fazında akış `readiness düşürüldü, endpoint yayılımı bekleniyor` satırında kesilir — drain hiç başlamadı
+
 **Kural:** `terminationGracePeriodSeconds` > (preStop beklemesi + `SHUTDOWN_GRACE` + drain süresi).
 Bu üç sayı birbirini tanımıyorsa, hangisinin kazandığını kubelet'in SIGKILL'i belirler.
 *"Kod doğru" ile "sistem doğru" aynı şey değildir — aradaki fark bir YAML satırı.*
@@ -189,7 +237,10 @@ seviyede farklı zarar**: artık tıklamaları ciddi ciddi sayıyoruz ve sayamı
 1. `make repro P=P05-06` — 302 modunda sayımı ölçer, sonra tuzağı açıp başlıkları karşılaştırır
 2. **Elle (asıl ikna edici olan):** Chrome'da linki 5 kez aç → `stats`'a bak → 1 tıklama
 
-**Grafana:** `03 · App Business` → "redirect ok/s" gerçek tıklamanın altında kalır.
+**Grafana'da gör:** Grafana'da görünmez — sunucuya hiç ulaşmayan bir istek hiçbir sunucu metriğine yazılamaz. `03 · App Business` → "Başarılı yönlendirme / sn" tarayıcının kendi önbelleğinden açtığı tıklamaları saymaz, ama saymadığını da gösteremez: eksik olan bir çizgi değil, hiç gelmemiş bir istektir. (Script'in `curl` istekleri önbellek tutmadığı için orada hepsi sayılır.) Kanıt terminalde ve tarayıcıda:
+- `curl -sI http://lvl05.localtest.me/<kod>` → tuzak kapalıyken `302` ve `Cache-Control: no-store, max-age=0`; `TRAP_REDIRECT_301=true` iken `301` ve saklamayı yasaklayan bir `Cache-Control` yok
+- Chrome'da linki 5 kez aç, DevTools → Network: 2.–5. açılışlar `(disk cache)`; sonra `curl -s http://lvl05.localtest.me/api/links/<kod>/stats | jq .clicks` → `1`
+
 **Zarar zinciri:** 301 → tarayıcı önbelleği → sunucuya ulaşmayan istek → sayılamayan tıklama →
 yanlış analitik → yanlış iş kararı. *Düzeltilmiş bir hatanın geri gelmesi, ilk hâlinden pahalıya patlar.*
 
@@ -215,15 +266,15 @@ Elle denemeye değer:
 
 | Dashboard | Durum | Neden |
 |---|---|---|
-| `07 · Analytics` | **Dolu** ✨ | enqueued/dropped/written, kuyruk derinliği, batch süresi/boyutu |
-| `05 · Postgres` | Dolu | `op=write_clicks` ve `op=stats` yeni; `increment_clicks` **kayboldu** |
-| `04 · Cache` · `06 · Redis` · `02 · App RED` · `03 · App Business` | Dolu | — |
-| `08 · Stream` · `09 · Autoscaling` | Boş | — |
-| `11 · Resilience` · `12 · SLO` · `13 · Rollout` | Boş | — |
+| [`07 · Analytics`](http://grafana.localtest.me/d/ladder-analytics?var-level=lvl05&from=now-15m&to=now) | **Dolu** ✨ | enqueued/dropped/written, kuyruk derinliği, batch süresi/boyutu, `stats` ucu süresi (kendi route etiketiyle: `/api/links/{code}/stats`) |
+| [`05 · Postgres`](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl05&from=now-15m&to=now) | Dolu | `op=write_clicks` ve `op=stats` yeni; `increment_clicks` **kayboldu** |
+| [`04 · Cache`](http://grafana.localtest.me/d/ladder-cache?var-level=lvl05&from=now-15m&to=now) · [`06 · Redis`](http://grafana.localtest.me/d/ladder-redis?var-level=lvl05&from=now-15m&to=now) · [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl05&from=now-15m&to=now) · [`03 · App Business`](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl05&from=now-15m&to=now) | Dolu | — |
+| [`08 · Stream`](http://grafana.localtest.me/d/ladder-stream?var-level=lvl05&from=now-15m&to=now) · [`09 · Autoscaling`](http://grafana.localtest.me/d/ladder-autoscaling?var-level=lvl05&from=now-15m&to=now) | Boş | — |
+| [`11 · Resilience`](http://grafana.localtest.me/d/ladder-resilience?var-level=lvl05&from=now-15m&to=now) · [`12 · SLO`](http://grafana.localtest.me/d/ladder-slo?var-level=lvl05&from=now-15m&to=now) · [`13 · Rollout`](http://grafana.localtest.me/d/ladder-rollout?var-level=lvl05&from=now-15m&to=now) | Boş | — |
 
 En öğretici panel: **"k6 tıklama − DB tıklama" farkı**. İdeal durumda sıfır olmalı; sıfır değilse
 ya düşürme olmuştur (P05-02) ya kayıp (P05-01) ya da kuyruk henüz boşalmamıştır. Üçünü ayırt etmek
-için `dropped` ve `queue depth` panellerine birlikte bakılır.
+için "Atılan / sn" ve "Kuyrukta bekleyen" panellerine birlikte bakılır.
 
 ## 9. Bilerek bırakılanlar
 

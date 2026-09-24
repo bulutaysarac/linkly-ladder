@@ -1,5 +1,16 @@
 # 14 — modern · "Son hal"
 
+> **Bu seviyede ne yaşayacaksın?**
+> - L1 (pod belleği) + L2 (Redis) önbelleğin ağ adımını ve hot key'i geri alması (P14-01)
+> - Tuzak: her L1 kopyasının bir geçersiz kılma kanalı borçlanması — Redis pub/sub yayını ve kısa TTL (P14-02)
+> - 3 partition ile tüketici replikalarının gerçekten iş bölüşmesi (P14-03)
+> - Bu kümede ölçülmüş bir kapasite modeli: kaç istek/sn, önce hangi kaynak tıkanıyor (P14-04)
+> - Game day: arızaların aynı anda enjekte edilip bütün korumaların birlikte sınanması (P14-05) — ve sonunda dürüst bir "yolun devamı" listesi
+>
+> **Bu seviye olmasa ne olur?** Her koruma tek başına sınanmış olur ama birlikte hiç; sistemin gerçek tavanı tahmin olarak kalır.
+>
+> **Yeni gelen teknolojiler:** L1+L2 önbellek, Redis pub/sub ile geçersiz kılma, `allkeys-lru`, 3 partition, kapasite modeli, game day ([her biri tek cümleyle](../README.md#kullanılan-teknolojiler)).
+
 ## 1. Bu seviye ne?
 
 Merdivenin son basamağı. Üç şey yapıyor: **kalan teknik borçları kapatıyor** (L1+L2 ve
@@ -22,7 +33,7 @@ flowchart LR
   end
   RS & AS -->|L1 ıskası| RD[("redis<br/>allkeys-lru<br/>+ pub/sub kanalı")]
   RD -.->|"invalidate yayını"| L1 & L1b
-  RS & AS -->|L2 ıskası| PGP["pg-pooler-rw/ro"] --> PG[("CNPG: 1 primary + 2 replika")]
+  RS & AS -->|L2 ıskası| PGP["pg-pooler-rw/ro"] --> PG[("CNPG: 1 primary + 1 replika")]
   RS ==>|clicks (3 partition)| K[("redpanda")] ==> CN["analytics ×1-3 (KEDA)"]
   CN --> PGP
 ```
@@ -31,13 +42,12 @@ flowchart LR
 
 **Hiçbiri — ve bu tabloyu boş bırakmak bilinçli bir karar.**
 
-Burada bir zamanlar P13-06 (enumeration) yazıyordu ve hemen yanında "*tam çözüm değil*" notu
-vardı. İkisi aynı anda doğru olamaz: bir sorun ya çözülmüştür ya da çözülmemiştir, ve
-`problems/SOLVES` kontratı bunu `verify-prev` ile ÖLÇER. P13-06'nın ölçüsü "tarama 404 üretti
-mi?"dir; tarama her zaman 404 üretir. L1'in negatif kayıtları bu 404'lerin **maliyetini**
-düşürür, **varlığını** değil. Dolayısıyla P13-06'yı SOLVES'a yazmak iki kötü seçenekten birine
-zorlardı: ya `verify-prev` kalıcı olarak kırık kalırdı, ya da ölçüyü iddiaya uyacak şekilde
-gevşetirdik — ki bu, merdivenin bütün amacının tersidir.
+P13-06 (enumeration) burada **yok**, çünkü "kısmen çözüldü" diye bir satır olamaz: bir sorun ya
+çözülmüştür ya da çözülmemiştir, ve `problems/SOLVES` kontratı bunu `verify-prev` ile ÖLÇER.
+P13-06'nın ölçüsü "tarama 404 üretti mi?"dir; tarama her zaman 404 üretir. L1'in negatif kayıtları
+bu 404'lerin **maliyetini** düşürür, **varlığını** değil. Dolayısıyla P13-06'yı SOLVES'a yazmak iki
+kötü seçenekten birine zorlardı: ya `verify-prev` kalıcı olarak kırık kalırdı, ya da ölçü iddiaya
+uyacak şekilde gevşetilirdi — ki bu, merdivenin bütün amacının tersidir.
 
 14 bir "düzeltme" seviyesi değil, bir **sentez** seviyesidir: katkısı önceki bir sorunu silmek
 değil, sistemin tamamının aynı anda ayakta kalıp kalmadığını ölçmek (P14-05 game day).
@@ -72,21 +82,33 @@ Her seviyede aynı: [docs/API.md](../docs/API.md). 13'e göre değişiklik yok.
 
 | ID | Sorun | Reproduce | Grafana'da | Çözüm |
 |---|---|---|---|---|
-| P14-01 | L1'in kazancı: ağ adımı olmadan isabet | `make repro P=P14-01` | Cache → l1 vs l2; Redis ops | seviye içi |
-| P14-02 | **TRAP** her kopya bir kanal borçlanır | `make repro P=P14-02` | Cache → invalidation mesajları | seviye içi (pub/sub + kısa TTL) |
-| P14-03 | Partition tavanı kalktı | `make repro P=P14-03` | Stream → lag by partition | seviye içi |
-| P14-04 | Kapasite modeli (ölçümle) | `make repro P=P14-04` | App RED → rps/p99 | `docs-capacity.md` |
-| P14-05 | **GAME DAY**: üç arıza üst üste | `CONFIRM=1 make repro P=P14-05` | Resilience + SLO | prova |
+| P14-01 | L1'in kazancı: ağ adımı olmadan isabet | `make repro P=P14-01` | [04 · Cache](http://grafana.localtest.me/d/ladder-cache?var-level=lvl14&from=now-30m&to=now&refresh=10s) · [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl14&from=now-30m&to=now&refresh=10s) → "Önbellek işlemleri (katman ve sonuca göre)" | seviye içi |
+| P14-02 | **TRAP** her kopya bir kanal borçlanır | `make repro P=P14-02` | [04 · Cache](http://grafana.localtest.me/d/ladder-cache?var-level=lvl14&from=now-30m&to=now&refresh=10s) · [03 · App Business](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl14&from=now-30m&to=now&refresh=10s) → "Önbellekten çıkarılma sebepleri" | seviye içi (pub/sub + kısa TTL) |
+| P14-03 | Partition tavanı kalktı | `make repro P=P14-03` | [08 · Stream (Redpanda)](http://grafana.localtest.me/d/ladder-stream?var-level=lvl14&from=now-15m&to=now&refresh=10s) → "Onaylama / sn ve tüketici pod sayısı" | seviye içi |
+| P14-04 | Kapasite modeli (ölçümle) | `make repro P=P14-04` | [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl14&from=now-15m&to=now&refresh=10s) · [01 · Pods & Resources](http://grafana.localtest.me/d/ladder-pods?var-level=lvl14&from=now-15m&to=now&refresh=10s) → "İstek / saniye (uç noktaya göre)" | `docs-capacity.md` |
+| P14-05 | **GAME DAY**: üç arıza üst üste | `CONFIRM=1 make repro P=P14-05` | [11 · Resilience](http://grafana.localtest.me/d/ladder-resilience?var-level=lvl14&from=now-15m&to=now&refresh=10s) · [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl14&from=now-15m&to=now&refresh=10s) → "Devre kesici durumu (0 kapalı · 1 yarı açık · 2 açık)" | prova |
 
 ---
 
 ### P14-01 · L1'in geri dönüşü
 
-**Belirti/Kazanç:** Sıcak anahtarlarda p50 düşüyor ve Redis komut sayısı belirgin azalıyor.
+**Belirti/Kazanç:** Sıcak anahtar okumalarının çoğu L1'den (pod belleğinden) karşılanır; okuma yolunda
+Redis'e (L2) giden istek L1 isabeti kadar azalır. Redis'in **toplam** komut hızı ise düşmeyebilir,
+artabilir de — ölçümde 767 → 1560 komut/s: L1 açıkken gelen pub/sub geçersiz kılma trafiği de
+Redis komutu sayılır. p50 farkı çoğu zaman histogram kovasından küçüktür.
 **Neden:** En sıcak anahtarlar artık **hiç ağa çıkmıyor** — P04-02'deki RTT ve P04-03'teki tek
 çekirdek tavanı bu sayede geç geliyor. [Topic · Konu: Çok katmanlı önbellek]
 
-**Reproduce:** `make repro P=P14-01` — L1 kapalı/açık `hot-key` yükünde p50 ve Redis ops'u karşılaştırır.
+**Reproduce:** `make repro P=P14-01` — L1 kapalı/açık `hot-key` yükünde okuma yolundaki L2 erişimini,
+L1 isabet oranını ve p50/p99'u karşılaştırır. `L1_ENABLED` değişikliği bir canary dağıtımıdır: script
+her fazdan önce yeni sürümün stable olmasını bekler (`make wait` ölçütü: `Healthy` ve
+`stableRS == currentPodHash`, ~4 dk) ve 1. fazda L1'in gerçekten kapalı olduğunu doğrular — değilse
+ölçemediğini söyler (exit 2). Hüküm L1 isabetine ve L2 erişimindeki düşüşe bağlıdır, p50'ye değil.
+
+**Grafana'da gör:** [`04 · Cache`](http://grafana.localtest.me/d/ladder-cache?var-level=lvl14&from=now-30m&to=now&refresh=10s), [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl14&from=now-30m&to=now&refresh=10s) ve [`06 · Redis`](http://grafana.localtest.me/d/ladder-redis?var-level=lvl14&from=now-30m&to=now&refresh=10s) — iki faz var (önce L1 kapalı, sonra açık; her biri bir canary dağıtımı — ~4 dk — ve ardından 40 sn `hot-key` yükü), deney boyunca açık tut (giriş: admin / ladder)
+- "Önbellek işlemleri (katman ve sonuca göre)" → asıl kanıt bu panel. 1. fazda okumaların hepsi `l2` serilerinde; 2. fazda `l1` `hit` baskın olur ve `l2` serileri neredeyse sıfıra iner: sıcak okumalar artık ağa çıkmıyor. 1. fazda da `l1` serisi akıyorsa L1 gerçekten kapanmamıştır — `L1_ENABLED=false` bir canary dağıtımıyla gelir; script bunu bekler ve 1. fazda L1 işlemi görürse ölçümü geçersiz sayar.
+- "Gecikme (p50 / p95 / p99)" → p50 2. fazda aynı ya da biraz aşağıda. Fark histogram kovasından küçükse iki faz aynı görünür — script hükmü bu yüzden gecikmeye değil L1 isabetine bağlar.
+- "Komut / sn" → Redis'in toplam komut hızı düşmeyebilir, hatta artabilir (ölçümde 767 → 1560/s): L1 açıkken pub/sub geçersiz kılma trafiği de Redis komutu sayılır. Okuma yolundaki azalmayı bu panel değil, yukarıdaki `l2` serileri gösterir.
 
 **Ama bu "L1 artık bedava" demek değil.** Bedeli bir sonraki maddede.
 
@@ -100,6 +122,11 @@ L1 TTL'i boyunca yaşamaya devam ediyor — **03'teki P03-01'in aynısı**.
 [Topic · Konu: Invalidation broadcast, en-iyi-çaba]
 
 **Reproduce:** `make repro P=P14-02`.
+
+**Grafana'da gör:** [`04 · Cache`](http://grafana.localtest.me/d/ladder-cache?var-level=lvl14&from=now-30m&to=now&refresh=10s) ve [`03 · App Business`](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl14&from=now-30m&to=now&refresh=10s) — iki faz var (yayın açık, sonra kapalı; her faz bir canary dağıtımıyla başlar ve script onun bitmesini bekler, ~4 dk), deney boyunca açık tut (giriş: admin / ladder)
+- "Önbellekten çıkarılma sebepleri" → 1. fazda silme anında kısa bir `invalidate` tepesi: yayını alan her pod kendi kopyasını siler. 2. fazda redirect pod'larında bu tepe yok: kopyalar yayınla silinmez, ancak TTL dolunca düşer (deney süresince `L1_TTL` 90 sn).
+- "Yönlendirme sonuçları" → silinmiş koda yapılan okumalar 1. fazda `not_found`; 2. fazda `ok` sayılmaya devam eder — bayat cevap, uygulamanın gözünden **başarıdır**.
+- Explore'da: `sum by (direction) (increase(cache_invalidation_messages_total{namespace="lvl14"}[2m]))` → 1. fazda `sent` ve `received` birlikte artar (`received` daha büyük: her mesajı diğer pod'ların hepsi alır). 2. fazda silmeyi yapan api pod'u yayını göndermeye devam eder (`sent` artar), ama redirect pod'ları başka bir kanalı dinlediği için `received` neredeyse durur — §8'deki "gönderilen ile alınan arasındaki fark" tam olarak bu.
 
 **Kanal en-iyi-çabadır:** Redis yeniden başlarsa, bir pod abone olamazsa ya da mesaj düşerse
 kimse fark etmez. Bu yüzden **kısa TTL (10 sn) bir yedek mekanizmadır, optimizasyon değil** —
@@ -118,6 +145,11 @@ tavanı vardı).
 
 **Reproduce:** `make repro P=P14-03`.
 
+**Grafana'da gör:** [`08 · Stream (Redpanda)`](http://grafana.localtest.me/d/ladder-stream?var-level=lvl14&from=now-15m&to=now&refresh=10s) — tüketici 3 replikaya sabitlenip 60 sn'lik `hot-key` yükü başlayınca aç (giriş: admin / ladder)
+- "Onaylama / sn ve tüketici pod sayısı" → pod çizgisi deney boyunca 3'te (KEDA duraklatıldı), commit/s yükle birlikte yükselir; deney bitince KEDA yeniden devreye girer ve pod sayısı düşebilir.
+- "Tüketici gecikmesi (bölüme göre)" → üç ayrı çizgi (partition 0, 1, 2). Tüketiciler yetiştiği sürece hepsi sıfıra yakın kalır; biri birikiyorsa o partition'ın tüketicisi darboğazdır.
+- Explore'da: `sum by (pod) (rate(consumer_records_total{namespace="lvl14",result="ok"}[1m]))` → üç ayrı çizgi, üçü de sıfırın üstünde: üç pod da gerçekten iş yapıyor (tek partition'da yalnızca biri çizgi verirdi). Biri belirgin yüksek olur: anahtar kısa kod olduğu için sıcak kodun bütün olayları tek partition'a, yani tek pod'a gider — partition başına sıranın bedeli.
+
 **Yeni sınır ve bedeli:** partition başına sıra garantisi var, **global sıra yok** · partition
 sayısı **azaltılamaz** · artırma anında mevcut anahtarlar yeni partition'lara taşınır ve o an
 için sıra garantisi kırılır. *"Partition artır" bir düğme değil, planlanması gereken bir değişikliktir.*
@@ -131,6 +163,12 @@ için sıra garantisi kırılır. *"Partition artır" bir düğme değil, planla
 o sayıyla kurar. [Topic · Konu: Kapasite planlaması]
 
 **Reproduce:** `make repro P=P14-04` · tam model: [`docs-capacity.md`](docs-capacity.md)
+
+**Grafana'da gör:** [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl14&from=now-15m&to=now&refresh=10s), [`01 · Pods & Resources`](http://grafana.localtest.me/d/ladder-pods?var-level=lvl14&from=now-15m&to=now&refresh=10s) ve [`04 · Cache`](http://grafana.localtest.me/d/ladder-cache?var-level=lvl14&from=now-15m&to=now&refresh=10s) — redirect tek pod'a indirilip `stairs` yükü başlayınca aç (~3 dk sürer) (giriş: admin / ladder)
+- "İstek / saniye (uç noktaya göre)" → `/{code}` basamak basamak yükselir (varsayılan `RATES=50,100,200,400`, her basamak ~40 sn). Son basamakta çizgi hedefin altında kalıyorsa tek pod doymuştur — o tavan, modelin "pod başına rps"i.
+- "Gecikme (p50 / p95 / p99)" → alt basamaklarda düz; pod doymaya yaklaşınca p99 yukarı kıvrılır. Kıvrılmıyorsa ölçtüğün tepe kapasite değil, verdiğin yüktür: `RATES` ile üstüne çık.
+- "CPU kullanımı (çekirdek)" → tek redirect pod'unun çizgisi basamaklarla birlikte tırmanır; script bunun sıfırdan büyük olmasını "yük gerçekten koştu" kanıtı sayar.
+- "İsabet oranı (toplam)" → yüksek; modelin "DB okuma = tepe × (1 − hit)" satırı buradan gelir. Soğuk anda bu oran 0'dır ve DB tepe trafiğin tamamını görür (P03-02).
 
 **Modelin en kritik satırı:** önbellek **soğukken** DB tepe trafiğin tamamını görür (P03-02).
 *Kapasiteyi ortalamaya göre planlarsan ilk dağıtım seni devirir.*
@@ -147,6 +185,14 @@ ve sonuncusu (tek primary'ye yazma) **aşılmadı**, sharding ister.
 
 **Reproduce:** `CONFIRM=1 make repro P=P14-05` — erişilebilirliği, breaker durumunu, yük atmayı,
 retry'ı ve kalan hata bütçesini raporlar.
+
+**Grafana'da gör:** [`11 · Resilience`](http://grafana.localtest.me/d/ladder-resilience?var-level=lvl14&from=now-15m&to=now&refresh=10s), [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl14&from=now-15m&to=now&refresh=10s), [`06 · Redis`](http://grafana.localtest.me/d/ladder-redis?var-level=lvl14&from=now-15m&to=now&refresh=10s) ve [`15 · k6`](http://grafana.localtest.me/d/ladder-k6?var-level=lvl14&from=now-15m&to=now&refresh=10s) — game day başlamadan aç; arızalar 00:15 (Redis +200 ms), 00:45 (Postgres %30 paket kaybı) ve 01:15 (pod öldürme) anlarında gelir, 01:45'te kalkar (giriş: admin / ladder)
+- "Devre kesici durumu (0 kapalı · 1 yarı açık · 2 açık)" → game day başlamadan **0** olmalı (değilse script uyarır: trafik almayan pod'un breaker'ı açıldığı anda donar). `redis` ve `kafka` çizgileri hep 0'da durur (etraflarında breaker yok); hareket edebilen tek çizgi `postgres`: yalnızca önbellek ıskaları veritabanına gittiği için paket kaybı ancak o sorguları düşürürse 1–2'ye çıkar, çıkmıyorsa önbellek yükü emmiştir — bu da bir sonuçtur.
+- "Bağımlılık gecikmesi p99" → iki çizgi: `redis` 00:15'te ~200 ms'ye sıçrar ve 01:45'e kadar orada kalır (enjekte edilen gecikme, kendi etiketiyle); `postgres` 00:45'ten sonra yükselir. Her bağımlılığın kendi guard'ı var: L2 önbelleğin Redis çağrıları `redis` çizgisine, veritabanı çağrıları `postgres` çizgisine düşer — biri diğerinin gecikmesini taşımaz. (L1 isabetleri Redis'e hiç gitmez; `redis` çizgisi L1 ıskalarının L2 çağrılarıdır.)
+- "Uygulama → Redis gecikmesi (p99)" (06 · Redis) → aynı ~200 ms platosu, yalnızca Redis için: uygulamanın gördüğü gecikme. Script tepe değeri de basar (`redis=… ms`).
+- "Şu an işlenen istek (pod'a göre)" → Redis gecikmesiyle (00:15) yükselir ama yük atma eşiğinin (`SHED_MAX_INFLIGHT=200`) çok altında kalır; bu yüzden "Atılan yük / sn" düz kalabilir. "Hazır pod adresi (endpoint) sayısı" → 01:15'te bir basamak iner, yeni pod hazır olunca geri çıkar.
+- "İstek / saniye (durum koduna göre)" (App RED) ile "Dönen durum kodları" (k6) → uygulamanın saydığı 5xx ile istemcinin gördüğü 5xx'i yan yana koy: aradaki fark, araya giren bir katmanın (ingress, hazır pod'u kalmamış servis) cevabıdır. Bkz. [Grafana'yı okumak](../README.md#grafanayı-okumak).
+- Explore'da: `slo:period_error_budget_remaining:ratio{namespace="lvl14",sloth_slo="redirect-availability"}` → game day'in 5xx'leri kalan bütçeyi aşağı çeker; `12 · SLO` → "Kalan hata bütçesi" aynı seriyi çizer (kayıt kuralları `namespace` etiketini taşır). Pencere 30 gün yazılı ama Prometheus yalnızca 6 saat tutuyor: değer, eldeki birkaç saatin bütçesidir ve önceki deneylerin izi de içindedir (eksi olabilir).
 
 **Bu bir test değil, bir provadır:** amacı geçmek değil, hangi korumanın ne zaman devreye
 girdiğini **görmek** ve runbook'u buna göre yazmak. *Tek tek çalışan korumaların birlikte nasıl
@@ -174,8 +220,14 @@ Elle denemeye değer:
 
 ## 8. Gözlemlenebilirlik: hangi paneller dolu
 
-Bu seviyede **hepsi** dolu — merdivenin ilk bakışta en görünür kazancı bu. 00'da yalnızca
-`Pods & Resources` ve `k6` doluydu; şimdi 16 dashboard'ın tamamı veri gösteriyor.
+Bu seviyede neredeyse hepsi dolu — merdivenin ilk bakışta en görünür kazancı bu. 00'da yalnızca
+`Pods & Resources` ve `k6` doluydu. Bilinen boşluklar, sebepleriyle: `05 · Postgres`'in
+postgres_exporter panelleri (CNPG'de exporter yok; havuz ve sorgu panelleri uygulamadan geldiği için
+dolu), `14 · Security` → "Ağ politikası hataları (Calico)" (felix kazınmıyor) ve `13 · Rollout` →
+"Git ile uyumsuz uygulamalar (Argo CD)" (Application tanımlı değil, P12-03).
+`13 · Rollout`'un sürüme göre panelleri pod şablonu hash'iyle ayrılır (stable hash:
+`kubectl -n lvl14 get rollout redirect -o jsonpath='{.status.stableRS}'`); `11 · Resilience` →
+"Bağımlılık gecikmesi p99" `postgres` ve `redis`'i ayrı çizer.
 
 Yeni metrik: `cache_invalidation_messages_total{direction}`. *Gönderilen ile alınan arasındaki
 fark, kaç pod'un yayını kaçırdığını söyler* — ve bu sayı sessizce büyüyorsa L1 TTL'in tek
@@ -204,7 +256,8 @@ Bu liste bir eksiklik itirafı değil, **kapsam beyanıdır**. Her madde gerçek
 - **Argo CD Application tanımlı değil** (P12-03): kurulu, bağlanmadı.
 - **Sırlar düz metin** (P13-04): sealed-secrets kurulu, kullanılmadı — gerekçesi yazılı.
 - **Alertmanager hedefi yok** (11): alarmlar ateşliyor, kimseye gitmiyor.
-- **Sürekli profil yok** (P11-08).
+- **Sürekli profil yok** (P11-08): profil uçları iç portta (`:6060`) hazır, toplayan yok (Pyroscope).
+  `/metrics` hâlâ ingress arkasındaki portta (13 §9).
 - **Maliyet modeli yok**: 12 pod + 3 DB + Redis + Kafka'nın bulut faturası kapasite modelinin
   parçası olmalı. *Ölçeklenebilirlik bir mühendislik sorunu kadar bir ekonomi sorunudur.*
 

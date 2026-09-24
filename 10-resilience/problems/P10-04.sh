@@ -10,19 +10,20 @@ on_cleanup "setenv "$(wl redirect)" TRAP_NO_BREAKER-"
 step "Postgres'e %50 paket kaybı (ağır arıza)"
 chaos_apply pg-loss-50
 sleep 5
-# İKİ HATA BİRDEN YAPILIYORDU.
+# ÖLÇÜ SEÇİMİ — iki tuzak.
 # (1) `dependency_requests_total` devre AÇIKKEN hızlıca reddedilen çağrıları da sayar
-#     (result="open"). Yani "bağımlılığa giden çağrı" diye raporlanan sayı, bağımlılığa GİTMEYEN
-#     çağrıları da içeriyordu: breaker açıkken 1663 göründü, oysa gerçekten giden 165'ti.
-# (2) İki fazın da penceresi [3m] idi; fazlar ~1 dakika arayla koştuğu için ikinci fazın
-#     ölçümü birinci fazın trafiğini de içeriyordu.
+#     (result="open"). Toplamı "bağımlılığa giden çağrı" diye raporlamak, bağımlılığa GİTMEYEN
+#     çağrıları da saymaktır — breaker açıkken toplam, gerçekten gidenin kat kat üstündedir.
+#     Ulaşan = toplam − open.
+# (2) Fazlar ~1 dakika arayla koşar; sabit bir [3m] pencere ikinci fazın ölçümüne birinci fazın
+#     trafiğini de katar. Pencere faz başınadır.
 # Üstüne, iki fazın ÜRETTİĞİ İSTEK SAYISI çok farklı: breaker açıkken istekler hızlı reddedilir
 # ve k6 çok daha fazla istek basar. Mutlak sayılar karşılaştırılamaz; oran karşılaştırılır:
 # "her 100 istekten kaçı bozuk bağımlılığa ULAŞTI?"
-# EN: two bugs at once — the counter includes fast-rejected calls (result="open"), so the number
-# reported as "calls to the dependency" counted calls that never reached it (1663 vs the real
-# 165); and both phases queried a [3m] window while running ~1 minute apart, so phase 2 measured
-# phase 1's traffic too. On top of that the two phases push very different request volumes, so
+# EN: two pitfalls — the counter includes fast-rejected calls (result="open"), so its total counts
+# calls that never reached the dependency (reached = total − open); and the phases run ~1 minute
+# apart, so a fixed [3m] window would let phase 2 measure phase 1's traffic too — each phase gets
+# its own window. On top of that the two phases push very different request volumes, so
 # absolute counts are not comparable — the ratio is: of every 100 requests, how many REACHED the
 # broken dependency?
 PH_REACH=0; PH_OPEN=0; PH_REQS=0; PH_P99=0
@@ -51,7 +52,7 @@ kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=180s >/dev/null 2>&1 
 for _ in $(seq 1 20); do serving && break; sleep 2; done
 run_phase
 reach_off=$PH_REACH; reqs_off=$PH_REQS; p99_off=$PH_P99
-grafana_hint "11 · Resilience → 'breaker state by dep' + 'dependency errors/s' · 02 · App RED → p99"
+grafana_hint "11 · Resilience → 'Devre kesici durumu (0 kapalı · 1 yarı açık · 2 açık)' + 'Azaltılmış mod (degrade)' · 02 · App RED → 'Gecikme (p50 / p95 / p99)'"
 note "breaker yok: bağımlılığa ULAŞAN çağrı=$reach_off · istek=$reqs_off · p99=$(awk -v v="$p99_off" 'BEGIN{printf "%.0f", v*1000}') ms"
 note "Oran: breaker açıkken her 100 istekten $(awk -v r="$reach_on" -v q="$reqs_on" 'BEGIN{printf "%.1f", (q>0? r*100/q : 0)}') tanesi bozuk bağımlılığa ulaştı; breaker yokken $(awk -v r="$reach_off" -v q="$reqs_off" 'BEGIN{printf "%.1f", (q>0? r*100/q : 0)}') tanesi."
 note "Devre açıkken istek, bağımlılığa GİTMEDEN hızlıca reddedilir (ya da degrade moda düşer):"

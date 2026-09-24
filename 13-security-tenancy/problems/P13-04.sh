@@ -8,8 +8,8 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # etmekten kötüdür.
 ensure_healthy
 step "Git'te düz metin sır var mı?"
-# Düz metin sır BULUNAMAMASI bu scriptin NOT-REPRODUCED yoludur; grep'in 1 dönmesi pipefail ile
-# atamayı düşürüp set -e'yi tetikliyordu — yani iyi haber scripti öldürüyordu.
+# Düz metin sır BULUNAMAMASI bu scriptin NOT-REPRODUCED yoludur; `|| true` olmadan grep'in 1
+# dönmesi pipefail ile atamayı düşürür ve set -e'yi tetiklerdi — yani iyi haber scripti öldürürdü.
 hits=$(grep -rn 'API_KEYS:\|POSTGRES_PASSWORD:\|linkly:linkly@' "$(dirname "$0")/../deploy/" 2>/dev/null | grep -v 'secretKeyRef' | head -4 || true)
 echo "${hits:-    (bulunamadı)}" | sed 's/^/    /'
 step "sealed-secrets controller kurulu mu?"
@@ -25,7 +25,7 @@ note "  kubectl -n $NS create secret generic linkly-api-keys \\"
 note "    --from-literal=API_KEYS='acme:pro:...' --dry-run=client -o yaml \\"
 note "    | kubeseal --controller-namespace kube-system -o yaml > "$(wl api)"-keys-sealed.yaml"
 note "Üretilen dosya GİT'E COMMIT EDİLEBİLİR: yalnızca bu cluster'ın özel anahtarı çözebilir."
-grafana_hint "14 · Security"
+note "Grafana'da görünmez: sır git'teki bir dosyada duruyor; hiçbir metrik bir dosyanın içeriğini ölçmez — kanıt yukarıdaki grep."
 note "Sealed-secrets'ın çözmediği şey: sır pod'un ORTAM DEĞİŞKENİNDE hâlâ düz metin. Bir crash"
 note "dump, bir /proc okuması ya da yanlış bir log satırı onu sızdırabilir."
 note "Sonraki adımlar (bu merdivende kapsam dışı): etcd at-rest şifreleme · kısa ömürlü kimlik"

@@ -9,7 +9,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # Pencere normalde mikrosaniyelerdir. Küçük olması YOK olduğu anlamına gelmez: yeterli trafikte
 # her pencere er geç yakalanır. Burada TRAP_READ_FILL_DELAY_MS ile pencereyi görünür kılıyoruz.
 #
-# ÖLÇÜM DERSİ: bu deneyin ilk hâli yanlış pencereyi büyütüyordu (silme ile geçersiz kılma arası).
+# ÖLÇÜM DERSİ: silme ile geçersiz kılma arasını büyütmek YANLIŞ pencereyi büyütür.
 # Orada anahtar hâlâ önbellektedir; okuyanlar bayat değeri zaten hit olarak alır ve geçersiz
 # kılmadan sonra düzelir — yani KALICI bayatlık üretmez. "Yarışı büyüttüm" demeden önce hangi
 # iki olayın yarıştığını yaz.

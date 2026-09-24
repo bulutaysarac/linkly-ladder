@@ -20,15 +20,15 @@ psql "CREATE TABLE IF NOT EXISTS clicks_detail (id bigserial, code text, at time
 psql "INSERT INTO clicks_detail (code, at)
       SELECT '$code', now() - (i || ' seconds')::interval FROM generate_series(1, $ROWS) i" >/dev/null
 psql "ANALYZE clicks_detail" >/dev/null
-# Planın TAMAMINI al: "Parallel Seq Scan" satırı 4. satıra düşebiliyor ve `head -3` onu kesiyordu
-# (aynı hatayı P02-05'te de yaptık). Kanıtı okunabilirlik uğruna kırpma; ekrana kırpılmışını bas.
+# Planın TAMAMINI al: "Parallel Seq Scan" satırı 4. satıra düşebilir ve `head -3` ile kırpılmış bir
+# plan onu keser (P02-05'te de aynı tuzak var). Kanıtı okunabilirlik uğruna kırpma; ekrana kırpılmışını bas.
 detail_plan=$(psql "EXPLAIN (ANALYZE) SELECT count(*) FROM clicks_detail WHERE code='$code'")
 { echo "$detail_plan" | head -5 | sed 's/^/    /'; } || true
 t_detail=$(psql "\timing on" >/dev/null; { time psql "SELECT count(*) FROM clicks_detail WHERE code='$code'" >/dev/null; } 2>&1 | awk '/real/{print $2}')
 agg_plan=$(psql "EXPLAIN (ANALYZE) SELECT sum(count) FROM clicks_daily WHERE code='$code'")
 { echo "$agg_plan" | head -5 | sed 's/^/    /'; } || true
 psql "DROP TABLE clicks_detail" >/dev/null
-grafana_hint "07 · Analytics → 'stats endpoint p99' · 05 · Postgres → 'DB query p99 by op' (op=stats)"
+grafana_hint "07 · Analytics → 'İstatistik ucu süresi (p99)' · 05 · Postgres → 'Sorgu süresi p99 (türe göre)' (op=stats)"
 note "ayrıntı tablosu count(*): ${t_detail:-?} ($ROWS satır) · toplama tablosu: ${rows_agg:-?} satırda anında"
 note "Toplama, veriyi YAZARKEN küçültür; ayrıntı ise OKURKEN büyür. İkisi arasındaki seçim,"
 note "'hangi soruları soracağım?' sorusuna verilen cevaptır — ve ayrıntıyı sonradan eklemek,"

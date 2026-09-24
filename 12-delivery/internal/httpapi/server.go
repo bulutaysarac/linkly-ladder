@@ -15,6 +15,7 @@ import (
 	"github.com/bulutaysarac/linkly-ladder/12-delivery/internal/metrics"
 	"github.com/bulutaysarac/linkly-ladder/12-delivery/internal/ratelimit"
 	"github.com/bulutaysarac/linkly-ladder/12-delivery/internal/store"
+	"github.com/bulutaysarac/linkly-ladder/12-delivery/internal/tracing"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -32,13 +33,22 @@ type API struct {
 
 // ClickRecorder — istek yolunun analitiğe tek bağlantısı: bloklamayan tek bir çağrı.
 // Arayüzü dar tutmak, 06'da bunu bir Kafka producer'ı ile değiştirmeyi tek satırlık bir iş yapacak.
-type ClickRecorder interface{ Record(code string) }
+//
+// 11: imzada ctx var. Bağlam iptal için değil (Record asla bloklamaz); TRACE'i taşır: üretici onu
+// Kafka header'ına yazar ve tüketicinin span'i isteğin trace'ine bağlanır. ctx'siz bir imzada
+// üretici boş bir bağlam yazardı — tüketici trace'leri tuzak açık da kapalı da yetim kalır ve
+// P11-02'nin tuzağı (TRAP_NO_KAFKA_PROPAGATION) kapatacak bir şey bulamazdı.
+// EN: the context carries the trace, not cancellation. Context must cross the API boundary or it
+// cannot cross the queue.
+type ClickRecorder interface {
+	Record(ctx context.Context, code string)
+}
 
 // nopRecorder — varsayılan. Analitik BAĞLI DEĞİLSE redirect yine de çalışmalı; eksik bir
 // bağımlılık, ana işlevi nil pointer ile düşürmemeli. (Testlerde de bu sayede ek kurulum gerekmiyor.)
 type nopRecorder struct{}
 
-func (nopRecorder) Record(string) {}
+func (nopRecorder) Record(context.Context, string) {}
 
 // SetDistributedLimiter — paylaşılan limiter. Verilmezse süreç içi limiter kullanılır
 // (testlerde ve Redis'siz çalıştırmada).
@@ -93,7 +103,7 @@ func (a *API) Handler(rl *ratelimit.Limiter) http.Handler {
 		// yük → o da ölür. Yük artışı kendini KESİNTİYE çevirir. README §7.
 		business.HandleFunc("GET /healthz", a.handleHealthz)
 		business.HandleFunc("GET /readyz", a.handleReadyz)
-		root.Handle("/", Chain(business, a.log, a.met, rl, a.cfg.HandlerTimeout))
+		root.Handle("/", Chain(business, a.log, a.met, rl, a.cfg.HandlerTimeout, a.clientIP))
 		root.Handle("GET /metrics", a.met.Handler())
 		return root
 	}
@@ -101,27 +111,38 @@ func (a *API) Handler(rl *ratelimit.Limiter) http.Handler {
 	root.HandleFunc("GET /healthz", a.handleHealthz)
 	root.HandleFunc("GET /readyz", a.handleReadyz)
 	root.Handle("GET /metrics", a.met.Handler())
-	// PROFİL UCU — gözlemlenebilirliğin dördüncü ayağı (P11-08).
-	// EN: P11-08's whole thesis is that some CPU costs are invisible to metrics and logs and show
-	//     up only in a profile. The script even printed the `go tool pprof` command to run — and
-	//     net/http/pprof was never registered, so that command could not work. Telling the reader
-	//     to use a tool you did not wire is worse than not mentioning it: they will conclude the
-	//     technique does not work rather than that the endpoint is missing.
-	//     It lives on the internal port (8080) next to /metrics, never on the ingress: a profile
-	//     endpoint is a CPU-costly, information-rich surface and does not belong on the internet.
-	// TR: P11-08'in bütün tezi, bazı CPU maliyetlerinin metriklerde ve log'larda GÖRÜNMEYİP
-	//     yalnızca profilde göründüğüdür. Script koşulacak `go tool pprof` komutunu bile
-	//     basıyordu — ve net/http/pprof hiç kaydedilmemişti, yani o komut çalışamazdı.
-	//     Bağlamadığın bir aracı okuyucuya önermek, hiç bahsetmemekten kötüdür: tekniğin
-	//     çalışmadığı sonucuna varır, ucun eksik olduğu sonucuna değil.
-	//     İç portta (8080), /metrics'in yanında duruyor; ingress'te ASLA: profil ucu CPU maliyetli
-	//     ve bilgi yoğun bir yüzeydir, internete açılmaz.
-	root.HandleFunc("GET /debug/pprof/", pprof.Index)
-	root.HandleFunc("GET /debug/pprof/cmdline", pprof.Cmdline)
-	root.HandleFunc("GET /debug/pprof/profile", pprof.Profile)
-	root.HandleFunc("GET /debug/pprof/symbol", pprof.Symbol)
-	root.HandleFunc("GET /debug/pprof/trace", pprof.Trace)
 	return root
+}
+
+// PprofHandler — profil uçları, AYRI bir iç portta (PPROF_ADDR, varsayılan :6060) servis edilir.
+//
+// EN: P11-08's thesis is that some CPU costs are invisible to metrics and logs and show up only
+//
+//	in a profile, so every deployed service serves one — from its own main, because
+//	redirect-svc and api-svc build their own muxes (split.go) and API.Handler() runs in neither.
+//	The endpoints do not belong on the service port: the ingress sends "/" to redirect:8080,
+//	so /debug/pprof there would be on the internet, and a profile endpoint is a CPU-costly,
+//	information-rich surface. A separate port that no Service or Ingress points at is reachable
+//	only from inside the cluster (kubectl port-forward / the API server's pod proxy).
+//
+// TR: P11-08'in tezi, bazı CPU maliyetlerinin metrikte ve log'da görünmeyip yalnızca profilde
+//
+//	göründüğüdür; bu yüzden deploy edilen her servis bir profil ucu sunar — kendi main'inden,
+//	çünkü redirect-svc ve api-svc kendi mux'larını kuruyor (split.go) ve API.Handler() ikisinde
+//	de koşmuyor. Uçların yeri servis portu değil: ingress "/"'i redirect:8080'e gönderiyor,
+//	/debug/pprof orada internete açık olurdu; profil ucu ise CPU maliyetli ve bilgi yoğun bir
+//	yüzeydir. Hiçbir Service'in ya da Ingress'in göstermediği ayrı bir port yalnızca küme
+//	içinden erişilebilir (kubectl port-forward / API sunucusunun pod proxy'si).
+//
+// [Topic · Konu: Sürekli profil, iç uçlar]
+func PprofHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /debug/pprof/", pprof.Index)
+	mux.HandleFunc("GET /debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("GET /debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("GET /debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("GET /debug/pprof/trace", pprof.Trace)
+	return mux
 }
 
 // chain — dağıtık limiter varsa onu kullan, yoksa süreç içi olana düş.
@@ -139,11 +160,33 @@ func (a *API) chain(business http.Handler, rl *ratelimit.Limiter) http.Handler {
 	if a.dist != nil {
 		h := rateLimitDistributed(business, a.cfg, a.dist)
 		h = timeout(h, a.cfg.HandlerTimeout)
-		h = accessLog(h, a.log, a.met)
+		h = accessLog(h, a.log, a.met, a.clientIP)
+		h = tracing.HTTPServer(h, routeOf) // accessLog'dan ÖNCE: log ve exemplar span'i görsün (bkz. Chain)
 		h = requestID(h)
 		return recoverPanic(h, a.log, a.met)
 	}
-	return Chain(business, a.log, a.met, rl, a.cfg.HandlerTimeout)
+	return Chain(business, a.log, a.met, rl, a.cfg.HandlerTimeout, a.clientIP)
+}
+
+// clientIP — bu isteğin istemcisi. Limiter'ın kovası ve access log'un `ip` alanı AYNI değerdir.
+//
+// EN: One request, one client identity. The limiter buckets by the address counted back from the
+//
+//	right of X-Forwarded-For by TRUSTED_PROXY_HOPS (clientIPFrom); the access log records that
+//	same address, so a 429 in the log points at the bucket that produced it. The first XFF
+//	entry is written by the client and identifies nobody — logging it would let a client choose
+//	who it appears to be in the logs, exactly as it would choose its bucket.
+//
+// TR: Tek istek, tek istemci kimliği. Limiter, X-Forwarded-For'un sağından TRUSTED_PROXY_HOPS
+//
+//	kadar geri sayılan adrese göre kova seçer (clientIPFrom); access log aynı adresi yazar,
+//	böylece logdaki bir 429 onu üreten kovayı gösterir. XFF'in ilk girdisini client yazar ve
+//	kimseyi tanımlamaz — onu loglamak, client'ın kovasını seçtiği gibi loglarda kim olarak
+//	görüneceğini de seçmesine izin vermek olurdu.
+//
+// [Topic · Konu: Güven sınırı, X-Forwarded-For]
+func (a *API) clientIP(r *http.Request) string {
+	return clientIPFrom(r, a.cfg.TrustedProxyHops, a.cfg.TrapTrustAnyXFF, a.cfg.TrapIgnoreXFF)
 }
 
 func (a *API) Server(h http.Handler) *http.Server {
@@ -210,11 +253,26 @@ func (a *API) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 }
 
+// routeOf — metrik etiketi olarak ŞABLON rota (gerçek yol değil: kardinalite).
+//
+// EN: The stats case must come before the `/api/links/{code}` prefix case. If `/stats` falls into
+//
+//	that case, the stats endpoint has no series of its own and the "İstatistik ucu süresi (p99)"
+//	panel — which filters route="/api/links/{code}/stats" — stays empty. A panel that is empty
+//	because the label never exists looks exactly like a fast endpoint.
+//
+// TR: stats dalı, `/api/links/{code}` önek dalından ÖNCE gelmeli. `/stats` o dala düşerse stats
+//
+//	ucunun kendi serisi olmaz ve route="/api/links/{code}/stats" süzen "İstatistik ucu süresi
+//	(p99)" paneli boş kalır. Etiket hiç oluşmadığı için boş kalan bir panel, hızlı bir uçla
+//	birebir aynı görünür.
 func routeOf(r *http.Request) string {
 	p := r.URL.Path
 	switch {
 	case p == "/api/links":
 		return "/api/links"
+	case strings.HasPrefix(p, "/api/links/") && strings.HasSuffix(p, "/stats"):
+		return "/api/links/{code}/stats"
 	case strings.HasPrefix(p, "/api/links/"):
 		return "/api/links/{code}"
 	case p == "/":
@@ -228,7 +286,7 @@ func shortCodeOf(r *http.Request) string {
 	// Yalnızca TRAP_METRIC_LABEL_CODE açıkken kullanılır.
 	p := strings.TrimPrefix(r.URL.Path, "/")
 	if strings.HasPrefix(p, "api/links/") {
-		return strings.TrimPrefix(p, "api/links/")
+		return strings.TrimSuffix(strings.TrimPrefix(p, "api/links/"), "/stats")
 	}
 	return p
 }

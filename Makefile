@@ -1,13 +1,16 @@
 # Kök Makefile — bütün seviyelerde toplu iş. Tek bir seviyeyle çalışmak için o klasöre gir: cd 03-local-cache && make up
 LEVELS := $(sort $(wildcard [0-9][0-9]-*))
 
-.PHONY: help list test lint lint-skeleton fmt verify sweep build matrix
+.PHONY: help list wipe test lint lint-skeleton fmt verify sweep build matrix
 
 help: ## Bu yardım
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
 list: ## Seviyeleri listele
 	@for l in $(LEVELS); do printf '%s\n' "$$l"; done
+
+wipe: ## Bütün verileri sil (seviyeler, Grafana'da görünen metrik/trace/log), kurulumu koru: make wipe CONFIRM=1
+	@CONFIRM=$(CONFIRM) platform/lib/wipe.sh
 
 test: ## go test -race, tüm seviyeler (go.work kökünden ./... çalışmaz — modül döngüsü)
 	@for l in $(LEVELS); do echo "== $$l"; (cd $$l && go test -race ./...) || exit 1; done

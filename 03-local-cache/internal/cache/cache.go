@@ -40,6 +40,20 @@ type Metrics struct {
 	Evictions *prometheus.CounterVec // reason
 	Entries   prometheus.Gauge
 	Errors    *prometheus.CounterVec // op
+	// Lookup — önbelleğe SORMANIN bedeli (katmana göre), DB'den yükleme hariç.
+	// EN: "an L2 hit costs a network round trip, an L1 hit costs a map lookup" is a claim that needs
+	//     its own instrument: the end-to-end HTTP histogram's smallest bucket is 1 ms and it also
+	//     contains the per-click DB UPDATE. A sub-millisecond difference cannot be read from a 1 ms
+	//     bucket — an end-to-end "p50 > 0.5 ms" check passes at level 03 too, so it proves nothing
+	//     about L2. The buckets start at 1 µs so both layers are resolved by the SAME instrument:
+	//     l1 (03) and l2 (04) can be compared side by side (P04-02).
+	// TR: "L2 isabeti bir ağ gidiş-gelişi, L1 isabeti bir map araması" iddiası kendi aletini ister:
+	//     uçtan uca HTTP histogramının en küçük kovası 1 ms ve içinde tıklama başına DB UPDATE'i de
+	//     var. Milisaniyenin altındaki bir fark 1 ms'lik kovadan okunamaz — uçtan uca bir
+	//     "p50 > 0.5 ms" kontrolünü 03 de geçer, yani L2 hakkında hiçbir şey kanıtlamaz.
+	//     Kovalar 1 µs'den başlıyor ki iki katman da AYNI aletle çözülsün: l1 (03) ile l2 (04) yan
+	//     yana (P04-02).
+	Lookup *prometheus.HistogramVec // layer
 }
 
 func NewMetrics(reg prometheus.Registerer, layer string) *Metrics {
@@ -54,24 +68,28 @@ func NewMetrics(reg prometheus.Registerer, layer string) *Metrics {
 			Name: "cache_entries", Help: "Önbellekteki kayıt (bu pod)"}),
 		Errors: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "cache_errors_total", Help: "Önbellek hatası"}, []string{"op"}),
+		Lookup: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name: "cache_lookup_duration_seconds", Help: "Önbellek arama süresi (DB'den yükleme hariç)",
+			Buckets: []float64{.000001, .0000025, .000005, .00001, .000025, .00005, .0001, .00025, .0005, .001, .0025, .005, .01, .05}},
+			[]string{"layer"}),
 	}
 	// AYNI METRİK ADI, İKİ SAHİP — 14'te L1 ve L2 aynı anda var.
 	// EN: level 14 constructs the cache metrics twice, once per layer ("l1" and "l2"), and the
 	//     metric names are shared on purpose: `layer` is a LABEL, not part of the name. With
-	//     MustRegister the second call panicked at startup with "duplicate metrics collector
-	//     registration attempted" and api-svc never came up — level 14 had never actually run.
+	//     MustRegister the second call would panic at startup with "duplicate metrics collector
+	//     registration attempted" and api-svc would never come up.
 	//     Prometheus has a contract for exactly this: if registration fails with
 	//     AlreadyRegisteredError, use the collector that is already there.
 	//     A metric name is a CONTRACT; when it has two owners, both must write to ONE series.
-	//     (The same bug hit `ratelimit_decisions_total` at level 08 — same shape, same fix.)
+	//     (`ratelimit_decisions_total` at level 08 has the same shape and the same answer.)
 	// TR: 14, önbellek metriklerini katman başına iki kez kuruyor ("l1" ve "l2") ve metrik adları
 	//     BİLEREK ortak: `layer` adın parçası değil, bir ETİKET. MustRegister ile ikinci çağrı
-	//     açılışta "duplicate metrics collector registration attempted" diye panikliyor ve
-	//     api-svc hiç ayağa kalkmıyordu — yani 14 hiç çalışmamıştı.
+	//     açılışta "duplicate metrics collector registration attempted" diye paniklerdi ve
+	//     api-svc hiç ayağa kalkmazdı.
 	//     Prometheus'un tam da bunun için bir sözleşmesi var: kayıt AlreadyRegisteredError ile
 	//     düşerse, ZATEN ORADA olan collector'ı kullan.
 	//     Bir metriğin adı bir SÖZLEŞMEDİR; iki sahibi varsa ikisi de TEK seriye yazmalı.
-	//     (Aynı hata 08'de `ratelimit_decisions_total`'da çıkmıştı — aynı biçim, aynı çözüm.)
+	//     (08'de `ratelimit_decisions_total` da aynı biçimde — aynı çözüm.)
 	register := func(c prometheus.Collector) prometheus.Collector {
 		if err := reg.Register(c); err != nil {
 			var are prometheus.AlreadyRegisteredError
@@ -87,6 +105,8 @@ func NewMetrics(reg prometheus.Registerer, layer string) *Metrics {
 	m.Evictions = register(m.Evictions).(*prometheus.CounterVec)
 	m.Entries = register(m.Entries).(prometheus.Gauge)
 	m.Errors = register(m.Errors).(*prometheus.CounterVec)
+	m.Lookup = register(m.Lookup).(*prometheus.HistogramVec)
+	m.Lookup.WithLabelValues(layer)
 	// Sıfırla pre-register: "hiç olmadı" ile "raporlamıyor" ayırt edilebilsin.
 	for _, r := range []string{"hit", "miss", "negative_hit", "expired"} {
 		m.Ops.WithLabelValues(layer, r)
@@ -173,7 +193,10 @@ func (c *LRU[V]) ttlWithJitter(base time.Duration) time.Duration {
 //	çalıştığının kanıtıdır — ve bunu hit oranına bakarak göremezsin.
 func (c *LRU[V]) GetOrLoad(ctx context.Context, key string, load func(context.Context) (V, bool, error)) (V, error) {
 	var zero V
-	if v, negative, ok := c.lookup(key); ok {
+	start := time.Now()
+	v, negative, ok := c.lookup(key)
+	c.m.Lookup.WithLabelValues(c.cfg.Layer).Observe(time.Since(start).Seconds())
+	if ok {
 		if negative {
 			return zero, ErrNegative
 		}

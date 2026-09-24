@@ -10,11 +10,11 @@ run_scan() {
   kubectl -n "$NS" rollout status "$(app_workload)" --timeout=180s >/dev/null || true
   for _ in $(seq 1 20); do serving && break; sleep 2; done
   # SINIRLI HAVUZ ŞART. Sınırsız rastgele kodla aynı eksik anahtar hiç tekrarlanmaz; negatif
-  # önbellekte tutulacak bir cevap olmaz ve deney iddiasını SINAYAMAZ. Ölçüldü: açıkken
-  # DB get/s=3639 · negatif isabet=0, kapalıyken 1696 — yani sonuç iddianın tersi çıktı, çünkü
-  # ölçülen şey negatif önbellek değil, iki koşunun gürültüsüydü.
+  # önbellekte tutulacak bir cevap olmaz ve deney iddiasını SINAYAMAZ. Sınırsız havuzla ölçülen:
+  # açıkken DB get/s=3639 · negatif isabet=0, kapalıyken 1696 — sonuç iddianın tersi çıkar, çünkü
+  # ölçülen şey negatif önbellek değil, iki koşunun gürültüsüdür.
   # EN: with an unbounded key space a missing key never repeats, so the negative cache has
-  # nothing to serve and the experiment cannot test its claim — it measured run-to-run noise.
+  # nothing to serve and the experiment cannot test its claim — it measures run-to-run noise.
   KEYS=${SCAN_KEYS:-60} CODE_LEN=7 k6run scan --vus 30 --duration 60s >/dev/null 2>&1 || true
   sleep 18
   promq "sum(rate(db_queries_total{namespace=\"$NS\",op=\"get\"}[1m]))"

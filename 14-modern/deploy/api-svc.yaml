@@ -27,7 +27,9 @@ spec:
       containers:
         - name: api
           image: localhost:5001/linkly-ladder/14-api-svc:IMAGE_TAG
-          ports: [{ name: http, containerPort: 8080 }]
+          # pprof: İÇ port (P11-08). Service yalnızca `http`'yi gösteriyor, Ingress de Service'i —
+          # yani 6060'a yalnızca küme içinden (port-forward / API sunucusunun pod proxy'si) ulaşılır.
+          ports: [{ name: http, containerPort: 8080 }, { name: pprof, containerPort: 6060 }]
           envFrom: [{ secretRef: { name: postgres } }]
           env:
             - { name: SERVICE_NAME, value: api }
@@ -54,7 +56,8 @@ spec:
             # Yalnızca kendi ingress'imizin eklediği hop'a güven (P08-03b)
             - { name: TRUSTED_PROXY_HOPS, value: "1" }
             # API anahtarları: üretimde bir sır yöneticisinden ya da veritabanından gelir.
-            # Burada Secret'tan — ve o Secret artık SealedSecret ile şifreli git'te (P13-04).
+            # Burada Secret'tan — ve o Secret hâlâ git'te DÜZ METİN; SealedSecret'a çevirmek bir
+            # komut uzakta ama yapılmadı (P13-04). "Şifreli" demek, olmayan bir korumayı ilan etmekti.
             - name: API_KEYS
               valueFrom: { secretKeyRef: { name: linkly-api-keys, key: API_KEYS } }
             - { name: AUTH_REQUIRED, value: "true" }
@@ -87,14 +90,14 @@ spec:
             - { name: SHED_ENABLED, value: "true" }
             # TRAP'ler kapalı: TRAP_LIST_N_PLUS_ONE · TRAP_READY_ALWAYS
           # KONTEYNER SERTLEŞTİRME (P13-08).
-          # EN: the level claimed "container hardening" and shipped no securityContext at all —
-          #     P13-08 measured it and said so. distroless already gives a small attack surface;
+          # EN: "container hardening" without a securityContext is only a word, and P13-08
+          #     measures exactly that. distroless already gives a small attack surface;
           #     this adds the kernel-level half: no privilege escalation, no capabilities, a
           #     read-only root filesystem and a non-root UID that Kubernetes ENFORCES rather than
           #     trusting the image to have set. "The image runs as nonroot" is a claim about the
           #     image; runAsNonRoot is a claim the API server checks.
-          # TR: seviye "konteyner sertleştirme" diyordu ve hiç securityContext göndermiyordu —
-          #     P13-08 bunu ÖLÇÜP söyledi. distroless zaten saldırı yüzeyini küçültüyor; bu,
+          # TR: securityContext olmadan "konteyner sertleştirme" yalnızca bir sözdür ve P13-08 tam
+          #     olarak bunu ÖLÇER. distroless zaten saldırı yüzeyini küçültüyor; bu,
           #     çekirdek tarafındaki yarısını ekliyor: yetki yükseltme yok, capability yok,
           #     salt-okunur kök dosya sistemi ve imajın ayarladığına GÜVENMEK yerine Kubernetes'in
           #     DOĞRULADIĞI bir non-root UID. "İmaj nonroot koşuyor" imaj hakkında bir iddiadır;

@@ -27,8 +27,8 @@ spec:
         # ve "client has run out of available brokers / network is unreachable" diyor — ScaledObject
         # Ready=False kalıyor, HPA hiç oluşmuyor ve tüketici ASLA ölçeklenmiyor. Sessiz arıza:
         # `kubectl get scaledobject` READY sütununda False yazıyor ama kimse bakmıyorsa
-        # "otomatik ölçekleme var" sanırsın. (P06-02 bunu 07'de yakaladı: sistem kendi kendine
-        # toparlanmadı, çünkü toparlayacak mekanizma hiç kurulmamıştı.)
+        # "otomatik ölçekleme var" sanırsın. (P06-02'de bu, sistemin kendi kendine
+        # toparlanmaması olarak görünür: toparlayacak mekanizma hiç kurulmamıştır.)
         bootstrapServers: redpanda.lvl14.svc.cluster.local:9092
         consumerGroup: analytics
         topic: clicks

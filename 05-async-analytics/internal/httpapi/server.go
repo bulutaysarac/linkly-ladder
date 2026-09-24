@@ -144,11 +144,29 @@ func (a *API) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 }
 
+// routeOf — metrik etiketi olarak ŞABLON yol (kardinalite sınırlı kalsın).
+//
+// EN: The stats case must come before the `/api/links/{code}` prefix case. If `/stats` falls into
+//
+//	that branch, every stats request is counted as a metadata lookup and the "İstatistik ucu
+//	süresi (p99)" panel — which filters route="/api/links/{code}/stats" — stays empty. A route
+//	label that merges two endpoints does not just hide one of them; it also blends their
+//	latencies into a number that describes neither. Every template registered in Handler needs
+//	its own label.
+//
+// TR: stats dalı, `/api/links/{code}` önek dalından ÖNCE gelmeli. `/stats` o dala düşerse her stats
+//
+//	isteği bir meta okuması sayılır ve route="/api/links/{code}/stats" filtreleyen "İstatistik
+//	ucu süresi (p99)" paneli boş kalır. İki ucu birleştiren bir etiket yalnızca birini gizlemez;
+//	ikisinin gecikmesini de hiçbirini anlatmayan tek bir sayıda karıştırır. Handler'da kayıtlı
+//	her şablonun kendi etiketi olmalı.
 func routeOf(r *http.Request) string {
 	p := r.URL.Path
 	switch {
 	case p == "/api/links":
 		return "/api/links"
+	case strings.HasPrefix(p, "/api/links/") && strings.HasSuffix(p, "/stats"):
+		return "/api/links/{code}/stats"
 	case strings.HasPrefix(p, "/api/links/"):
 		return "/api/links/{code}"
 	case p == "/":
@@ -162,7 +180,7 @@ func shortCodeOf(r *http.Request) string {
 	// Yalnızca TRAP_METRIC_LABEL_CODE açıkken kullanılır.
 	p := strings.TrimPrefix(r.URL.Path, "/")
 	if strings.HasPrefix(p, "api/links/") {
-		return strings.TrimPrefix(p, "api/links/")
+		return strings.TrimSuffix(strings.TrimPrefix(p, "api/links/"), "/stats")
 	}
 	return p
 }

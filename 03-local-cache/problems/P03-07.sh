@@ -6,7 +6,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # sistemin kendi kendine yarattığı, saat gibi işleyen bir yük dalgası.
 #
 # ÖLÇÜM NOTU — bu darbeyi Prometheus'tan OKUYAMAZSIN:
-# Darbe 1-2 saniye sürüyor, Prometheus ise 15 saniyede bir örnekliyor ve `rate(...[30s])` onu
+# Darbe 1-2 saniye sürüyor, Prometheus ise uygulamayı 10 saniyede bir kazıyor ve `rate(...[30s])` onu
 # 30 saniyeye yayıp düzlüyor. Tepe/ortalama oranı tam da düzlenen şey. Bu yüzden burada pod'un
 # kendi /metrics ucunu SANİYEDE BİR örnekliyoruz: ölçüm çözünürlüğü, ölçtüğün olaydan ince olmalı.
 # (Aynı örnekleme sorunu 11'de "exemplar ve yüksek çözünürlük" başlığıyla geri gelecek.)

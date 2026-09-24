@@ -11,12 +11,12 @@ loki_rejects() {
   promq 'sum(increase(loki_discarded_samples_total[3m])) or sum(increase(loki_request_duration_seconds_count{status_code="429"}[3m])) or vector(0)'
 }
 step "(1) LOG_LEVEL=info (varsayılan) altında yük"
-# FAZ BAŞINA PENCERE. `rate(...[2m])` her iki fazda da KOMŞU fazın trafiğini içeriyordu: ikinci
-# ölçüm, yeni pod'lar daha yeni ayağa kalkmışken birinci fazın kuyruğunu okuyor. Sonuç ters
-# çıktı — debug seviyesinde bayt/s DAHA DÜŞÜK göründü (627k → 373k), ki bu fiziksel olarak
-# saçmadır. Her faz kendi süresi kadar bir pencere okumalı.
-# EN: a fixed [2m] window straddles both phases; the second reading was dominated by the first
-# phase's tail while the new pods had barely started, so debug appeared to log LESS than info.
+# FAZ BAŞINA PENCERE. Sabit bir `rate(...[2m])` her iki fazda da KOMŞU fazın trafiğini içerir:
+# ikinci ölçüm, yeni pod'lar daha yeni ayağa kalkmışken birinci fazın kuyruğunu okur ve sonuç
+# ters çıkar — debug seviyesinde bayt/s DAHA DÜŞÜK görünür, ki bu fiziksel olarak saçmadır.
+# Her faz kendi süresi kadar bir pencere okur.
+# EN: a fixed [2m] window straddles both phases; the second reading is dominated by the first
+# phase's tail while the new pods have barely started, so debug appears to log LESS than info.
 T0=$(date +%s)
 k6run redirect --vus 30 --duration 40s >/dev/null 2>&1 || true
 sleep 15

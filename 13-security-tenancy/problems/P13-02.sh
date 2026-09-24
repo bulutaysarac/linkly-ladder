@@ -4,11 +4,12 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # Uygulama seviyesindeki filtreler, biri WHERE'i unutana kadar doğrudur. O hata HİÇBİR HATA
 # ÜRETMEZ: yalnızca başkalarının verisi yanıta girer. Katmanlı savunma tam da bunun içindir.
 #
-# NEDEN RLS VARSAYILAN OLARAK KAPALI (ve bu scriptin kendi tarihi):
-# 007_rls.sql bir süre migration hedefinin İÇİNDEYDİ. Sonuç: seviye hiç açılamadı. Politika
+# NEDEN RLS VARSAYILAN OLARAK KAPALI:
+# 007_rls.sql migration hedefinin DIŞINDA (deploy/migrate-job.yaml). Politika
 # `tenant = current_setting('app.tenant_id')` diyor; uygulama bu değişkeni HİÇ ayarlamıyor ve
-# PUBLIC yönlendirme yolunun kiracısı zaten yok — kısa kod herkes için çözülür. Yani her INSERT
-# SQLSTATE 42501 ile reddedildi, her yazma 503 döndü ve smoke "link oluşturulamadı" dedi.
+# PUBLIC yönlendirme yolunun kiracısı zaten yok — kısa kod herkes için çözülür. Varsayılan olarak
+# açık olsaydı her INSERT SQLSTATE 42501 ile reddedilir, her yazma 503 döner ve smoke "link
+# oluşturulamadı" derdi: seviye hiç açılamazdı.
 # Dersin kendisi bu: RLS ücretsiz bir onay kutusu değildir. Açmak, uygulamanın veritabanına
 # HER İŞLEMDE kim olduğunu söylemesini gerektirir (SET LOCAL). Söylemiyorsa, sızıntıyı
 # KESİNTİYE çevirirsin. Bu script ikisini de ölçüyor: neyi koruduğunu VE neye mal olduğunu.
@@ -19,12 +20,12 @@ prim=$(dep_pod 'cnpg.io/cluster=pg,cnpg.io/instanceRole=primary') || exit 2
 # sandığın şey aslında bir komut adıdır.
 psql()  { kubectl -n "$NS" exec "$prim" -c postgres -- psql -U postgres -d linkly -qtAc "$1" 2>&1; }
 # SÜPER KULLANICI RLS'İ ATLAR — FORCE bile onu bağlamaz (FORCE yalnızca tablo SAHİBİNİ bağlar).
-# Bu scriptin ilk hâli `postgres` ile sorguluyordu ve RLS açıkken bile 568 satır görüyordu:
-# politika çalışıyordu, biz onu göremiyorduk. Uygulamanın gördüğünü görmek için uygulamanın
-# ROLÜYLE sor. "Ben veritabanında kontrol ettim, veri görünüyor" cümlesi, hangi rolle baktığını
-# söylemiyorsa bir bilgi taşımaz.
+# `postgres` ile sorgulanan bir tablo RLS açıkken bile TÜM satırları gösterir: politika çalışır,
+# ama o rolle görünmez. Uygulamanın gördüğünü görmek için uygulamanın ROLÜYLE sor. "Ben
+# veritabanında kontrol ettim, veri görünüyor" cümlesi, hangi rolle baktığını söylemiyorsa bir
+# bilgi taşımaz.
 # EN: a superuser bypasses RLS entirely; FORCE only binds the table OWNER. Querying as `postgres`
-# showed all rows with the policy active — the policy worked, we just could not see it.
+# shows all rows with the policy active — the policy works, it is just invisible to that role.
 appq() { psql "SET ROLE linkly; $1"; }
 BKEY=${BKEY:-globex-key-3a71}
 on_cleanup "kubectl -n \"$NS\" exec $prim -c postgres -- psql -U postgres -d linkly -tAc \"ALTER TABLE links NO FORCE ROW LEVEL SECURITY; DROP POLICY IF EXISTS links_tenant_isolation ON links; ALTER TABLE links DISABLE ROW LEVEL SECURITY\" >/dev/null 2>&1 || true"
@@ -88,7 +89,7 @@ psql "ALTER TABLE links DISABLE ROW LEVEL SECURITY" >/dev/null
 back=$(appq "SELECT count(*) FROM links")
 note "kapatıldıktan sonra filtresiz sorgu → ${back:-?} satır (sızıntı geri döndü)"
 
-grafana_hint "14 · Security → '401/403' · 05 · Postgres"
+grafana_hint "02 · App RED → '5xx (uç noktaya göre)' (RLS açıkken yazmalar 503 — sızıntının kendisi hiçbir panelde görünmez)"
 note "RLS'in bedeli, transaction modundaki bir havuzda daha da artar: ayar İŞLEM BAŞINA yapılmalı"
 note "(SET LOCAL), oturum başına değil — yoksa bir sonraki kiracı öncekinin ayarını devralır."
 note "P09-03'teki aynı fizik: proxy, 'bağlantı'nın ne demek olduğunu değiştirir."

@@ -90,6 +90,7 @@ func main() {
 		WriteTimeout:      cfg.ClickWriteTimeout,
 		CommitBeforeWrite: cfg.TrapCommitBeforeWrite,
 		NoDLQ:             cfg.TrapNoDLQ,
+		CommitDelay:       time.Duration(cfg.TrapCommitDelayMs) * time.Millisecond,
 	}, db, stream.NewConsumerMetrics(met.Registry()), log)
 	if err != nil {
 		log.Error("tüketici kurulamadı", "err", err)
@@ -110,7 +111,11 @@ func main() {
 		log.Warn("TRAP_COMMIT_BEFORE_WRITE açık: commit yazmadan önce → veri kaybı (README §7)")
 	}
 	if cfg.TrapNoDLQ {
-		log.Warn("TRAP_NO_DLQ açık: bozuk mesaj DLQ'ya gitmeyecek (README §7)")
+		log.Warn("TRAP_NO_DLQ açık: bozuk mesajda tüketici takılı kalacak, offset ilerlemeyecek (README §7)")
+	}
+	if cfg.TrapCommitDelayMs > 0 {
+		log.Warn("TRAP_COMMIT_DELAY_MS açık: yazma ile commit arası bekleniyor — bu arada ölürsem parti tekrar gelir (yaz→commit) ya da kaybolur (commit→yaz) (README §7)",
+			"ms", cfg.TrapCommitDelayMs)
 	}
 
 	done := make(chan struct{})

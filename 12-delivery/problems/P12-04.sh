@@ -15,15 +15,15 @@ note ":latest kullanan imaj sayısı: $latest · farklı etiket sayısı: $uniqt
 step "Etiket nasıl üretiliyor?"
 note "ladder.mk: TAG = <git-sha>-<kaynak-hash>. Kaynak değişmezse etiket DEĞİŞMEZ (deterministik),"
 note "kaynak değişirse yeni etiket üretilir — yani 'deploy ettim değişmedi' mümkün değil."
-note "Bu bir tercih değil, bir ZORUNLULUK: ilk denemede zaman damgalı etiket kullanmıştık ve"
-note "'make push' ile 'make deploy' ayrı çağrıldığında FARKLI etiket üretip ImagePullBackOff verdi."
+note "Bu bir tercih değil, bir ZORUNLULUK: zaman damgalı bir etiket, 'make push' ile 'make deploy'"
+note "ayrı çağrıldığında FARKLI etiket üretir ve pod ImagePullBackOff'a düşer."
 step "Sürümü geri almak mümkün mü?"
 hist=$(kubectl -n "$NS" get rollout redirect -o jsonpath='{range .status.conditions[*]}{.type}={.status} {end}' 2>/dev/null) || true
 rs=$(kubectl -n "$NS" get replicaset -l "$APP_SELECTOR" --sort-by=.metadata.creationTimestamp -o jsonpath='{range .items[*]}{.metadata.name}{" → "}{.spec.template.spec.containers[0].image}{"\n"}{end}' 2>/dev/null | tail -3) || true
 [[ -n "$rs" ]] && { note "önceki sürümler (ReplicaSet geçmişi):"; echo "$rs" | sed 's/^/      /'; }
 note "Her sürüm farklı bir etikete sahip olduğu için 'kubectl argo rollouts undo' anlamlı bir yere döner."
 note ":latest olsaydı tüm ReplicaSet'ler aynı imajı gösterirdi ve 'undo' HİÇBİR ŞEY değiştirmezdi."
-grafana_hint "13 · Rollout → 'rps by version'"
+grafana_hint "13 · Rollout → 'İstek / sn (sürüme göre)' (her çizgi bir pod şablonu hash'i; :latest'le imaj değişse de hash değişmezdi)"
 note "13'te Kyverno bu kuralı POLICY hâline getirecek: :latest kullanan bir pod cluster'a giremeyecek."
 (( latest > 0 )) \
   && reproduced ":latest etiketi kullanılıyor ($latest imaj) — sürüm belirsiz ve geri alınamaz"

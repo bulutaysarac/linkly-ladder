@@ -6,10 +6,10 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # sistemden önce kendisi darboğaz olur.
 #
 # ÖLÇÜM NOTU — neden "p99 arttı mı?" diye BAKMIYORUZ (P04-03 ile aynı ders):
-# İlk hâl dağıtık anahtar ile global anahtarın limit kontrolü p99'unu kıyaslıyordu ve iki koşuda
-# da 40 ms çıkıyordu. Sebep basit: bu kümede uygulama saniyede birkaç yüz istek üretiyor, tek bir
-# Redis anahtarı ise on binlerce yazmayı rahatça kaldırır. Yani sorun YOKTU demiyorduk — sorunun
-# göründüğü YÜKE hiç çıkmamıştık. Sıcak anahtarın arızası bir yavaşlama değil, bir TAVAN'dır:
+# Dağıtık anahtar ile global anahtarın limit kontrolü p99'unu kıyaslamak iki koşuda da aynı sayıyı
+# verir. Sebep basit: bu kümede uygulama saniyede birkaç yüz istek üretiyor, tek bir Redis anahtarı
+# ise on binlerce yazmayı rahatça kaldırır. Bu "sorun YOK" demek değildir — sorunun göründüğü YÜKE
+# hiç çıkılmamıştır. Sıcak anahtarın arızası bir yavaşlama değil, bir TAVAN'dır:
 # tek anahtar tek çekirdektir ve o tavanı ancak tavanı DOĞRUDAN ölçerek gösterebilirsin.
 limits_enforced   # bu script limiter'ı sınıyor — yük girişi ve muafiyet jetonu KULLANILMAZ
 APP_SELECTOR="app.kubernetes.io/name=redirect"
@@ -49,7 +49,7 @@ step "TRAP_GLOBAL_LIMIT: her istek TEK anahtara yazıyor"
 setenv "$(wl redirect)" TRAP_GLOBAL_LIMIT=true >/dev/null
 read -r p2 c2 <<< "$(measure)"
 note "global anahtar: limit kontrolü p99=$(awk -v v="$p2" 'BEGIN{printf "%.2f", v*1000}') ms · Redis CPU=$(awk -v v="$c2" 'BEGIN{printf "%.2f", v}')"
-grafana_hint "06 · Redis → 'Redis CPU' + 'commands by type' · 10 · Rate limit → 'decisions by key type'"
+grafana_hint "06 · Redis → 'Redis CPU' + 'Komutlar (türe göre)' · 10 · Rate limit → 'Kararlar (anahtar türüne göre)'"
 note "Global limit gerçekten gerekiyorsa: anahtarı PARÇALA (global:0..15, rastgele seç, limiti 16'ya böl)."
 note "Bu, kesinlikten biraz ödün verir (parçalar eşit dolmaz) ama sıcak anahtarı ortadan kaldırır."
 note "Genel kural: paylaşılan durumda 'tek sayaç' istemek, tek bir CPU çekirdeğine ölçeklenmek demektir."

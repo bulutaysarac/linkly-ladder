@@ -11,9 +11,9 @@ setenv "$(app_workload)" ANALYTICS_QUEUE_SIZE=500 >/dev/null
 kubectl -n "$NS" rollout status "$(app_workload)" --timeout=180s >/dev/null || true
 for _ in $(seq 1 20); do serving && break; sleep 2; done
 # SIRA ÖNEMLİ: önce ısıt, SONRA gecikmeyi enjekte et.
-# Gerçekte oldu: chaos'u önce uyguladığımızda k6'nın setup'ı (100 link oluşturma) her INSERT için
-# 2 sn beklediği için setup timeout'una takıldı ve yük HİÇ koşmadı — script "düşürme olmadı" dedi.
-# Yani ölçtüğümüz şey kuyruk değil, kendi kurulum sıramızdı.
+# Chaos önce uygulanırsa k6'nın setup'ı (100 link oluşturma) her INSERT için 2 sn bekler, setup
+# timeout'una takılır ve yük HİÇ koşmaz — script "düşürme olmadı" der. O zaman ölçülen şey kuyruk
+# değil, scriptin kendi kurulum sırasıdır.
 step "Önce ısıt: sıcak kodu oluştur ve önbelleğe al (gecikme yokken)"
 k6run hot-key --vus 20 --duration 20s >/dev/null 2>&1 || true
 chaos_apply pg-delay-2s   # yazıcı yetişemeyecek

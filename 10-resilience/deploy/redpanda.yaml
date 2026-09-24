@@ -94,14 +94,14 @@ spec:
             storage: 4Gi
 ---
 # Topic'leri oluşturan JOB — lifecycle hook DEĞİL.
-# EN: The postStart hook did the same thing and silently did nothing: no event, no log, no
-#     failure — the broker came up with zero topics and every stream experiment measured a
-#     pipeline that could not exist. A Job is observable (`kubectl get job`), retried by
+# EN: A postStart hook fails silently: no event, no log, no failure — when its command does
+#     nothing the broker comes up with zero topics and every stream experiment measures a
+#     pipeline that cannot exist. A Job is observable (`kubectl get job`), retried by
 #     Kubernetes, and its failure is visible in the same place you look for everything else.
 #     Prefer the mechanism that FAILS LOUDLY over the one that is convenient.
-# TR: Aynı işi postStart hook'u yapıyordu ve sessizce hiçbir şey yapmadı: olay yok, log yok,
-#     hata yok — broker sıfır topic'le açıldı ve bütün stream deneyleri var olamayacak bir boru
-#     hattını ölçtü. Job gözlenebilir (`kubectl get job`), Kubernetes tarafından yeniden denenir
+# TR: postStart hook'u sessizce bozulur: olay yok, log yok, hata yok — komutu hiçbir şey
+#     yapmazsa broker sıfır topic'le açılır ve bütün stream deneyleri var olamayacak bir boru
+#     hattını ölçer. Job gözlenebilir (`kubectl get job`), Kubernetes tarafından yeniden denenir
 #     ve arızası diğer her şeye baktığın yerde görünür. Kolay olanı değil, YÜKSEK SESLE BOZULANI seç.
 apiVersion: batch/v1
 kind: Job

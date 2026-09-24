@@ -59,7 +59,8 @@ type Config struct {
 	TrapUnboundedQueue    bool // sınırsız analitik kuyruğu → düşürme yerine OOM (P05-02)
 	TrapRedirect301       bool // 302 yerine 301 → tarayıcı önbellekler, tıklama hiç sayılmaz (P05-06)
 	TrapCommitBeforeWrite bool // offset'i yazmadan önce commit et → tüketici ölürse veri kaybı (P06-01)
-	TrapNoDLQ             bool // bozuk mesajı DLQ'ya taşıma → crashloop ve sonsuz lag (P06-04)
+	TrapNoDLQ             bool // bozuk mesajda çıkış yolu yok → tüketici takılır, offset ilerlemez, lag sınırsız büyür (P06-04)
+	TrapCommitDelayMs     int  // yazma ile offset commit'i arasına gecikme → tekrar teslim (P06-01) / kayıp (P06-06) penceresini vurulabilir kıl
 }
 
 func Load() Config {
@@ -114,6 +115,7 @@ func Load() Config {
 		TrapRedirect301:       envBool("TRAP_REDIRECT_301", false),
 		TrapCommitBeforeWrite: envBool("TRAP_COMMIT_BEFORE_WRITE", false),
 		TrapNoDLQ:             envBool("TRAP_NO_DLQ", false),
+		TrapCommitDelayMs:     envInt("TRAP_COMMIT_DELAY_MS", 0),
 	}
 }
 

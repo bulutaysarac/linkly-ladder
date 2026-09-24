@@ -195,3 +195,46 @@ func TestInvalidateIsLocalOnly(t *testing.T) {
 		t.Fatal("invalidate çalışmadı")
 	}
 }
+
+// Önbelleğe SORMANIN bedeli katman başına ölçülüyor mu — ve DB'den yükleme ona KARIŞMIYOR mu?
+// P04-02 L2'nin ağ gidiş-gelişini L1'in bellek aramasıyla bu histogram üzerinden karşılaştırıyor.
+// Yükleyici 20 ms uyuyor: ölçüye karışsaydı toplam 20 ms'yi geçerdi.
+func TestLookupDurationObservedWithoutLoad(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	c := New[string](Config{Capacity: 10, TTL: time.Minute, NegativeTTL: time.Second, Layer: "l1"}, NewMetrics(reg, "l1"))
+	slow := func(context.Context) (string, bool, error) { time.Sleep(20 * time.Millisecond); return "v", true, nil }
+	for i := 0; i < 3; i++ {
+		if v, err := c.GetOrLoad(context.Background(), "k", slow); err != nil || v != "v" {
+			t.Fatalf("beklenmeyen: %v %v", v, err)
+		}
+	}
+	n, sum := lookupStats(t, reg, "l1")
+	if n != 3 {
+		t.Fatalf("3 arama bekleniyordu (1 ıska + 2 isabet), histogram %d saydı", n)
+	}
+	if sum >= 0.02 {
+		t.Fatalf("arama süresi toplamı %.4f s — DB'den yükleme ölçüye karışmış", sum)
+	}
+}
+
+func lookupStats(t *testing.T, reg *prometheus.Registry, layer string) (uint64, float64) {
+	t.Helper()
+	mfs, err := reg.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mf := range mfs {
+		if mf.GetName() != "cache_lookup_duration_seconds" {
+			continue
+		}
+		for _, m := range mf.GetMetric() {
+			for _, lp := range m.GetLabel() {
+				if lp.GetName() == "layer" && lp.GetValue() == layer {
+					return m.GetHistogram().GetSampleCount(), m.GetHistogram().GetSampleSum()
+				}
+			}
+		}
+	}
+	t.Fatalf("cache_lookup_duration_seconds{layer=%q} yayınlanmıyor", layer)
+	return 0, 0
+}

@@ -20,14 +20,15 @@ nodes:
             node-labels: "ingress-ready=true"
       # LİDER KİRASI BU VM'E GÖRE. Varsayılan kira 15 sn / yenileme 10 sn. 6 çekirdeği dört düğüm
       # paylaşırken yük üreteci, derleme ya da `make up`'ın docker build'i API sunucusunu aç
-      # bırakıyor ve lease yazması 25 sn'ye çıkıyor: controller-manager 173, scheduler 163 kez
-      # kirayı kaybedip yeniden başladı. Yeniden başlayan her controller her şeyi baştan
-      # listeliyor, API sunucusunu daha da yavaşlatıyor ve sıradakini düşürüyor — bir GERİ
-      # BESLEME DÖNGÜSÜ. Scheduler düşükken öldürülen pod'un yerine yenisi konmaz; deney
-      # sistemi değil kümeyi ölçer. Operatörlerin (CNPG, Argo Rollouts) aynı ayarı Makefile'da.
-      # EN: default lease 15s/renew 10s; on this shared 6-core VM lease writes hit 25s and the
-      #     control plane restarted 170+ times, each restart re-listing everything and starving
-      #     the API server further. A single-replica control plane gains nothing from fast failover.
+      # bırakır ve lease yazması 25 sn'ye çıkabilir: varsayılan kirayla controller-manager ve
+      # scheduler kirayı kaybedip yeniden başlar. Yeniden başlayan her controller her şeyi baştan
+      # listeler, API sunucusunu daha da yavaşlatır ve sıradakini düşürür — bir GERİ BESLEME
+      # DÖNGÜSÜ. Scheduler düşükken öldürülen pod'un yerine yenisi konmaz; deney sistemi değil
+      # kümeyi ölçer. Operatörlerin (CNPG, Argo Rollouts) aynı ayarı Makefile'da.
+      # EN: default lease 15s/renew 10s; on this shared 6-core VM lease writes can take 25s, so the
+      #     control plane would keep losing its lease and restarting, each restart re-listing
+      #     everything and starving the API server further. A single-replica control plane gains
+      #     nothing from fast failover.
       - |
         kind: ClusterConfiguration
         controllerManager:

@@ -12,12 +12,12 @@ curl -sG "$PROM_URL/api/v1/rules" 2>/dev/null \
   | jq -r '.data.groups[]?.rules[]? | select(.type=="alerting") | select(.name|test("Linkly")) | "    \(.name) [\(.labels.severity // "-")]"' 2>/dev/null | sort -u
 # SIÇRAMA, NAIVE EŞİĞİ AŞACAK KADAR HATA ÜRETMELİ.
 # Naive kural `slo:sli_error:ratio_rate5m > 0.01` diyor ve `for:` yok — ama 35 sn'lik bir sıçrama
-# 5 dakikalık oranı %1'in üstüne çıkarmaya yetmedi: ölçüldü, yalnızca YAVAŞ burn kuralı pending'e
-# geçti, naive alarm hiç ateşlemedi ve script "naive daha gürültülü" iddiasını sınayamadı.
-# Sıçrama 90 sn'ye çıkarıldı (hâlâ 1s/6s burn pencerelerine göre KISA — anlatı bozulmuyor) ve
-# değerlendirme için kayıt kuralının birkaç aralığı beklenilir hâle getirildi.
-# EN: the naive rule has no `for:`, but a 35s spike did not push the 5-minute ratio above 1% —
-# only the SLOW burn rule went pending, so the claim could not be tested. 90s is still short
+# 5 dakikalık oranı %1'in üstüne çıkarmaya yetmez: yalnızca YAVAŞ burn kuralı pending'e geçer,
+# naive alarm hiç ateşlemez ve "naive daha gürültülü" iddiası sınanamaz. Bu yüzden sıçrama 90 sn
+# (hâlâ 1s/6s burn pencerelerine göre KISA — anlatı bozulmaz) ve değerlendirme için kayıt
+# kuralının birkaç aralığı beklenir.
+# EN: the naive rule has no `for:`, but a 35s spike does not push the 5-minute ratio above 1% —
+# only the SLOW burn rule goes pending, so the claim cannot be tested. 90s is still short
 # relative to the 1h/6h burn windows, so the narrative holds.
 step "Kısa bir hata sıçraması üret (~90 sn)"
 chaos_apply pg-loss-50
@@ -27,14 +27,19 @@ note "sıçrama bitti, alarmlar değerlendiriliyor..."
 sleep 75
 step "Hangi alarm ateşledi?"
 curl -sG "$PROM_URL/api/v1/alerts" 2>/dev/null \
-  | jq -r '.data.alerts[]? | select(.labels.alertname|test("Linkly")) | "    \(.labels.alertname) → \(.state) [\(.labels.severity // "-")]"' 2>/dev/null | sort -u
-naive=$(promq 'count(ALERTS{alertname="LinklyNaiveErrorRateThreshold",alertstate=~"pending|firing"}) or vector(0)')
-fast=$(promq 'count(ALERTS{alertname="LinklyRedirectErrorBudgetBurnFast",alertstate="firing"}) or vector(0)')
-budget=$(promq 'slo:period_error_budget_remaining:ratio{sloth_slo="redirect-availability"}')
-grafana_hint "12 · SLO → 'burn rate 1h / 6h' + 'error budget remaining' + 'Alarmlar (firing)'"
+  | jq -r --arg ns "$NS" '.data.alerts[]? | select((.labels.alertname|test("Linkly")) and .labels.namespace == $ns) | "    \(.labels.alertname) → \(.state) [\(.labels.severity // "-")]"' 2>/dev/null | sort -u
+# Kurallar `namespace` taşır (deploy/slo.yaml): 11-14 aynı adlı kuralları kurar, süzmeden
+# sorulan sayı başka bir seviyenin alarmı olabilir.
+# EN: rules carry `namespace`; filter on it — 11-14 define identically named rules.
+naive=$(promq "count(ALERTS{alertname=\"LinklyNaiveErrorRateThreshold\",alertstate=~\"pending|firing\",namespace=\"$NS\"}) or vector(0)")
+fast=$(promq "count(ALERTS{alertname=\"LinklyRedirectErrorBudgetBurnFast\",alertstate=\"firing\",namespace=\"$NS\"}) or vector(0)")
+budget=$(promq "slo:period_error_budget_remaining:ratio{sloth_slo=\"redirect-availability\",namespace=\"$NS\"}")
+grafana_hint "12 · SLO → 'Hata oranı (son 5 dk)' + 'Bütçe yanma hızı (1 sa / 6 sa)' + 'Kalan hata bütçesi' + 'Çalan alarmlar'"
 note "naive eşik alarmı: ${naive%%.*} · hızlı burn-rate alarmı: ${fast%%.*}"
 note "kalan hata bütçesi: $(awk -v v="$budget" 'BEGIN{printf "%.2f%%", v*100}')"
 note "Okuma: kısa bir sıçrama, 30 GÜNLÜK bütçenin küçük bir kısmını harcar — uyandırmayı hak etmez."
+note "Ama bu kümede Prometheus yalnızca 6 SAAT saklıyor: 'kalan bütçe' fiilen son 6 saatin hesabı."
+note "Az trafikli bir laboratuvarda aynı sıçrama onu büyük ölçüde yiyebilir, sıfırın altına bile inebilir."
 note "Burn-rate alarmının iki penceresi de aynı anda aşılmalı: uzun pencere 'yeterince büyük mü?',"
 note "kısa pencere 'HÂLÂ oluyor mu?' diye sorar. Biri olmadan diğeri ya geç çalar ya geç susar."
 note "Kural: alarm, EYLEM gerektirmiyorsa alarm değildir. Eylem gerektiren şey bütçenin tükenme"

@@ -26,9 +26,15 @@ kind: ClusterPolicy
 metadata:
   name: linkly-ladder-baseline
   annotations:
+    # Açıklama yalnızca AŞAĞIDAKİ ÜÇ kuralı sayar. "Root olarak çalışma yasak" bir kural DEĞİL —
+    # runAsNonRoot pod tanımında duruyor (P13-08) ama admission'da zorunlu değil. Var olmayan bir
+    # kuralı ilan eden politika açıklaması, README'den de kötüdür: kapının kendisi yalan söyler.
+    # EN: the description lists exactly the three rules below and nothing else; a description
+    #     that announces a rule the policy does not enforce makes the gate itself lie.
     policies.kyverno.io/description: >-
       Merdivende öğrenilen kurallar: :latest yasak (P12-04), bellek limiti zorunlu (P00-08),
-      probe zorunlu (P00-04/P07-08), root olarak çalışma yasak.
+      probe zorunlu (P00-04/P07-08). Root olarak çalışma bir KURAL DEĞİL: runAsNonRoot pod
+      tanımında (P13-08), admission'da zorunlu tutulmuyor.
 spec:
   validationFailureAction: Enforce
   background: true
@@ -87,16 +93,18 @@ spec:
                 matchLabels:
                   app.kubernetes.io/name: migrate     # Job'ın readiness'i olmaz
           # OPERATÖRÜN KENDİ POD'LARINI DIŞARIDA BIRAK.
-          # EN: This rule blocked CloudNativePG's own `pg-1-initdb` bootstrap Job — a one-shot pod
-          #     that legitimately has no readiness probe — so the level's security policy prevented
-          #     the level's own database from ever starting. The policy did exactly what it said
-          #     and that was the problem: a cluster-wide rule must carve out the controllers that
-          #     create pods you do not author. Otherwise "secure" means "does not run".
-          # TR: Bu kural CloudNativePG'nin kendi `pg-1-initdb` bootstrap Job'ını engelledi —
-          #     readiness'i olmayan tek seferlik bir pod — ve seviyenin güvenlik politikası,
-          #     seviyenin KENDİ veritabanının açılmasını imkânsız kıldı. Politika tam da yazdığı
-          #     şeyi yaptı; sorun da buydu: küme geneli bir kural, senin yazmadığın pod'ları
-          #     yaratan denetleyicileri dışarıda bırakmalı. Yoksa "güvenli", "çalışmıyor" demektir.
+          # EN: Without these exclusions the rule blocks CloudNativePG's own `pg-1-initdb`
+          #     bootstrap Job — a one-shot pod that legitimately has no readiness probe — so the
+          #     level's security policy would keep the level's own database from ever starting.
+          #     The policy would do exactly what it says, and that is the problem: a cluster-wide
+          #     rule must carve out the controllers that create pods you do not author.
+          #     Otherwise "secure" means "does not run".
+          # TR: Bu istisnalar olmadan kural CloudNativePG'nin kendi `pg-1-initdb` bootstrap Job'ını
+          #     engeller — readiness'i olmayan tek seferlik bir pod — ve seviyenin güvenlik
+          #     politikası, seviyenin KENDİ veritabanının açılmasını imkânsız kılar. Politika tam
+          #     da yazdığı şeyi yapar; sorun da budur: küme geneli bir kural, senin yazmadığın
+          #     pod'ları yaratan denetleyicileri dışarıda bırakmalı. Yoksa "güvenli", "çalışmıyor"
+          #     demektir.
           - resources:
               kinds: [Pod]
               selector:
@@ -120,18 +128,18 @@ spec:
       validate:
         message: "readinessProbe zorunlu — probe'suz pod hazır olmadan trafik alır (P00-04, P07-08)"
         # DESEN TUZAĞI · PATTERN PITFALL
-        # EN: The first version of this rule was `readinessProbe: {"?*": "?*"}`. It read as
-        #     "any key, any value" but Kyverno applies the value wildcard to each key's value,
-        #     and `httpGet` is a MAP, not a scalar — so it rejected pods that DID have a probe.
-        #     Three redirect replicas were refused while the policy message said the opposite of
-        #     what was wrong. A policy that lies about why it denied you is worse than no policy.
+        # EN: The obvious pattern, `readinessProbe: {"?*": "?*"}`, reads as "any key, any value",
+        #     but Kyverno applies the value wildcard to each key's value, and `httpGet` is a MAP,
+        #     not a scalar — so it rejects pods that DO have a probe, with a message that says
+        #     the opposite of what is wrong. A policy that lies about why it denied you is worse
+        #     than no policy.
         #     `periodSeconds: ">0"` is safe: the API server defaults it for every probe kind
         #     (httpGet, exec, tcpSocket), so its presence proves a probe exists.
-        # TR: Bu kuralın ilk hâli `readinessProbe: {"?*": "?*"}` idi. "Her anahtar, her değer"
+        # TR: Akla ilk gelen desen, `readinessProbe: {"?*": "?*"}`, "her anahtar, her değer"
         #     gibi okunuyor ama Kyverno değer joker'ini her anahtarın DEĞERİNE uyguluyor ve
-        #     `httpGet` skaler değil MAP — yani probe'u OLAN pod'ları reddetti. Üç redirect
-        #     replikası geri çevrildi ve politikanın mesajı, asıl sorunun tam tersini söyledi.
-        #     Reddetme sebebi hakkında yalan söyleyen bir politika, politikasızlıktan kötüdür.
+        #     `httpGet` skaler değil MAP — yani probe'u OLAN pod'ları, asıl sorunun tam tersini
+        #     söyleyen bir mesajla reddeder. Reddetme sebebi hakkında yalan söyleyen bir politika,
+        #     politikasızlıktan kötüdür.
         #     `periodSeconds: ">0"` güvenli: API sunucusu bunu her probe türü için (httpGet,
         #     exec, tcpSocket) varsayılan olarak doldurur — varlığı probe'un varlığını kanıtlar.
         pattern:

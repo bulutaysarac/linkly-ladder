@@ -18,6 +18,13 @@ grafana:
       searchNamespace: ALL
     datasources:
       enabled: true
+      # EXEMPLAR → TEMPO: 11+ uygulama gecikme histogramına örnek trace kimliği iliştirir; bu bağ olmadan
+      # Grafana'da noktaya tıklayıp trace'e gidilemez (11 §8'deki exemplar → trace yolu buna dayanır).
+      # EN: link exemplar trace_id to the Tempo datasource so a histogram point opens its trace.
+      exemplarTraceIdDestinations:
+        datasourceUid: tempo
+        traceIdLabelName: trace_id
+        urlDisplayLabel: Trace'i aç (Tempo)
   additionalDataSources:
     - name: Loki
       type: loki
@@ -40,9 +47,18 @@ grafana:
       min_refresh_interval: 5s
     users:
       default_theme: dark
+  # BELLEK SINIRI, ÇALIŞMA KÜMESİNİN EPEY ÜSTÜNDE OLMALI — yoksa bedeli CPU olarak ödenir.
+  # Chart GOMEMLIMIT'i sınırın %90'ı yapar. Grafana 13 boşta ~390 MiB, paneller açıkken 450-470
+  # MiB çalışır. Sınır bu kümeye yakınsa (512 Mi → hedef 460 MiB) Go çöp toplayıcısı durmadan
+  # çalışır: Grafana çekirdekler yer, Prometheus 35 ms'de cevap verse de her panel sorgusu
+  # saniyeler sürer, 1 sn'lik readiness düşer → 503, liveness düşer → öldürülür (137). OOM hiç
+  # görünmez; sınır bellek değil CPU olarak ödenir. 1 Gi, hedefi çalışma kümesinin çok üstüne koyar.
+  # EN: GOMEMLIMIT is 90% of the limit. With a limit close to Grafana 13's working set the GC runs
+  #     continuously: cores burned, multi-second panel queries, readiness/liveness failures —
+  #     never an OOM. 1Gi puts the target well above the working set.
   resources:
     requests: { cpu: 50m, memory: 128Mi }
-    limits: { memory: 512Mi }
+    limits: { memory: 1Gi }
 prometheus:
   ingress:
     enabled: true
@@ -63,16 +79,16 @@ prometheus:
     podMonitorSelectorNilUsesHelmValues: false
     ruleSelectorNilUsesHelmValues: false
     # WAL OYNATMA, KARARLI DURUMDAN DAHA FAZLA BELLEK İSTER.
-    # Kararlı hâlde ~880 MB yeterliydi ve limit 1536Mi konmuştu. Ama kind control-plane'i sert
-    # yeniden başlayınca Prometheus 73 segmentlik WAL'i oynatmak zorunda kaldı ve tam orada
-    # OOMKilled oldu; kubelet yeniden başlattı, replay baştan başladı ve SONSUZ bir döngüye
-    # girdi. O sırada koşan doğrulama turu Prometheus'a ulaşamadığı için her `promq` 0 döndü:
-    # ÖLÇÜM YAPILMADAN sonuç üretiliyordu. Bir bileşenin limitini KARARLI durumuna göre değil,
+    # Kararlı hâlde ~880 MB yeter. Ama kind control-plane'i sert yeniden başlayınca Prometheus
+    # onlarca segmentlik WAL'i oynatmak zorundadır; limit kararlı duruma göre (ör. 1536Mi)
+    # seçilirse tam orada OOMKilled olur, kubelet yeniden başlatır, replay baştan başlar ve
+    # SONSUZ bir döngüye girer. O sırada koşan her deney Prometheus'a ulaşamaz ve `promq` 0 döner:
+    # ÖLÇÜM YAPILMADAN sonuç üretilir. Bir bileşenin limitini KARARLI durumuna göre değil,
     # EN KÖTÜ ANINA (kurtarma) göre seç; kurtarma yolu, en çok ihtiyaç duyulan yoldur.
-    # EN: steady state fit in 1536Mi, but after a hard control-plane restart Prometheus had to
-    # replay a 73-segment WAL and was OOMKilled mid-replay — restart, replay again, forever. The
-    # verification sweep running at the time got 0 from every `promq` and produced verdicts with
-    # no measurement behind them. Size a limit for the RECOVERY path, not the steady state.
+    # EN: steady state fits in ~1.5Gi, but after a hard control-plane restart Prometheus must
+    # replay a multi-segment WAL; sized for the steady state it is OOMKilled mid-replay —
+    # restart, replay again, forever — and every experiment reads 0 from `promq` with no
+    # measurement behind it. Size a limit for the RECOVERY path, not the steady state.
     resources:
       requests: { cpu: 200m, memory: 512Mi }
       limits: { memory: 3Gi }

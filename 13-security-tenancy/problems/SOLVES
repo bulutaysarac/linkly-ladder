@@ -1,9 +1,9 @@
 # 13, 12'nin sorunlarından hiçbirini ÇÖZMÜYOR — ve bunu yazmak, yanlış bir iddiadan iyidir.
 #
-# Burada bir zamanlar P12-04 (:latest etiketi) yazıyordu. Yanlıştı: P12-04 bir SORUN ÜRETME
-# scripti değil, bir DOĞRULAMA scripti. Merdiven en baştan içerik hash'li etiket kullanıyor,
-# yani P12-04 12'de de NOT-REPRODUCED. Hiç üretilmemiş bir sorunu "çözdüm" diye listelemek,
-# verify-prev'i yeşil gösterir ve hiçbir şey kanıtlamaz — kontratın en sinsi ihlali budur.
+# P12-04 (:latest etiketi) burada DEĞİL: P12-04 bir SORUN ÜRETME scripti değil, bir DOĞRULAMA
+# scripti. Merdiven en baştan içerik hash'li etiket kullanıyor, yani P12-04 12'de de
+# NOT-REPRODUCED. Hiç üretilmemiş bir sorunu "çözdüm" diye listelemek, verify-prev'i yeşil
+# gösterir ve hiçbir şey kanıtlamaz — kontratın en sinsi ihlali budur.
 #
 # 13'ün P12-04 ile ilgili gerçek katkısı başka: Kyverno'nun disallow-latest-tag politikası,
 # bir GELENEĞİ bir GARANTİYE çeviriyor. Fark, o geleneği bilmeyen birinin bir şey dağıttığı

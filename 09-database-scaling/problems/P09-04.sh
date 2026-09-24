@@ -15,16 +15,16 @@ fb=$(rpsql "SHOW hot_standby_feedback")
 note "replika hot_standby_feedback = ${fb:-?}"
 note "on  → replika, primary'ye 'şu satırları hâlâ okuyorum' der; vacuum bekler (çakışma azalır, ŞİŞME artar)"
 note "off → primary umursamaz; uzun okumalar İPTAL edilir (çakışma artar, şişme azalmaz)"
-# ÖLÇÜM DEĞİŞİKLİĞİ: "çakışma oldu mu?" YANLIŞ SORUYDU.
+# ÖLÇÜM SEÇİMİ: "çakışma oldu mu?" YANLIŞ SORUDUR.
 # EN: this level sets hot_standby_feedback=on on purpose, so a cancellation is exactly what will
-#     NOT happen — the script was asking whether the behaviour it deliberately disabled occurred,
-#     and dutifully answering "no" every time. A question whose answer is fixed by your own
-#     configuration is not a measurement. The trade-off is still real; it is just paid on the
+#     NOT happen — asking whether the behaviour you deliberately disabled occurred gets a dutiful
+#     "no" every time. A question whose answer is fixed by your own configuration is not a
+#     measurement. The trade-off is still real; it is just paid on the
 #     OTHER side: the primary cannot vacuum rows that the replica's long query still needs, so
 #     dead tuples accumulate and VACUUM cannot reclaim them. That side IS measurable.
 # TR: bu seviye hot_standby_feedback=on'u bilerek açıyor, yani iptal TAM DA OLMAYACAK olan şey —
-#     script, bilerek devre dışı bıraktığı davranışın gerçekleşip gerçekleşmediğini soruyor ve
-#     her seferinde uslu uslu "hayır" cevabını alıyordu. Cevabı kendi yapılandırmanla SABİTLENMİŞ
+#     bilerek devre dışı bıraktığın davranışın gerçekleşip gerçekleşmediğini sormak her seferinde
+#     uslu uslu "hayır" cevabını alır. Cevabı kendi yapılandırmanla SABİTLENMİŞ
 #     bir soru, ölçüm değildir. Pazarlık yine de gerçek; yalnızca DİĞER taraftan ödeniyor:
 #     replikanın uzun sorgusunun hâlâ ihtiyaç duyduğu satırları primary VACUUM EDEMEZ, ölü satırlar
 #     birikir ve geri kazanılamaz. Ölçülebilir olan taraf bu.
@@ -56,7 +56,7 @@ ppsql "VACUUM links" >/dev/null
 free_dead=$(ppsql "SELECT n_dead_tup FROM pg_stat_user_tables WHERE relname='links'")
 note "rehin YOKKEN VACUUM sonrası ölü satır: ${free_dead:-?}"
 conflicts=$(rpsql "SELECT confl_snapshot + confl_bufferpin + confl_deadlock + confl_lock + confl_tablespace FROM pg_stat_database_conflicts WHERE datname='linkly'")
-grafana_hint "05 · Postgres → 'replication lag' + 'dead tuples'"
+grafana_hint "05 · Postgres → 'Replikasyon gecikmesi' · Explore → cnpg_pg_stat_replication_backend_xmin_age ('Ölü satırlar' paneli 09+'da boş: CNPG tablo başına metrik yayınlamıyor)"
 note "replikadaki uzun sorgu sonucu: ${out:-<boş>} · replikada çakışma: ${conflicts:-0} (feedback=on olduğu için 0 BEKLENİR)"
 note "Pazarlığın iki tarafı:"
 note "  feedback=on  → uzun okuma iptal EDİLMEZ, primary'de şişme birikir (ölçtüğümüz taraf)"

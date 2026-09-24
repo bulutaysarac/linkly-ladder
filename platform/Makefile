@@ -7,11 +7,6 @@
 KIND_NAME := linkly
 REG_NAME  := linkly-registry
 export KIND_NAME REG_NAME
-# ESKİ ADLAR (23 Eylül 2026 öncesi). `make cluster` bunları görürse durur, `make destroy` siler:
-# ad değişikliği bir geçiş yolu gerektirir, yoksa eski küme hiçbir hedefin ulaşamadığı yerde kalır
-# ve yenisi 80/443 portlarında onunla çakışır.
-LEGACY_KIND_NAME := ladder
-LEGACY_REG_NAME  := kind-registry
 # kind/shim/docker kind'ın `docker run`larına Compose etiketi ekler (Docker Desktop gruplaması).
 REAL_DOCKER := $(shell command -v docker)
 CALICO_VER := v3.29.3
@@ -19,14 +14,12 @@ INGRESS_URL := https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/d
 METRICS_URL := https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
 SHELL := /bin/bash
 
-.PHONY: help stop start cluster registry trust-ca core cnpg tempo argo security obs dashboards minimal standard full chaos keda destroy status
+.PHONY: help stop start wipe cluster registry trust-ca core cnpg tempo argo security obs dashboards minimal standard full chaos keda destroy status
 
 help: ## Hedefler
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
 cluster: ## kind cluster (1 cp + 3 worker) + Calico + local registry
-	@if kind get clusters 2>/dev/null | grep -qx $(LEGACY_KIND_NAME); then \
-	  echo "✘ eski '$(LEGACY_KIND_NAME)' kümesi hâlâ var ve 80/443 portlarını tutuyor. Önce: make destroy"; exit 1; fi
 	@# --name, cluster.yaml'daki `name:`i ezer: küme adının TEK kaynağı bu Makefile.
 	@kind get clusters 2>/dev/null | grep -qx $(KIND_NAME) || \
 	  PATH="$(CURDIR)/kind/shim:$$PATH" LADDER_REAL_DOCKER="$(REAL_DOCKER)" kind create cluster --name $(KIND_NAME) --config kind/cluster.yaml
@@ -45,6 +38,7 @@ registry: ## localhost:5001 registry'yi kur/bağla
 core: ## ingress-nginx + metrics-server
 	@kubectl apply -f $(INGRESS_URL) >/dev/null
 	@kubectl -n ingress-nginx patch deploy ingress-nginx-controller --patch-file manifests/ingress-nginx-patch.yaml >/dev/null
+	@kubectl apply -f manifests/ingress-nginx-config.yaml >/dev/null   # XFF: ConfigMap ayarı, Ingress annotasyonu değil
 	@kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=300s
 	@kubectl apply -f $(METRICS_URL) >/dev/null
 	@kubectl -n kube-system patch deploy metrics-server --patch-file manifests/metrics-server-patch.yaml >/dev/null
@@ -123,17 +117,18 @@ start: ## Durdurulmuş kümeyi ve registry'yi başlat, düğümler Ready olana k
 	done
 	@kubectl wait --for=condition=Ready nodes --all --timeout=600s >/dev/null && echo "✔ başladı"
 
-destroy: ## Cluster'ı ve registry'yi sil (eski adlarla kalmış olanlar dahil)
-	kind delete cluster --name $(KIND_NAME); docker rm -f $(REG_NAME) 2>/dev/null || true
-	@kind delete cluster --name $(LEGACY_KIND_NAME) 2>/dev/null || true; docker rm -f $(LEGACY_REG_NAME) 2>/dev/null || true
+wipe: ## Verileri sil, platformu koru: seviyeler + metrik/trace/log (make wipe CONFIRM=1)
+	@CONFIRM=$(CONFIRM) lib/wipe.sh
 
-cnpg: ## CloudNativePG operatörü + MinIO (09+)
+destroy: ## Cluster'ı ve registry'yi sil
+	kind delete cluster --name $(KIND_NAME); docker rm -f $(REG_NAME) 2>/dev/null || true
+
+cnpg: ## CloudNativePG operatörü (09+)
 	@helm repo add cnpg https://cloudnative-pg.github.io/charts >/dev/null 2>&1 || true
-	@helm repo add minio https://charts.min.io/ >/dev/null 2>&1 || true
 	@helm repo update >/dev/null
-	@# Lider kirası 15/10 sn yerine 60/45 sn: paylaşılan VM'de lease yazması 25 sn'ye çıkıyor ve
-	@# operatör saatte birkaç kez kirayı kaybedip yeniden başlıyordu (23 restart). Gerekçe:
-	@# kind/cluster.yaml'daki controller-manager notu.
+	@# Lider kirası 15/10 sn yerine 60/45 sn: paylaşılan VM'de lease yazması 25 sn'ye çıkabiliyor;
+	@# varsayılan kirayla operatör kirayı kaybedip yeniden başlar ve her başlangıçta her şeyi
+	@# baştan listeler. Gerekçe: kind/cluster.yaml'daki controller-manager notu.
 	@helm upgrade --install cnpg cnpg/cloudnative-pg -n cnpg-system --create-namespace \
 	   --set resources.requests.cpu=50m --set resources.requests.memory=100Mi \
 	   --set 'additionalArgs={--leader-lease-duration=60,--leader-renew-deadline=45}' --wait --timeout 10m
@@ -149,16 +144,18 @@ tempo: ## Grafana Tempo (trace) + Alloy OTLP alıcısı (11+)
 # soyutlamanın arkasına saklıyor; bu merdivende kuralları ELLE yazmak daha öğretici — pencereler,
 # çarpanlar ve neden iki pencere gerektiği 11-observability-deep/deploy/slo.yaml'da görünür.
 
-argo: ## Argo CD + Argo Rollouts + Gitea (cluster içi git) — 12+
+argo: ## Argo CD + Argo Rollouts (12+)
 	@helm repo add argo https://argoproj.github.io/argo-helm >/dev/null 2>&1 || true
-	@helm repo add gitea-charts https://dl.gitea.com/charts/ >/dev/null 2>&1 || true
 	@helm repo update >/dev/null
+	@# Metrikler AÇIK: 13 · Rollout'un "Dağıtım aşaması" ve "Git ile uyumsuz uygulamalar" panelleri
+	@# Argo'nun kendi metriklerini okur; metrik + ServiceMonitor olmadan ikisi de boş kalır.
 	@helm upgrade --install argocd argo/argo-cd -n argocd --create-namespace \
 	   -f helm/argocd.values.yaml --wait --timeout 15m
 	@helm upgrade --install rollouts argo/argo-rollouts -n argo-rollouts --create-namespace \
 	   --set controller.resources.requests.cpu=50m --set controller.resources.requests.memory=100Mi \
 	   --set dashboard.enabled=false \
 	   --set 'controller.extraArgs={--leader-election-lease-duration=60s,--leader-election-renew-deadline=45s,--leader-election-retry-period=5s}' \
+	   --set controller.metrics.enabled=true --set controller.metrics.serviceMonitor.enabled=true \
 	   --wait --timeout 10m
 	@echo "✔ argocd + rollouts → http://argocd.localtest.me (admin / $$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' 2>/dev/null | base64 -d))"
 
@@ -175,26 +172,24 @@ security: ## cert-manager + sealed-secrets + Kyverno (13+)
 	@helm upgrade --install sealed-secrets sealed-secrets/sealed-secrets -n kube-system \
 	   --set resources.requests.cpu=20m --set resources.requests.memory=64Mi --wait --timeout 10m \
 	   || kubectl apply -f https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.27.1/controller.yaml
-	@# KYVERNO'NUN PROBE BÜTÇESİ BU KÜMEDE YETMİYOR — ve yetmemesi TÜM KÜMEYİ kilitliyor.
+	@# KYVERNO'NUN PROBE BÜTÇESİ BU KÜMEYE GÖRE — yetmezse TÜM KÜME kilitlenir.
 	@# Varsayılan startup probe'u `timeout=1s period=6s failure=20`: yüklü bir kind kümesinde
-	@# Kyverno'nun HTTPS sağlık ucu 1 saniyede cevap veremiyor, kubelet konteyneri öldürüyor ve
-	@# admission controller CRASH LOOP'a giriyor. Kyverno'nun webhook'u `failurePolicy: Fail`
-	@# olduğu için bu yalnızca Kyverno'yu değil, KÜMEDEKİ HER YAZMAYI bozuyor: local-path
-	@# provisioner PVC oluşturamadı ("failed calling webhook validate.kyverno.svc-fail:
-	@# connection refused"), Postgres hiç kalkmadı ve 14. seviye AYAĞA KALKMADI. P14-05'in
-	@# "erişilebilirlik %4.37" sonucu buradan geliyordu: sistem çökmemişti, HİÇ KURULMAMIŞTI.
-	@# Ders (Prometheus WAL OOM'u ile aynı): bir bileşenin bütçesini KARARLI durumuna göre değil
-	@# EN KÖTÜ ANINA göre seç — hele ki o bileşen kümenin yazma yoluna zincirlenmişse.
+	@# Kyverno'nun HTTPS sağlık ucu 1 saniyede cevap veremez, kubelet konteyneri öldürür ve
+	@# admission controller CRASH LOOP'a girer. Webhook `failurePolicy: Fail` iken bu yalnızca
+	@# Kyverno'yu değil, KÜMEDEKİ HER YAZMAYI bozar: local-path provisioner PVC oluşturamaz
+	@# ("failed calling webhook validate.kyverno.svc-fail: connection refused"), Postgres kalkmaz
+	@# ve seviye hiç kurulmaz — ardından koşan deney çökmüş bir sistemi değil, HİÇ KURULMAMIŞ bir
+	@# sistemi ölçer. Ders (Prometheus WAL OOM'u ile aynı): bir bileşenin bütçesini KARARLI
+	@# durumuna göre değil EN KÖTÜ ANINA göre seç — hele ki o bileşen kümenin yazma yoluna zincirlenmişse.
 	@# EN: the default startup probe (timeout=1s) is not enough on a loaded kind cluster, so the
-	@# admission controller crash-loops; and because its webhook is `failurePolicy: Fail`, that
-	@# breaks EVERY write in the cluster, not just Kyverno's. The local-path provisioner could not
-	@# create the PVC, Postgres never initialised and level 14 never came up — which is where
-	@# P14-05's "4.37% availability" actually came from: the system had not collapsed, it had
-	@# never been built.
-	@# FAIL-OPEN (forceFailurePolicyIgnore): probe bütçesi yetmedi. Kyverno'nun kirası kodda sabit
-	@# (15/10 sn) ve API sunucusu yavaşladığında kirayı kaybedip yeniden başlıyor; bu sürede
-	@# failurePolicy: Fail webhook'u kümedeki HER yazmayı reddediyor — `make up` üç denemede de
-	@# "failed calling webhook ... connection refused" ile düştü. P08-01'in limiter seçiminin aynısı:
+	@# admission controller crash-loops; with a `failurePolicy: Fail` webhook that breaks EVERY
+	@# write in the cluster, not just Kyverno's: the local-path provisioner cannot create PVCs,
+	@# Postgres never initialises and the level never comes up — an experiment run after that
+	@# measures a system that was never built, not one that collapsed.
+	@# FAIL-OPEN (forceFailurePolicyIgnore): probe bütçesi tek başına yetmez. Kyverno'nun kirası
+	@# kodda sabit (15/10 sn) ve API sunucusu yavaşladığında kirayı kaybedip yeniden başlar; bu
+	@# sürede failurePolicy: Fail webhook'u kümedeki HER yazmayı reddeder ve `make up`
+	@# "failed calling webhook ... connection refused" ile düşer. P08-01'in limiter seçiminin aynısı:
 	@# Kyverno düşükken politika uygulanmaz (koruma kaybolur, telafi edilebilir), ama küme kilitlenmez
 	@# (hizmet kaybolmaz). Bedeli: o pencerede kuralsız bir pod kabul edilebilir; Kyverno'nun arka
 	@# plan taraması onu sonradan raporlar. KAPSAMI: yalnızca KAYNAK webhook'u (pod, PVC, ...)

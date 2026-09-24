@@ -3,8 +3,8 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # P01-04 · Bellek hâlâ sınırsız büyüyor — ama artık büyümeyi ÖNCEDEN görüyorsun
 #
 # ÖLÇÜM NOTU: "öncesi/sonrası heap" ölçmek YANILTIR — süreç test sırasında OOM olup yeniden doğarsa
-# son ölçüm sıfırdan başlar ve "büyüme yok" gibi görünür (ilk denemede tam olarak bu oldu).
-# Bu yüzden pencere içindeki TEPE değere ve OOM kanıtına bakıyoruz. Aynı tuzağa P00-08'de de düştük.
+# son ölçüm sıfırdan başlar ve "büyüme yok" gibi görünür — yanlış negatif.
+# Bu yüzden pencere içindeki TEPE değere ve OOM kanıtına bakıyoruz (P00-08'deki örnekleme dersiyle aynı kök).
 ensure_healthy
 ensure_fresh_pod
 pod=$(pod_name)

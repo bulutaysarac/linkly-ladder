@@ -8,19 +8,15 @@ import (
 	"time"
 )
 
-// KALDIRILAN TUZAKLAR (ve neden buraya yazıldığı):
-// EN: TRAP_MIGRATE_IN_MAIN, TRAP_BREAKING_MIGRATION and TRAP_DROP_TENANT_FILTER used to be
-//     declared here at this level and were read NOWHERE — the mechanism they toggle stopped
-//     existing when the ladder moved migrations into a one-shot Job (07) and the breaking
-//     rename into the P12-02 experiment. A config field with no reader is worse than a
-//     missing feature: the experiment flips it, nothing changes, and the script still prints
-//     a verdict. They are removed rather than kept "for documentation".
-// TR: TRAP_MIGRATE_IN_MAIN, TRAP_BREAKING_MIGRATION ve TRAP_DROP_TENANT_FILTER bu seviyede
-//     tanımlıydı ve HİÇBİR YERDE okunmuyordu — açtıkları mekanizma, merdiven migration'ları
-//     tek seferlik bir Job'a (07) ve kırıcı rename'i P12-02 deneyine taşıdığında ortadan
-//     kalkmıştı. Okuyucusu olmayan bir config alanı, eksik bir özellikten daha kötüdür:
-//     deney onu açar, hiçbir şey değişmez ve script yine bir karar basar.
-//     "Belgeleme olsun diye" tutulmadılar, silindiler.
+// TRAP_MIGRATE_IN_MAIN BU SEVİYEDE YOK (ve neden):
+// EN: from 07 on the per-service mains carry no in-process migration path — migrations run only
+//     as the one-shot Job — so TRAP_MIGRATE_IN_MAIN (P02-07) has nothing to toggle and is not
+//     declared. A config field with no reader is worse than a missing feature: the experiment
+//     flips it, nothing changes, and the script still prints a verdict.
+// TR: 07'den itibaren servis başına main'lerde süreç içi migration yolu yok — migration yalnızca
+//     tek seferlik Job olarak koşar — yani TRAP_MIGRATE_IN_MAIN'in (P02-07) açıp kapatacağı bir
+//     şey kalmadığı için tanımlı değil. Okuyucusu olmayan bir config alanı, eksik bir özellikten
+//     daha kötüdür: deney onu açar, hiçbir şey değişmez ve script yine bir karar basar.
 
 type Config struct {
 	Addr               string
@@ -80,7 +76,8 @@ type Config struct {
 	TrapUnboundedQueue    bool // sınırsız analitik kuyruğu → düşürme yerine OOM (P05-02)
 	TrapRedirect301       bool // 302 yerine 301 → tarayıcı önbellekler, tıklama hiç sayılmaz (P05-06)
 	TrapCommitBeforeWrite bool // offset'i yazmadan önce commit et → tüketici ölürse veri kaybı (P06-01)
-	TrapNoDLQ             bool // bozuk mesajı DLQ'ya taşıma → crashloop ve sonsuz lag (P06-04)
+	TrapNoDLQ             bool // bozuk mesajda çıkış yolu yok → tüketici takılır, offset ilerlemez, lag sınırsız büyür (P06-04)
+	TrapCommitDelayMs     int  // yazma ile offset commit'i arasına gecikme → tekrar teslim (P06-01) / kayıp (P06-06) penceresini vurulabilir kıl
 	TrapListNPlusOne      bool // liste yanıtında her link için AYRI stats çağrısı → N+1 (P07-06)
 	TrapReadyAlways       bool // readiness her zaman 200 → bozuk pod trafik alır (P07-08)
 	TrapIgnoreXFF         bool // XFF'i yok say → herkes ingress IP'sinde tek kovada (P08-03a)
@@ -148,6 +145,7 @@ func Load() Config {
 		TrapRedirect301:       envBool("TRAP_REDIRECT_301", false),
 		TrapCommitBeforeWrite: envBool("TRAP_COMMIT_BEFORE_WRITE", false),
 		TrapNoDLQ:             envBool("TRAP_NO_DLQ", false),
+		TrapCommitDelayMs:     envInt("TRAP_COMMIT_DELAY_MS", 0),
 		TrapListNPlusOne:      envBool("TRAP_LIST_N_PLUS_ONE", false),
 		TrapReadyAlways:       envBool("TRAP_READY_ALWAYS", false),
 		TrapIgnoreXFF:         envBool("TRAP_IGNORE_XFF", false),

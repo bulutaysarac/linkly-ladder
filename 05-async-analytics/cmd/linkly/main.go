@@ -1,17 +1,14 @@
-// Command linkly — seviye 02, "kalıcılık ve yatay ölçek".
+// Command linkly — seviye 05, "yazmayı okuma yolundan çıkar".
 //
-// EN: The application is now STATELESS. That single word is what buys N replicas, clean rollouts,
+// EN: Every redirect drops a click event into a bounded in-process queue and returns; a separate goroutine
 //
-//	node drains and horizontal scaling — none of which were available at level 01, not because of
-//	missing Kubernetes features but because the data lived inside the process. The cost is that
-//	every request now crosses a network to a database that this level treats as always-up and
-//	infinitely fast. It is neither (P02-01 … P02-08).
+//	batches the events into clicks_daily. The hot-row lock of P02-08 disappears; the price is an
+//	at-most-once guarantee — a full queue drops clicks, a hard kill loses the buffer (P05-01 … P05-06).
 //
-// TR: Uygulama artık DURUMSUZ. N replika, temiz rollout, node drain ve yatay ölçeklenme bu tek
+// TR: Her redirect sınırlı bir süreç içi kuyruğa bir tıklama olayı bırakıp döner; ayrı bir goroutine
 //
-//	kelimenin karşılığı — hiçbiri 01'de yoktu, Kubernetes özelliği eksik olduğu için değil, veri
-//	sürecin içinde yaşadığı için. Bedeli: artık her istek, bu seviyenin hep ayakta ve sonsuz hızlı
-//	varsaydığı bir veritabanına ağ üzerinden gidiyor. İkisi de doğru değil (P02-01 … P02-08).
+//	olayları toplu olarak clicks_daily'ye yazar. P02-08'in sıcak satır kilidi kalkar; bedeli en fazla
+//	bir kez teslimattır — dolu kuyruk tıklama düşürür, sert ölüm tamponu kaybeder (P05-01 … P05-06).
 package main
 
 import (
@@ -184,7 +181,7 @@ func main() {
 	//     "we lose a second of clicks on every deploy" and "we don't" — and it only works because
 	//     terminationGracePeriodSeconds gives the process time to finish.
 	// TR: Kuyruğu sunucu kapandıktan SONRA boşalt, asla önce. Önce boşaltmak, bir parti yazıp sonra
-	//     kimsenin boşaltmadığı yeni tıklamalar kabul etmeye devam etmek demekti. Buradaki sıra,
+	//     kimsenin boşaltmadığı yeni tıklamalar kabul etmeye devam etmek demektir. Buradaki sıra,
 	//     "her dağıtımda bir saniyelik tıklama kaybediyoruz" ile "kaybetmiyoruz" arasındaki farktır
 	//     — ve yalnızca terminationGracePeriodSeconds sürece zaman verdiği için işe yarar.
 	log.Info("analitik kuyruğu boşaltılıyor", "kalan", clicks.Depth())
@@ -203,8 +200,21 @@ func runMigrations(cfg config.Config, log *slog.Logger) error {
 	if err := goose.SetDialect("postgres"); err != nil {
 		return err
 	}
+	// ÖNCE/SONRA SÜRÜMÜNÜ YAZ. "migration koşuluyor" satırını yapacak işi olmayan (şema zaten
+	// hedefte) bir pod da basar; bu satırları saymak "iş N kez yapıldı" der, oysa o pod'lar yalnızca
+	// bir no-op koşmuştur. from=1 to=2 diyen pod işi GERÇEKTEN yapmıştır; birden fazla pod bunu
+	// diyorsa aynı tek seferlik iş birden fazla kez koşmuştur.
+	// EN: the "migration running" line is also printed by pods that have nothing to do, so counting
+	// it overstates the race. from/to shows who actually applied something.
 	log.Info("migration koşuluyor", "target", cfg.MigrateTarget)
-	return goose.UpTo(sqlDB, "migrations", cfg.MigrateTarget)
+	from, _ := goose.GetDBVersion(sqlDB)
+	start := time.Now()
+	if err := goose.UpTo(sqlDB, "migrations", cfg.MigrateTarget); err != nil {
+		return err
+	}
+	to, _ := goose.GetDBVersion(sqlDB)
+	log.Info("migration bitti", "from", from, "to", to, "target", cfg.MigrateTarget, "sure_ms", time.Since(start).Milliseconds())
+	return nil
 }
 
 // waitForSchema — şema gelene kadar bekle (migration Job'ı henüz bitmemiş olabilir).

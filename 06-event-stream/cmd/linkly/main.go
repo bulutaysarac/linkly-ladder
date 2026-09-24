@@ -1,17 +1,16 @@
-// Command linkly — seviye 02, "kalıcılık ve yatay ölçek".
+// Command linkly — seviye 06, "olay akışı, ayrı tüketici".
 //
-// EN: The application is now STATELESS. That single word is what buys N replicas, clean rollouts,
+// EN: Click events go to a durable log (Redpanda, Kafka API) instead of process memory; a separate
 //
-//	node drains and horizontal scaling — none of which were available at level 01, not because of
-//	missing Kubernetes features but because the data lived inside the process. The cost is that
-//	every request now crosses a network to a database that this level treats as always-up and
-//	infinitely fast. It is neither (P02-01 … P02-08).
+//	deployment (analytics-consumer) writes them to Postgres. Hard kills no longer lose clicks (P05-01)
+//	and the writer no longer shares this process (P05-03); delivery becomes at-least-once, absorbed by
+//	idempotency (P06-01 … P06-07).
 //
-// TR: Uygulama artık DURUMSUZ. N replika, temiz rollout, node drain ve yatay ölçeklenme bu tek
+// TR: Tıklama olayları süreç belleği yerine dayanıklı bir loga (Redpanda, Kafka API) yazılır; ayrı bir
 //
-//	kelimenin karşılığı — hiçbiri 01'de yoktu, Kubernetes özelliği eksik olduğu için değil, veri
-//	sürecin içinde yaşadığı için. Bedeli: artık her istek, bu seviyenin hep ayakta ve sonsuz hızlı
-//	varsaydığı bir veritabanına ağ üzerinden gidiyor. İkisi de doğru değil (P02-01 … P02-08).
+//	deployment (analytics-consumer) onları Postgres'e işler. Sert ölüm tıklama kaybettirmez (P05-01),
+//	yazıcı bu süreci paylaşmaz (P05-03); teslimat en-az-bir-kez olur ve idempotency ile emilir
+//	(P06-01 … P06-07).
 package main
 
 import (
@@ -108,15 +107,16 @@ func main() {
 
 	// Tıklamalar artık süreç içi bir kuyruğa değil, DAYANIKLI bir loga gidiyor.
 	// Producer bloklamaz; broker düşerse tampon sınırına kadar biriktirir, sonra düşürür.
-	// TRAP_UNBOUNDED_QUEUE: tampon SINIRINI kaldır. 05'te bu bir slice'tı ve tuzak kodda
-	// okunuyordu; 06'da kuyruk Kafka üreticisine taşınınca tuzak MAIN'DE YALNIZCA BASTIRILAN bir
-	// bayrağa dönüştü — deney açıyor, hiçbir şey değişmiyordu. Sınır burada: tampon dolunca
-	// üretici kaydı DÜŞÜRÜR (ve sayar). Sınırsızda düşürme yerine bellek büyür ve pod OOM olur:
-	// yani "veri kaybetme" kararını almayı reddettiğinde, karar senin yerine kernel tarafından
-	// ve en kötü anda alınır (P05-02).
-	// EN: when the queue moved from a slice to the Kafka producer the trap became a flag that is
-	// only PRINTED. Bounded → the producer drops and counts; unbounded → memory grows and the pod
-	// is OOM-killed, i.e. refusing to decide "lose data" hands the decision to the kernel.
+	// TRAP_UNBOUNDED_QUEUE: tampon SINIRINI kaldır. 05'te kuyruk süreç içiydi ve tuzak onu sınırsız
+	// bir dilime çeviriyordu; 06'dan itibaren kuyruk Kafka üreticisi, yani tuzak üreticinin sınırını
+	// kaldırmalı — yalnızca log'a basılan bir bayrak, açılıp hiçbir şey değiştirmeyen bir deney olur.
+	// Sınır burada: tampon dolunca üretici kaydı DÜŞÜRÜR (ve sayar). Sınırsızda düşürme yerine
+	// bellek büyür ve pod OOM olur: yani "veri kaybetme" kararını almayı reddettiğinde, karar senin
+	// yerine kernel tarafından ve en kötü anda alınır (P05-02).
+	// EN: from 06 on the queue is the Kafka producer, so the trap must lift the producer's limit — a
+	// flag that is only PRINTED is an experiment that changes nothing. Bounded → the producer drops
+	// and counts; unbounded → memory grows and the pod is OOM-killed, i.e. refusing to decide
+	// "lose data" hands the decision to the kernel.
 	maxBuf := cfg.ProducerMaxBuffered
 	if cfg.TrapUnboundedQueue {
 		maxBuf = 1 << 30
@@ -198,7 +198,7 @@ func main() {
 	//     "we lose a second of clicks on every deploy" and "we don't" — and it only works because
 	//     terminationGracePeriodSeconds gives the process time to finish.
 	// TR: Kuyruğu sunucu kapandıktan SONRA boşalt, asla önce. Önce boşaltmak, bir parti yazıp sonra
-	//     kimsenin boşaltmadığı yeni tıklamalar kabul etmeye devam etmek demekti. Buradaki sıra,
+	//     kimsenin boşaltmadığı yeni tıklamalar kabul etmeye devam etmek demektir. Buradaki sıra,
 	//     "her dağıtımda bir saniyelik tıklama kaybediyoruz" ile "kaybetmiyoruz" arasındaki farktır
 	//     — ve yalnızca terminationGracePeriodSeconds sürece zaman verdiği için işe yarar.
 	// Flush: tamponda bekleyen kayıtları broker'a gönder. 05'teki drain'in karşılığı — ama artık

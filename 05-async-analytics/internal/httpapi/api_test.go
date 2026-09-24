@@ -297,3 +297,28 @@ func TestStatsDeclaresFreshness(t *testing.T) {
 		t.Error("stats yanıtı tazelik garantisini ilan etmiyor")
 	}
 }
+
+// Her kayıtlı şablonun KENDİ route etiketi olmalı. Stats "/api/links/{code}" sayılırsa
+// 07 · Analytics → "İstatistik ucu süresi (p99)" paneli (route="/api/links/{code}/stats") boş kalır.
+func TestRouteOfLabelsEachTemplate(t *testing.T) {
+	for path, want := range map[string]string{
+		"/api/links":               "/api/links",
+		"/api/links/abc1234":       "/api/links/{code}",
+		"/api/links/abc1234/stats": "/api/links/{code}/stats",
+		"/abc1234":                 "/{code}",
+		"/":                        "/",
+	} {
+		if got := routeOf(httptest.NewRequest("GET", path, nil)); got != want {
+			t.Errorf("routeOf(%q) = %q, beklenen %q", path, got, want)
+		}
+	}
+	// Uçtan uca: panelin filtrelediği seri gerçekten yayınlanıyor mu?
+	h := newTestAPI(t)
+	code := createAs(t, h, "t1", "https://example.com/route")
+	do(t, h, "GET", "/api/links/"+code+"/stats", "t1")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest("GET", "/metrics", nil))
+	if want := `http_request_duration_seconds_count{route="/api/links/{code}/stats"} 1`; !strings.Contains(w.Body.String(), want) {
+		t.Errorf("stats isteği kendi route etiketiyle ölçülmüyor; beklenen seri: %s", want)
+	}
+}

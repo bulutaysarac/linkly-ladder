@@ -34,7 +34,7 @@ if [[ -n "$oldpart" ]]; then
 else
   warn "partition bulunamadı (migration 005 uygulandı mı?)"
 fi
-grafana_hint "05 · Postgres → 'dead tuples' + tablo boyutu"
+grafana_hint "05 · Postgres → 'Veritabanı CPU' + 'İşlem / sn' · Explore → cnpg_pg_database_size_bytes (DELETE sonrası inmez; 'Ölü satırlar' paneli 09+'da boş)"
 note "Karşılaştırma: DELETE $del_ms ms + vacuum borcu  vs  DROP PARTITION birkaç ms + borç YOK."
 note "Saklama süresi bir ŞEMA kararıdır, bir zamanlanmış iş değil: tabloyu zamana göre bölersen"
 note "silmek ücretsizleşir. Bölmezsen, her gece koşan bir DELETE cron'u ile yaşarsın."

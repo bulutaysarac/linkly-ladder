@@ -1,14 +1,14 @@
 # Altyapı bileşenlerinin KENDİ metrikleri (postgres_exporter, redis_exporter, redpanda admin).
 #
-# EN: These ServiceMonitors existed up to level 06 and were lost when the app was split into
-#     redirect/api at 07 — and nothing failed loudly. `promq` returns "0" for a query with no
-#     series, so every script that asked "how many DB connections?" or "what is Redis doing?"
-#     silently measured zero and reported "no problem" (P07-02 printed max_connections=0).
+# EN: They are easy to lose when the app is split (redirect/api at 07), and losing them fails
+#     silently. `promq` returns "0" for a query with no series, so every script that asks "how
+#     many DB connections?" or "what is Redis doing?" would measure zero and report "no problem"
+#     (P07-02 would print max_connections=0).
 #     A metric that does not exist and a metric that is zero look identical downstream.
-# TR: Bu ServiceMonitor'lar 06'ya kadar vardı ve uygulama 07'de redirect/api diye bölününce
-#     kayboldular — hiçbir şey de yüksek sesle bozulmadı. `promq`, serisi olmayan bir sorguya
-#     "0" döndürür; dolayısıyla "kaç DB bağlantısı var?" ya da "Redis ne yapıyor?" diye soran
-#     her script sessizce sıfır ölçüp "sorun yok" dedi (P07-02 max_connections=0 bastı).
+# TR: Uygulama bölünürken (07'de redirect/api) kolayca kaybolurlar ve kayıpları sessizdir.
+#     `promq`, serisi olmayan bir sorguya "0" döndürür; dolayısıyla "kaç DB bağlantısı var?" ya
+#     da "Redis ne yapıyor?" diye soran her script sıfır ölçüp "sorun yok" der (P07-02
+#     max_connections=0 basar).
 #     Var olmayan bir metrik ile sıfır olan bir metrik, aşağı akışta AYNI görünür.
 #     Kural: bir metriğin varlığını doğrulamadan ona dayanan bir karar verme (`prom_absent`).
 apiVersion: monitoring.coreos.com/v1

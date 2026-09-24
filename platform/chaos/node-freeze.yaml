@@ -1,6 +1,6 @@
 # target: app.kubernetes.io/part-of=linkly-ladder
 # node-freeze Chaos Mesh değil: uygulamanın koştuğu worker'ı docker pause ile dondurur (make chaos bunu YAML olarak
-# uygulayamaz; problems scripti doğrudan `docker pause kind-worker2` çağırır). Bu dosya adın kayıt altında olması için var.
+# uygulayamaz; problems scripti uygulama pod'unun düğümünü doğrudan `docker pause` eder). Bu dosya adın kayıt altında olması için var.
 apiVersion: v1
 kind: ConfigMap
 metadata: { name: node-freeze-doc, namespace: ${NS} }

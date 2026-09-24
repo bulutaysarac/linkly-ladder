@@ -23,7 +23,7 @@ after=$(promq 'prometheus_tsdb_head_series')
 tenants=$(promq "count(count by (tenant) (http_requests_total{namespace=\"$NS\"}))")
 qtime=$(promq 'histogram_quantile(0.99, sum(rate(prometheus_engine_query_duration_seconds_bucket[5m])) by (le)) or vector(0)')
 mem=$(promq 'sum(container_memory_working_set_bytes{namespace="monitoring",pod=~"prometheus-.*",image!="",image!~".*pause.*"})')
-grafana_hint "02 · App RED → seri sayısı · Prometheus kendi metrikleri (prometheus_tsdb_head_series)"
+grafana_hint "03 · App Business → 'İstek / kiracı' · Explore → count(count by (tenant) (http_requests_total{namespace=\"$NS\"})) ve prometheus_tsdb_head_series"
 note "farklı tenant label değeri: ${tenants%%.*} · toplam seri: ${before%%.*} → ${after%%.*} (+$(( ${after%%.*} - ${before%%.*} )))"
 note "Prometheus sorgu p99=$(awk -v v="$qtime" 'BEGIN{printf "%.0f", v*1000}') ms · bellek=$(( ${mem%%.*} / 1024 / 1024 )) MB"
 step "Tuzağı kapat"
@@ -34,9 +34,9 @@ note "  · en çok trafik üreten 10 tenant → log toplama (Loki) ya da ayrı b
 note "  · tek bir tenant'ın tek bir yavaş isteği → EXEMPLAR + trace (kardinalite ödemeden)"
 note "  · faturalama → veritabanı, metrik değil"
 note "Metrikler ZAMAN SERİSİDİR; her yeni label değeri kalıcı bir bellek maliyetidir."
-# ÖLÇÜ SEÇİMİ: karar, Prometheus'un TOPLAM seri sayısına bakıyordu. O sayı yoğun bir kümede
-# kendi başına oynar (yeni pod, yeni chaos kaynağı, yeni scrape hedefi) — yani tuzak KODDA HİÇ
-# OKUNMAZKEN bile "REPRODUCED" çıkıyordu. Ölçü, tuzağın ÜRETTİĞİ ŞEY olmalı: tenant label'ının
+# ÖLÇÜ SEÇİMİ: karar Prometheus'un TOPLAM seri sayısına bakmaz. O sayı yoğun bir kümede kendi
+# başına oynar (yeni pod, yeni chaos kaynağı, yeni scrape hedefi) — ona bakan bir karar, tuzak
+# KODDA HİÇ OKUNMASA bile "REPRODUCED" çıkarır. Ölçü, tuzağın ÜRETTİĞİ ŞEYdir: tenant label'ının
 # kaç farklı değer aldığı. Toplam seri artışı bunun sonucudur, kanıtı değil.
 awk -v t="${tenants%%.*}" 'BEGIN{exit !(t > 1)}' \
   && reproduced "tenant label'ı ${tenants%%.*} farklı değer aldı → toplam seri ${before%%.*} → ${after%%.*} (+$(( ${after%%.*} - ${before%%.*} )))"

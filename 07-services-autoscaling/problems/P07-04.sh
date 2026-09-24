@@ -25,20 +25,20 @@ req=$(kubectl -n "$NS" get "$(wl redirect)" -o jsonpath='{.spec.template.spec.co
 # together must be fixed together.
 on_cleanup "setres "$(wl redirect)" --requests=cpu=${req:-150m} --limits=cpu=${lim:-500m}"
 on_cleanup "kubectl -n \"$NS\" scale "$(wl redirect)" --replicas=2"
-# ÖLÇÜM NOTU: throttling ancak kotaya ÇARPARSAN görünür. İlk hâl 2 replika × 300m limit ile
-# 40 VU koşuyordu; uygulama toplam 0.13 çekirdek kullandı, yani kotanın yakınına bile gitmedi
-# ve "throttle=0.00" çıktı. Karar da p99 farkına bakıyordu — iki ayrı 45 sn'lik koşunun p99'u
-# bu kümede zaten oynuyor, yani ölçüm gürültüyü okuyordu.
+# ÖLÇÜM NOTU: throttling ancak kotaya ÇARPARSAN görünür. 2 replika × 300m limit ve 40 VU'da
+# uygulama toplam ~0.13 çekirdek kullanır, kotanın yakınına bile gitmez ve "throttle=0.00" çıkar.
+# p99 farkına bakan bir karar da gürültüyü okur: iki ayrı 45 sn'lik koşunun p99'u bu kümede
+# zaten oynar.
 # Doğrusu: TEK pod + dar kota + kotayı aşacak yük. Ölçü de p99 değil, throttling'in kendisi.
-TIGHT=${TIGHT:-50m}   # ÖLÇÜLDÜ: 200m kotada bile kısıtlama 0 çıktı; uygulama o kadar CPU istemiyor
+TIGHT=${TIGHT:-50m}   # 200m kotada bile kısıtlama 0: uygulama bu yükte o kadar CPU istemiyor
 step "TEK pod, dar kota ($TIGHT) ve kotayı aşacak yük"
 kubectl -n "$NS" scale "$(wl redirect)" --replicas=1 >/dev/null; wait_endpoints 1
 # requests AYNI ZAMANDA daraltılmalı: 100m istek, 50m limitle bir arada GEÇERSİZdir ve API
 # "must be less than or equal to cpu limit" ile reddeder — script tam burada, hiçbir şey ölçmeden
-# öldü. Kotayı daraltan her deney, isteği de daraltmak zorundadır.
+# ölür. Kotayı daraltan her deney, isteği de daraltmak zorundadır.
 # EN: requests must shrink too: 100m request with a 50m limit is INVALID and the API rejects it
-# with "must be less than or equal to cpu limit" — the script died right here without measuring
-# anything. Any experiment that tightens the quota must tighten the request with it.
+# with "must be less than or equal to cpu limit" — the script would die right here without
+# measuring anything. Any experiment that tightens the quota must tighten the request with it.
 setres "$(wl redirect)" --requests=cpu=$TIGHT --limits=cpu=$TIGHT >/dev/null
 kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=180s >/dev/null 2>&1 || true
 wait_endpoints 1; sleep 5
@@ -50,9 +50,9 @@ tight_thr=$(promq "sum(rate(container_cpu_cfs_throttled_seconds_total{namespace=
 note "limitli: p99=$(awk -v v="$tight_p99" 'BEGIN{printf "%.0f", v*1000}') ms · CPU=$(awk -v v="$tight_cpu" 'BEGIN{printf "%.2f", v}') çekirdek · throttle=$(awk -v v="$tight_thr" 'BEGIN{printf "%.2f", v}') s/s"
 tight_thr_total=$(promq "sum(increase(container_cpu_cfs_throttled_seconds_total{namespace=\"$NS\",pod=~\"redirect.*\"}[2m]))")
 # Doğrudan metrik yoksa DOLAYLI kanıtla devam et — ama hangisini kullandığını SÖYLE.
-# İlk düzeltme burada `exit 2` veriyordu; doğruydu ama eksikti: bu ortamda cAdvisor
+# Burada `exit 2` vermek doğru ama eksik olurdu: bu ortamda cAdvisor
 # container_cpu_cfs_throttled_* serisini bizim pod'larımız için yayınlamıyor, buna karşılık
-# aynı yük altında dar kota ile kotasız p99 farkı ÖLÇÜLEBİLİYOR (ölçüldü: limitli p99=786 ms).
+# aynı yük altında dar kota ile kotasız p99 farkı ÖLÇÜLEBİLİYOR (dar kotada p99 ~800 ms).
 # Ölçemediğin şeyi ölçebildiğin bir şeyle kuşatmak meşrudur; meşru olmayan, hangisini
 # kullandığını gizlemektir. Karar aşağıda: seri varsa kısıtlama, yoksa p99 farkı — ve hüküm
 # metni hangisi olduğunu yazar.
@@ -64,8 +64,8 @@ have_thr=1
 prom_absent "container_cpu_cfs_throttled_seconds_total{namespace=\"$NS\",pod=~\"redirect.*\"}" && have_thr=0
 (( have_thr == 0 )) && note "throttling serisi bu pod'lar için YOK — karar dolaylı kanıta (p99 farkı) dayanacak"
 step "Kotayı pratikte KALDIR (4 çekirdek), AYNI yük — tek pod"
-# `--limits=cpu=0` geçerli görünüp bozuk bir spec üretebiliyor (pod'lar hazır olmuyor, iki
-# ReplicaSet takılı kalıyor — gerçekte oldu). Niyet "kota beni sınırlamasın"; bunu geçerli bir
+# `--limits=cpu=0` geçerli görünüp bozuk bir spec üretebilir (pod'lar hazır olmaz, iki
+# ReplicaSet takılı kalır). Niyet "kota beni sınırlamasın"; bunu geçerli bir
 # değerle ifade et: node'un verebileceğinden büyük bir limit, pratikte limitsizdir.
 setres "$(wl redirect)" --requests=cpu=100m --limits=cpu=4 >/dev/null 2>&1 || \
   kubectl -n "$NS" patch "$(wl redirect)" --type=json -p '[{"op":"remove","path":"/spec/template/spec/containers/0/resources/limits/cpu"}]' >/dev/null 2>&1
@@ -75,7 +75,7 @@ k6run redirect --vus 120 --duration 60s >/dev/null 2>&1 || true
 sleep 15
 free_p99=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[1m])) by (le))")
 free_cpu=$(promq "sum(rate(container_cpu_usage_seconds_total{namespace=\"$NS\",pod=~\"redirect.*\",image!=\"\",image!~\".*pause.*\"}[1m]))")
-grafana_hint "01 · Pods & Resources → 'CPU throttling (s/s)' (bu ortamda BOŞ) + 'CPU kullanımı' · 02 · App RED → p99"
+grafana_hint "01 · Pods & Resources → 'CPU kısıtlama (throttling)' (bu ortamda BOŞ) + 'CPU kullanımı (çekirdek)' · 02 · App RED → 'p99 süre (uç noktaya göre)'"
 note "limitsiz: p99=$(awk -v v="$free_p99" 'BEGIN{printf "%.0f", v*1000}') ms · CPU=$(awk -v v="$free_cpu" 'BEGIN{printf "%.2f", v}') çekirdek"
 note "Limit kalkınca CPU kullanımı arttı ve p99 düştüyse, aradaki fark THROTTLING'dir."
 note "Kural: CPU limiti koymadan önce 'bu servis dilim içinde ne kadar patlıyor?' sorusunu sor."

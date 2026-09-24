@@ -36,19 +36,18 @@ type Redis[V any] struct {
 	// Bu seviyede HER ZAMAN true — ama 04'te bunun bedeli ölçülüyor (P04-01): DB o yükü kaldırabilmeli.
 	failOpen bool
 	rnd      func() float64
-	// POD İÇİ SINGLEFLIGHT — 04'te YANLIŞLIKLA DÜŞMÜŞTÜ.
-	// EN: the comment on GetOrLoad said "per-pod singleflight (kept below)" and there was no
-	//     singleflight below. L1 (the in-process LRU of level 03) had it; when the cache moved to
-	//     Redis the guard was not carried over, and TRAP_NO_SINGLEFLIGHT — which P03-05 toggles to
-	//     prove the guard exists — was left unread in config. So from level 04 on, the stampede
-	//     protection was absent AND unmeasurable, while a comment asserted it was there.
-	//     A comment is not an implementation, and a trap nobody reads cannot contradict it.
-	// TR: GetOrLoad'ın yorumu "pod içi singleflight (aşağıda korunuyor)" diyordu ve aşağıda
-	//     singleflight YOKTU. L1'de (03'ün süreç içi LRU'su) vardı; önbellek Redis'e taşınınca
-	//     koruma taşınmadı ve P03-05'in korumanın varlığını kanıtlamak için açtığı
-	//     TRAP_NO_SINGLEFLIGHT config'de okunmadan kaldı. Yani 04'ten itibaren izdiham koruması
-	//     hem YOKTU hem de ÖLÇÜLEMEZDİ, üstelik bir yorum var olduğunu iddia ediyordu.
-	//     Yorum bir gerçekleştirim değildir ve kimsenin okumadığı bir tuzak onu yalanlayamaz.
+	// POD İÇİ SINGLEFLIGHT — önbellek Redis'e taşınınca da yerinde kalır.
+	// EN: L1 (the in-process LRU of level 03) has a singleflight guard, and moving the cache to
+	//     Redis does not make it unnecessary: without it, N concurrent misses on one pod are still
+	//     N loads. TRAP_NO_SINGLEFLIGHT — which P03-05 toggles to prove the guard exists — is read
+	//     here too, so the stampede protection stays present AND measurable.
+	//     A comment is not an implementation; a trap that actually switches the code off is what
+	//     keeps the comment honest.
+	// TR: L1'de (03'ün süreç içi LRU'su) singleflight koruması var ve önbelleği Redis'e taşımak
+	//     onu gereksiz kılmaz: koruma olmadan bir pod'daki N eşzamanlı miss yine N yüklemedir.
+	//     P03-05'in korumanın varlığını kanıtlamak için açtığı TRAP_NO_SINGLEFLIGHT burada da
+	//     okunur; izdiham koruması hem VAR hem de ÖLÇÜLEBİLİR kalır.
+	//     Yorum bir gerçekleştirim değildir; yorumu dürüst tutan, kodu gerçekten kapatan tuzaktır.
 	mu      sync.Mutex
 	flights map[string]*flight[V]
 }

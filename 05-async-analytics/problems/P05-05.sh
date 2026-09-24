@@ -26,15 +26,15 @@ measure_loss() {
   kubectl -n "$NS" rollout status "$(app_workload)" --timeout=200s >/dev/null 2>&1 || true
   for _ in $(seq 1 25); do serving && break; sleep 2; done
   # SABİT UYKU, FLUSH ARALIĞINDAN KISA OLAMAZ.
-  # `sleep 8` ile okunan sayı henüz DURULMAMIŞTI: tampon aralığı 15 sn, yani son flush çoğu zaman
-  # o 8 saniyenin dışında kalıyor ve "kayıp" diye yazdığımız şey aslında HENÜZ YAZILMAMIŞ olan
-  # kayıtlardı. İki fazın rollout süresi farklı olduğu için bu artık iki fazı FARKLI oranda
-  # bozdu ve sonuç ters çıktı: doğru ayarda 39 kayıp, bozuk ayarda 0 kayıp.
+  # Tampon aralığı 15 sn: kısa bir sabit uykudan (ör. `sleep 8`) sonra okunan sayı henüz DURULMAMIŞTIR,
+  # son flush çoğu zaman o pencerenin dışında kalır ve "kayıp" diye okunan şey aslında HENÜZ
+  # YAZILMAMIŞ kayıtlardır. İki fazın rollout süresi farklı olduğu için bu artefakt iki fazı FARKLI
+  # oranda bozar ve sonucu tersine bile çevirebilir.
   # Sayım durulana kadar bekle; "durdu" eşiği flush aralığını aşmalı (7 × 3 sn = 21 sn > 15 sn).
-  # EN: the count had not SETTLED after a fixed 8s: with a 15s buffer interval the final flush
-  # usually falls outside that window, so what we recorded as "loss" was simply not-yet-written.
-  # The two phases restart at different speeds, so the artifact skewed them unequally and the
-  # result came out inverted. Wait for the count to stop changing, past the flush interval.
+  # EN: a count read after a short fixed sleep has not SETTLED: with a 15s buffer interval the final
+  # flush usually falls outside that window, so "loss" would simply be not-yet-written. The two
+  # phases restart at different speeds, so the artifact skews them unequally and can invert the
+  # result. Wait for the count to stop changing, past the flush interval.
   local prev=-1 stable=0 cur=0
   for _ in $(seq 1 40); do
     cur=$(curl -s "$BASE_URL/api/links/$code/stats" | jq -r '.clicks // 0') || true
@@ -49,9 +49,9 @@ step "Mevcut ayar (grace=${orig_grace}s, preStop=${orig_prestop}s, SHUTDOWN_GRAC
 loss_ok=$(measure_loss ok)
 note "kayıp: $loss_ok tıklama"
 step "grace=3s yap: kubelet süreci drain'in ORTASINDA öldürecek (SHUTDOWN_GRACE hâlâ 20s)"
-# preStop beklemesi de küçültülmek ZORUNDA: Kubernetes preStop.sleep < grace şartını doğruluyor
-# ve ikisi ayrı patch'lerde gönderilirse ara hâl geçersiz olduğu için istek reddediliyor
-# (gerçekte oldu: "Invalid value: 5: must be ... less than terminationGracePeriodSeconds (2)").
+# preStop beklemesi de küçültülmek ZORUNDA: Kubernetes preStop.sleep < grace şartını doğrular
+# ve ikisi ayrı patch'lerde gönderilirse ara hâl geçersiz olduğu için istek reddedilir
+# ("Invalid value: 5: must be ... less than terminationGracePeriodSeconds (2)").
 # Ders küçülmüyor: grace (3s) hâlâ preStop(1s) + SHUTDOWN_GRACE(20s) toplamının ÇOK altında.
 kubectl -n "$NS" patch "$(app_workload)" --type=json -p '[
   {"op":"replace","path":"/spec/template/spec/terminationGracePeriodSeconds","value":3},

@@ -3,7 +3,7 @@
 #
 # EN: Docker Desktop groups containers into a collapsible project only by the Compose label
 #     `com.docker.compose.project`. kind creates each node with its own `docker run` and offers no
-#     way to add container labels, so the cluster showed up as five unrelated rows. `make cluster`
+#     way to add container labels, so without this the cluster shows up as five unrelated rows. `make cluster`
 #     puts this directory first on PATH while kind runs: `docker run` gets the labels, every other
 #     subcommand goes to the real docker untouched. Labels can only be set at creation, which is why
 #     this lives in the create step and not anywhere later.
@@ -11,8 +11,8 @@
 #     and `docker compose -p linkly down` would too. Use `make destroy` / `make stop` instead.
 # TR: Docker Desktop konteynerleri açılır-kapanır bir proje altında YALNIZCA Compose etiketine
 #     (`com.docker.compose.project`) göre gruplar. kind her düğümü ayrı bir `docker run` ile yaratır
-#     ve konteyner etiketi eklemenin bir yolunu sunmaz; küme birbiriyle ilgisiz beş satır olarak
-#     görünüyordu. `make cluster`, kind çalışırken bu klasörü PATH'in başına koyar: `docker run`
+#     ve konteyner etiketi eklemenin bir yolunu sunmaz; bu sarmalayıcı olmadan küme birbiriyle
+#     ilgisiz beş satır olarak görünür. `make cluster`, kind çalışırken bu klasörü PATH'in başına koyar: `docker run`
 #     etiketleri alır, diğer her alt komut gerçek docker'a olduğu gibi gider. Etiket yalnızca
 #     oluşturma anında verilebildiği için bu iş sonradan değil, kurulum adımında yapılır.
 #     Bilinmesi gereken yan etki: Docker Desktop'ta grubun "sil" düğmesi tüm kümeyi siler;

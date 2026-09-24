@@ -33,7 +33,7 @@ metadata:
     app.kubernetes.io/name: redis
 spec:
   serviceName: redis
-  replicas: 1          # P04-01: tek kopya, failover yok. 14'te Sentinel/Valkey HA.
+  replicas: 1          # P04-01: tek kopya, failover yok. HA (Sentinel/Valkey) kapsam dışı: 14 §9.
   selector:
     matchLabels:
       app.kubernetes.io/name: redis

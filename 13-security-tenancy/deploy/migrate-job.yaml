@@ -34,27 +34,26 @@ spec:
             # 3 = clicks_daily tablosu (05). Bu seviyede ŞART: analitik yazıcısı ona yazıyor.
             # (2 = tenant index'i, P02-05'in çözümü — burada da uygulanmış oluyor.)
             - name: MIGRATE_TARGET
-              # 7 = RLS politikası (13). Eskiden 8'di ve sıradaki 007_breaking_rename.sql'i de
-              # uyguluyordu: `links.url` → `url_old`. Yani seviyenin KENDİ migration'ı, seviyenin
-              # kendi uygulamasını bozuyordu ("column url does not exist", her yazma 503).
-              # Kırıcı rename bir migration değil bir DENEYDİR — P12-02 onu doğrudan psql ile
-              # uyguluyor ve deney bitince geri alıyor. Sıraya konmuş bir deney, deney olmaktan
-              # çıkıp herkesin ödediği bir bedele dönüşür.
               # 6 = expand aşaması. RLS (007) BİLEREK UYGULANMIYOR.
               # EN: enabling RLS on `links` requires the application to declare a tenant to the
               #     database on every transaction (SET LOCAL app.tenant_id). This app does not,
               #     and the public redirect path has no tenant at all — a short code is resolved
-              #     for anyone. Applying 007 by default therefore did not "harden" the level, it
-              #     stopped every write with SQLSTATE 42501 and the level could not boot.
+              #     for anyone. Applying 007 by default therefore would not "harden" the level, it
+              #     would stop every write with SQLSTATE 42501 and the level could not boot.
               #     So RLS is applied BY THE EXPERIMENT (P13-02), which measures both what it
               #     protects and what it costs. A defence you cannot turn on is not a defence.
               # TR: `links` üzerinde RLS'i açmak, uygulamanın HER İŞLEMDE veritabanına kiracıyı
               #     bildirmesini gerektirir (SET LOCAL app.tenant_id). Bu uygulama bunu yapmıyor
               #     ve PUBLIC yönlendirme yolunun kiracısı zaten YOK — kısa kod herkes için
-              #     çözülür. 007'yi varsayılan olarak uygulamak seviyeyi "sertleştirmedi",
-              #     her yazmayı SQLSTATE 42501 ile durdurdu ve seviye hiç açılamadı.
+              #     çözülür. 007'yi varsayılan olarak uygulamak seviyeyi "sertleştirmez",
+              #     her yazmayı SQLSTATE 42501 ile durdurur ve seviye hiç açılamaz.
               #     Bu yüzden RLS'i DENEY (P13-02) uyguluyor: hem neyi koruduğunu hem de neye
               #     mal olduğunu ölçüyor. Açamadığın bir savunma, savunma değildir.
+              # Kırıcı rename (`links.url` → `url_old`) de sırada YOK: o bir migration değil bir
+              # DENEYDİR — P12-02 onu doğrudan psql ile uygular ve deney bitince geri alır.
+              # Sırada olsaydı goose onu da uygular ve seviyenin KENDİ migration'ı kendi
+              # uygulamasını bozardı ("column url does not exist", her yazma 503). Sıraya
+              # konmuş bir deney, deney olmaktan çıkıp herkesin ödediği bir bedele dönüşür.
               value: "6"
           resources:
             requests: { cpu: 50m, memory: 32Mi }

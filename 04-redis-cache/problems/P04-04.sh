@@ -4,8 +4,8 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # 03'te jitter yokluğu pod başına bir dalga üretiyordu. 04'te tek bir önbellek var: TÜM pod'lar
 # aynı anahtarların aynı anda dolmasını aynı anda görür. Dalga bölünmez, birleşir.
 #
-# ÖLÇÜM NOTU (P03-07 ile aynı): darbe 1-2 saniye sürüyor, Prometheus 15 sn'de bir örnekliyor ve
-# `rate(...[15s])` onu düzlüyor. Bu yüzden pod'un /metrics ucunu saniyede bir kendimiz örnekliyoruz.
+# ÖLÇÜM NOTU (P03-07 ile aynı): darbe 1-2 saniye sürüyor, Prometheus uygulamayı 10 sn'de bir kazıyor ve
+# `rate()` onu düzlüyor. Bu yüzden pod'un /metrics ucunu saniyede bir kendimiz örnekliyoruz.
 # Sayaç olarak `result="miss"` seçildi: TTL Redis tarafında dolduğu için uygulama "expired" değil
 # ıska görür. İlk ısınma saniyeleri atlanır, geriye yalnızca TTL dolmaları kalır.
 TTLS=${TTLS:-30s}

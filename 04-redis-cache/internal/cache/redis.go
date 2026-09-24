@@ -36,19 +36,18 @@ type Redis[V any] struct {
 	// Bu seviyede HER ZAMAN true — ama 04'te bunun bedeli ölçülüyor (P04-01): DB o yükü kaldırabilmeli.
 	failOpen bool
 	rnd      func() float64
-	// POD İÇİ SINGLEFLIGHT — 04'te YANLIŞLIKLA DÜŞMÜŞTÜ.
-	// EN: the comment on GetOrLoad said "per-pod singleflight (kept below)" and there was no
-	//     singleflight below. L1 (the in-process LRU of level 03) had it; when the cache moved to
-	//     Redis the guard was not carried over, and TRAP_NO_SINGLEFLIGHT — which P03-05 toggles to
-	//     prove the guard exists — was left unread in config. So from level 04 on, the stampede
-	//     protection was absent AND unmeasurable, while a comment asserted it was there.
-	//     A comment is not an implementation, and a trap nobody reads cannot contradict it.
-	// TR: GetOrLoad'ın yorumu "pod içi singleflight (aşağıda korunuyor)" diyordu ve aşağıda
-	//     singleflight YOKTU. L1'de (03'ün süreç içi LRU'su) vardı; önbellek Redis'e taşınınca
-	//     koruma taşınmadı ve P03-05'in korumanın varlığını kanıtlamak için açtığı
-	//     TRAP_NO_SINGLEFLIGHT config'de okunmadan kaldı. Yani 04'ten itibaren izdiham koruması
-	//     hem YOKTU hem de ÖLÇÜLEMEZDİ, üstelik bir yorum var olduğunu iddia ediyordu.
-	//     Yorum bir gerçekleştirim değildir ve kimsenin okumadığı bir tuzak onu yalanlayamaz.
+	// POD İÇİ SINGLEFLIGHT — önbellekle birlikte L1'den L2'ye TAŞINAN koruma.
+	// EN: the stampede guard lives in the cache layer, not in Redis: when the cache moves from the
+	//     in-process LRU (level 03) to Redis, the guard has to move with it, because Redis does not
+	//     collapse concurrent misses by itself. TRAP_NO_SINGLEFLIGHT (P03-05) toggles it here too,
+	//     so the guard stays measurable. A guard that only a comment asserts, behind a trap nobody
+	//     reads, is indistinguishable from no guard: a comment is not an implementation.
+	// TR: İzdiham koruması Redis'te değil önbellek katmanında yaşar: önbellek süreç içi LRU'dan
+	//     (03) Redis'e taşınınca koruma da onunla taşınmak zorundadır, çünkü Redis eşzamanlı
+	//     ıskaları kendiliğinden birleştirmez. TRAP_NO_SINGLEFLIGHT (P03-05) onu burada da açıp
+	//     kapatır, yani koruma ölçülebilir kalır. Yalnızca bir yorumun iddia ettiği ve tuzağını
+	//     kimsenin okumadığı bir koruma, korumanın yokluğundan ayırt edilemez: yorum bir
+	//     gerçekleştirim değildir.
 	mu      sync.Mutex
 	flights map[string]*flight[V]
 }
@@ -90,7 +89,10 @@ func (c *Redis[V]) ttl(base time.Duration) time.Duration {
 //	REPLİKA SAYISIYLA sınırlıdır. Kilit satın almadan önce hangi izdihama sahip olduğunu bil.
 func (c *Redis[V]) GetOrLoad(ctx context.Context, k string, load func(context.Context) (V, bool, error)) (V, error) {
 	var zero V
+	// Ölçülen şey tam olarak ağ gidiş-gelişi: GET gidip cevap (ya da hata) dönene kadar.
+	start := time.Now()
 	raw, err := c.rdb.Get(ctx, c.key(k)).Result()
+	c.m.Lookup.WithLabelValues(c.cfg.Layer).Observe(time.Since(start).Seconds())
 	switch {
 	case err == nil:
 		if raw == negativeMarker {

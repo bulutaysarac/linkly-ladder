@@ -11,7 +11,6 @@ import (
 
 	"github.com/bulutaysarac/linkly-ladder/13-security-tenancy/internal/shortcode"
 	"github.com/bulutaysarac/linkly-ladder/13-security-tenancy/internal/store"
-	"github.com/bulutaysarac/linkly-ladder/13-security-tenancy/internal/tracing"
 )
 
 type createReq struct {
@@ -96,24 +95,25 @@ func (a *API) handleCreate(w http.ResponseWriter, r *http.Request) {
 var safeCodeRe = regexp.MustCompile(`^[A-Za-z0-9]{1,16}$`)
 
 func (a *API) handleRedirect(w http.ResponseWriter, r *http.Request) {
-	ctx0, span := tracing.Start(r.Context(), "redirect")
-	defer span.End()
-	r = r.WithContext(ctx0)
+	// Span burada AÇILMIYOR: isteğin kök span'ini middleware (tracing.HTTPServer) açtı. Buradan
+	// aşağıdaki her adım — önbellek, guard, sorgu, Kafka — o span'in çocuğu olarak görünür.
 	code := r.PathValue("code")
 	// İSTEK BAŞINA DEBUG LOGU — "geliştirici debug seviyesini üretimde unuttu" senaryosu.
-	// EN: P11-05 measures what debug logging costs, but the level had ZERO `.Debug()` calls on any
-	//     path, so `LOG_LEVEL=debug` changed nothing and the experiment measured run-to-run noise
-	//     (151650 vs 144136 bytes/s). A trap that no code honours is not a trap. slog itself skips
-	//     the call when the level is above debug, so this costs nothing at info.
-	// TR: P11-05 debug loglamanın bedelini ölçüyor ama seviyede HİÇBİR yolda `.Debug()` çağrısı
-	//     yoktu; `LOG_LEVEL=debug` hiçbir şeyi değiştirmiyor ve deney iki koşunun gürültüsünü
-	//     ölçüyordu (151650 vs 144136 bayt/s). Hiçbir kodun uymadığı bir tuzak, tuzak değildir.
-	//     slog seviye debug'ın üstündeyse çağrıyı zaten atlar, yani info'da bedeli yoktur.
+	// EN: P11-05 measures what debug logging costs, so the hot path must actually log at debug:
+	//     without a `.Debug()` call `LOG_LEVEL=debug` changes nothing and the experiment measures
+	//     only run-to-run noise. A trap that no code honours is not a trap. slog itself skips the
+	//     call when the level is above debug, so this costs nothing at info.
+	// TR: P11-05 debug loglamanın bedelini ölçüyor; bu yüzden sıcak yol gerçekten debug
+	//     seviyesinde loglar: `.Debug()` çağrısı olmadan `LOG_LEVEL=debug` hiçbir şeyi
+	//     değiştirmez ve deney yalnızca iki koşunun gürültüsünü ölçer. Hiçbir kodun uymadığı bir
+	//     tuzak, tuzak değildir. slog seviye debug'ın üstündeyse çağrıyı zaten atlar, yani info'da
+	//     bedeli yoktur.
 	a.log.Debug("redirect isteği", "code", code, "ua", r.UserAgent(),
 		"ip", r.Header.Get("X-Forwarded-For"), "referer", r.Referer(), "proto", r.Proto)
 
-	// "Kötü sürüm" simülasyonu (P12-01). Canary analizinin görevi bunu %10 trafikte YAKALAYIP
-	// ilerlemeyi durdurmaktır — yani hatanın %100'e ulaşmasını engellemek.
+	// "Kötü sürüm" simülasyonu (P12-01). Canary analizinin görevi bunu canary payındayken
+	// YAKALAYIP ilerlemeyi durdurmaktır — yani hatanın %100'e ulaşmasını engellemek. (Trafik
+	// yönlendirici olmadığı için pay pod sayısıyla belirleniyor: 1 canary + 3 stable ≈ %25.)
 	// Neden bir bayrak? Çünkü kasıtlı bir bug, yeniden üretilebilir bir bug'dır; ve dağıtım
 	// güvenliğini test etmek için gerçekten bozuk bir sürüme ihtiyacın var.
 	if a.cfg.BadVersionErrorPct > 0 && rand.Intn(100) < a.cfg.BadVersionErrorPct {
@@ -170,13 +170,14 @@ func (a *API) handleRedirect(w http.ResponseWriter, r *http.Request) {
 	// EN: This is the whole point of level 05. The redirect no longer writes to the database; it
 	//     drops an event into a bounded in-process queue and returns. Record() never blocks and
 	//     never fails — if the queue is full the click is DROPPED and counted as dropped.
-	//     What used to be a row lock on the hottest row (P02-08) is now a channel send.
+	//     At level 02 this is a row lock on the hottest row (P02-08); here it is a channel send.
 	// TR: 05'in bütün mesele bu. Redirect artık veritabanına yazmıyor; sınırlı bir süreç içi kuyruğa
 	//     bir olay bırakıp dönüyor. Record() ne bloklar ne de hata döndürür — kuyruk doluysa tıklama
-	//     DÜŞÜRÜLÜR ve düşürülmüş olarak sayılır. Eskiden en sıcak satırdaki bir satır kilidi olan
+	//     DÜŞÜRÜLÜR ve düşürülmüş olarak sayılır. 02'de en sıcak satırdaki bir satır kilidi olan
 	//     şey (P02-08), artık bir kanal gönderimi.
 	// [Topic · Konu: Okuma/yazma yolu ayrımı, asenkronizm]
-	a.clicks.Record(code)
+	// İsteğin bağlamı üreticiye GEÇİYOR: trace, Kafka header'ı üzerinden tüketiciye taşınsın (P11-02).
+	a.clicks.Record(r.Context(), code)
 
 	a.met.Redirect.WithLabelValues("ok").Inc()
 	// TRAP_REDIRECT_301: 01'de çözdüğümüz P00-10'u geri getirir. Burada tekrar karşımıza çıkmasının

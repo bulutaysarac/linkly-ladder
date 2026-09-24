@@ -65,15 +65,16 @@ func main() {
 	}, cache.NewMetrics(met.Registry(), "l2"), "linkly:link:")
 	cached := store.NewCached(db, l2)
 
-	// TRAP_UNBOUNDED_QUEUE: tampon SINIRINI kaldır. 05'te bu bir slice'tı ve tuzak kodda
-	// okunuyordu; 06'da kuyruk Kafka üreticisine taşınınca tuzak MAIN'DE YALNIZCA BASTIRILAN bir
-	// bayrağa dönüştü — deney açıyor, hiçbir şey değişmiyordu. Sınır burada: tampon dolunca
-	// üretici kaydı DÜŞÜRÜR (ve sayar). Sınırsızda düşürme yerine bellek büyür ve pod OOM olur:
-	// yani "veri kaybetme" kararını almayı reddettiğinde, karar senin yerine kernel tarafından
-	// ve en kötü anda alınır (P05-02).
-	// EN: when the queue moved from a slice to the Kafka producer the trap became a flag that is
-	// only PRINTED. Bounded → the producer drops and counts; unbounded → memory grows and the pod
-	// is OOM-killed, i.e. refusing to decide "lose data" hands the decision to the kernel.
+	// TRAP_UNBOUNDED_QUEUE: tampon SINIRINI kaldır. 05'te kuyruk süreç içiydi ve tuzak onu sınırsız
+	// bir dilime çeviriyordu; 06'dan itibaren kuyruk Kafka üreticisi, yani tuzak üreticinin sınırını
+	// kaldırmalı — yalnızca log'a basılan bir bayrak, açılıp hiçbir şey değiştirmeyen bir deney olur.
+	// Sınır burada: tampon dolunca üretici kaydı DÜŞÜRÜR (ve sayar). Sınırsızda düşürme yerine
+	// bellek büyür ve pod OOM olur: yani "veri kaybetme" kararını almayı reddettiğinde, karar senin
+	// yerine kernel tarafından ve en kötü anda alınır (P05-02).
+	// EN: from 06 on the queue is the Kafka producer, so the trap must lift the producer's limit — a
+	// flag that is only PRINTED is an experiment that changes nothing. Bounded → the producer drops
+	// and counts; unbounded → memory grows and the pod is OOM-killed, i.e. refusing to decide
+	// "lose data" hands the decision to the kernel.
 	maxBuf := cfg.ProducerMaxBuffered
 	if cfg.TrapUnboundedQueue {
 		maxBuf = 1 << 30
@@ -88,14 +89,16 @@ func main() {
 
 	api := httpapi.New(cfg, log, met, cached, version)
 	// SetRedis OLMADAN a.rdb NIL KALIR ve ona bağlı tuzaklar SESSİZCE ÖLÜR.
-	// EN: 04-06 wired this and 07+ did not, so `TRAP_READY_CHECKS_REDIS` (P10-02) read its flag,
-	//     found `a.rdb == nil` and did nothing — the experiment ran, measured no difference and
-	//     reported "readiness is fine", which is the OPPOSITE of the lesson. A feature flag guarded
-	//     by a nil dependency is not disabled, it is INVISIBLE: nothing fails, nothing logs.
-	// TR: 04-06 bunu bağlıyordu, 07+ bağlamıyordu; `TRAP_READY_CHECKS_REDIS` (P10-02) bayrağını
-	//     okuyup `a.rdb == nil` görüyor ve hiçbir şey yapmıyordu — deney koşuyor, fark bulamıyor ve
-	//     "readiness sorunsuz" diyordu; dersin TAM TERSİ. Nil bir bağımlılığın arkasındaki bayrak
-	//     kapalı değil GÖRÜNMEZdir: hiçbir şey patlamaz, hiçbir şey loglanmaz.
+	// EN: 04-06 wire this in their single main; from 07 on every per-service main must wire it too.
+	//     Without it `TRAP_READY_CHECKS_REDIS` (P10-02) reads its flag, finds `a.rdb == nil` and does
+	//     nothing — the experiment runs, measures no difference and reports "readiness is fine",
+	//     which is the OPPOSITE of the lesson. A feature flag guarded by a nil dependency is not
+	//     disabled, it is INVISIBLE: nothing fails, nothing logs.
+	// TR: 04-06 bunu tek main'lerinde bağlar; 07'den itibaren servis başına her main de bağlamalı.
+	//     Bağlamazsa `TRAP_READY_CHECKS_REDIS` (P10-02) bayrağını okur, `a.rdb == nil` görür ve
+	//     hiçbir şey yapmaz — deney koşar, fark bulamaz ve "readiness sorunsuz" der; dersin TAM
+	//     TERSİ. Nil bir bağımlılığın arkasındaki bayrak kapalı değil GÖRÜNMEZdir: hiçbir şey
+	//     patlamaz, hiçbir şey loglanmaz.
 	api.SetRedis(rdb)
 	api.SetClicks(clicks)
 	srv := api.Server(api.RedirectHandler(ratelimit.New(cfg.RateLimitPerSec, cfg.RateLimitBurst)))

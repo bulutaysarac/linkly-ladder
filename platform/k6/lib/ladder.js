@@ -24,7 +24,7 @@ export const TENANT = __ENV.TENANT || 't1';
 const URL_SIZE = parseInt(__ENV.URL_SIZE || '0', 10);
 
 // 13'ten itibaren yazma ucu Bearer anahtar istiyor; anahtar boşsa başlık hiç gönderilmez.
-// Kiracıyı artık ANAHTAR belirler — X-Tenant-ID yalnızca 13 öncesinde (ve P13-01'in tuzağında)
+// 13'ten itibaren kiracıyı ANAHTAR belirler — X-Tenant-ID yalnızca 13 öncesinde (ve P13-01'in tuzağında)
 // dikkate alınır. İkisini de göndermek bilinçli: merdiven aynı senaryoyu 00'dan 14'e koşturuyor.
 export const API_KEY = __ENV.API_KEY || '';
 // 08'den itibaren yük testi kimliği: limiter bu jetonu taşıyan isteği saymaz (bkz. <seviye>/deploy/
@@ -73,12 +73,12 @@ export function getMeta(code) {
 // SEED_BUDGET_MS — setup'ın ZAMAN BÜTÇESİ. Neden var:
 // EN: The setup phase is subject to the very fault the experiment injects. With a 2s database
 //     delay, seeding 500 links takes 1000s: k6's setupTimeout fires, the run is aborted and the
-//     load never happens — while the repro script happily reports "not reproduced". The bug was
-//     never in the system under test, it was in the experiment's own preparation.
+//     load never happens — while the repro script happily reports "not reproduced". The failure
+//     is not in the system under test but in the experiment's own preparation.
 // TR: Kurulum aşaması, deneyin enjekte ettiği arızaya TABİDİR. 2 sn'lik bir veritabanı gecikmesinde
 //     500 link oluşturmak 1000 sn sürer: k6'nın setupTimeout'u devreye girer, koşu iptal olur ve
 //     yük hiç çalışmaz — reproduce scripti ise memnuniyetle "reproduce olmadı" der. Hata test
-//     edilen sistemde değil, deneyin kendi hazırlığındaydı. Bütçe dolunca elde ne varsa onunla devam.
+//     edilen sistemde değil, deneyin kendi hazırlığındadır. Bütçe dolunca elde ne varsa onunla devam.
 export function seedLinks(n, budgetMs = parseInt(__ENV.SEED_BUDGET_MS || '30000', 10)) {
   const codes = [];
   const t0 = Date.now();

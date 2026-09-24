@@ -21,7 +21,7 @@ note "kod: ${code:-<oluşturulamadı>}"
 step "globex, HEADER ile acme gibi davranmayı deniyor"
 spoof=$(curl -s -o /dev/null -w '%{http_code}' -XDELETE "$API_BASE/api/links/$code" \
           -H "Authorization: Bearer $BKEY" -H "X-Tenant-ID: acme")
-note "globex anahtarı + X-Tenant-ID: acme → HTTP $spoof (404/403 bekleniyor)"
+note "globex anahtarı + X-Tenant-ID: acme → HTTP $spoof (404 bekleniyor: kiracı anahtardan gelir; globex için acme'nin linki YOK)"
 step "globex, hiç kimlik göndermeden deniyor"
 noauth=$(curl -s -o /dev/null -w '%{http_code}' -XDELETE "$API_BASE/api/links/$code")
 note "kimliksiz → HTTP $noauth (401 bekleniyor)"
@@ -31,8 +31,9 @@ kubectl -n "$NS" rollout status "$(wl api)" --timeout=180s >/dev/null 2>&1 || tr
 sleep 5
 trapped=$(curl -s -o /dev/null -w '%{http_code}' -XDELETE "$API_BASE/api/links/$code" -H "X-Tenant-ID: acme")
 note "tuzakla (yalnızca header) → HTTP $trapped (204 ise link SİLİNDİ: taklit başarılı)"
-grafana_hint "14 · Security → '401 / 403 /s' + 'İstek / tenant'"
-note "Kimlik doğrulama KODU tuzakta da duruyordu — değişen tek şey KARARIN neye dayandığıydı."
+grafana_hint "14 · Security → 'Kimlik reddi / sn (401 / 403)' (yalnızca 401: bu seviyede 403 üreten yol yok) · 02 · App RED → '4xx (koda göre)'"
+note "Tuzaklı başarılı taklit (204) hiçbir hata panelinde görünmez: metrikte sıradan bir silme gibi sayılır."
+note "Kimlik doğrulama KODU tuzakta da duruyor — değişen tek şey KARARIN neye dayandığı."
 note "Ders: bir sınır, karşılaştırdığı değeri ayarlayabilen EN ZAYIF şey kadar güçlüdür."
 note "Bu yüzden 'kiracıyı nereden alıyoruz?' sorusu bir uygulama detayı değil, bir GÜVENLİK sınırıdır."
 { [[ "$spoof" != "204" ]] && [[ "$noauth" == "401" ]]; } \

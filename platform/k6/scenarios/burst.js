@@ -1,7 +1,7 @@
-// ÖLÇÜLDÜ: bu kümede redirect kapasitesi ~650 istek/s; 1000'lik tepe ölçüm değil yıkım
-// üretiyordu (probe'lar düşüyor, pod'lar restart ediyor, sonraki deneyler bozuk ortam buluyor).
-// Tepe 400'e çekildi — HPA'nın gecikmesini göstermek için kapasiteyi AŞMAK gerekmiyor,
-// hızlı YÜKSELMEK yetiyor. Üstüne çıkmak için: PEAK=1000 make repro P=P07-01
+// ÖLÇÜLDÜ: bu kümede redirect kapasitesi ~650 istek/s; 1000'lik bir tepe ölçüm değil yıkım
+// üretir (probe'lar düşer, pod'lar restart eder, sonraki deneyler bozuk ortam bulur).
+// Tepe 400 — HPA'nın gecikmesini göstermek için kapasiteyi AŞMAK gerekmez, hızlı YÜKSELMEK
+// yeter. Üstüne çıkmak için: PEAK=1000 make repro P=P07-01
 // burst — sessizlik, ani patlama, sessizlik. HPA gecikmesi (07), kuyruk taşması (05), pencere sınırı (08).
 import { seedLinks, redirect, pick, summaryLine } from '../lib/ladder.js';
 export const options = {

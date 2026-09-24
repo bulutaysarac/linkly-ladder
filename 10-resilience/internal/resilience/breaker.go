@@ -26,6 +26,7 @@ package resilience
 import (
 	"context"
 	"errors"
+	"net"
 	"sync"
 	"time"
 
@@ -90,7 +91,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		}
 		m.Retries.WithLabelValues(d)
 	}
-	for _, mode := range []string{"cache_only", "no_analytics", "read_only"} {
+	// cache_only: Postgres devresi açık → yalnızca önbellek isabetleri cevaplanır.
+	// no_cache:   Redis devresi açık → önbellek atlanır, okumalar doğrudan veritabanından.
+	for _, mode := range []string{"cache_only", "no_cache", "no_analytics", "read_only"} {
 		m.Degraded.WithLabelValues(mode)
 	}
 	return m
@@ -203,7 +206,7 @@ func (g *Guard) Do(ctx context.Context, fn func(context.Context) error) error {
 			return nil
 		}
 		lastErr = err
-		if errors.Is(err, context.DeadlineExceeded) {
+		if isTimeout(err) {
 			g.m.Requests.WithLabelValues(g.cfg.Name, "timeout").Inc()
 		} else {
 			g.m.Requests.WithLabelValues(g.cfg.Name, "error").Inc()
@@ -214,6 +217,24 @@ func (g *Guard) Do(ctx context.Context, fn func(context.Context) error) error {
 	}
 	g.onFailure()
 	return lastErr
+}
+
+// isTimeout — bağlamın süresi doldu YA DA istemcinin kendi soket süre sınırı aşıldı.
+// EN: go-redis enforces its timeout as a socket deadline and returns a net.Error, not
+//
+//	context.DeadlineExceeded; without this check every Redis timeout would count as a plain
+//	"error" and the timeout series would stay at zero exactly while timeouts are happening.
+//
+// TR: go-redis timeout'unu soket süre sınırı olarak uygular ve context.DeadlineExceeded değil bir
+//
+//	net.Error döndürür; bu kontrol olmadan her Redis timeout'u düz "error" sayılır ve timeout
+//	serisi, tam da timeout'lar olurken sıfırda kalırdı.
+func isTimeout(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var ne net.Error
+	return errors.As(err, &ne) && ne.Timeout()
 }
 
 func (g *Guard) allowRequest() bool {
@@ -286,9 +307,9 @@ func (g *Guard) retryAllowed() bool {
 	if float64(g.retCount) >= float64(g.reqCount)*g.cfg.RetryBudget {
 		return false
 	}
-	// Bütçeyi harcadığını KAYDET. (İlk yazımda bu satır yoktu: sayaç hiç artmıyordu, yani bütçe
-	// her zaman "boş" görünüyor ve retry'lar sınırsız kalıyordu. Birim test yakaladı — bir
-	// korumanın var olması ile ÇALIŞIYOR olması ayrı şeylerdir.)
+	// Bütçeyi harcadığını KAYDET. Bu satır olmadan sayaç hiç artmaz: bütçe her zaman "boş"
+	// görünür ve retry'lar sınırsız kalır. Birim testin bunu sınamasının nedeni bu — bir
+	// korumanın var olması ile ÇALIŞIYOR olması ayrı şeylerdir.
 	g.retCount++
 	return true
 }

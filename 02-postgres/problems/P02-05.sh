@@ -18,7 +18,7 @@ psql "ANALYZE links" >/dev/null
 after=$(psql "SELECT count(*) FROM links")
 note "şimdi: ${after:-?} satır"
 step "Sorgu planı: index mi, seq scan mi?"
-# NOT: planın tamamını arıyoruz. `head -6` "Parallel Seq Scan" satırını kesebiliyordu —
+# NOT: planın tamamını arıyoruz. `head -6` gibi bir kırpma "Parallel Seq Scan" satırını kesebilir —
 # ölçtüğün kanıtı, okunabilirlik uğruna kırpma.
 plan=$(psql "EXPLAIN (ANALYZE, BUFFERS) SELECT code FROM links WHERE tenant='acme' ORDER BY created_at DESC LIMIT 100")
 { echo "$plan" | head -8 | sed 's/^/    /'; } || true

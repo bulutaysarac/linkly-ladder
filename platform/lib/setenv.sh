@@ -6,16 +6,16 @@
 #   make env                                                  (şu an ne ayarlı?)
 #   make reset                                                (hepsini manifestteki hâline döndür)
 #
-# EN: The exercises said "set CACHE_CAPACITY=100" or "turn the flag off" and never said how.
+# EN: The exercises say "set CACHE_CAPACITY=100" or "turn the flag off"; this is how.
 #     `kubectl set env` is the obvious answer and it is wrong from level 12 on: redirect becomes an
-#     Argo Rollout and `set env` fails on CRDs (it killed all 98 toggles in the ladder once). This
-#     reuses the scripts' own `setenv`, which patches Rollouts too. Without W it targets EVERY
+#     Argo Rollout and `set env` fails on CRDs (see `setenv` in repro.sh). This reuses the
+#     scripts' own `setenv`, which patches Rollouts too. Without W it targets EVERY
 #     application workload (image from the ladder registry) — most flags are read by more than one
 #     service, and setting one of them silently leaves half the system on the old value.
-# TR: Alıştırmalar "CACHE_CAPACITY=100 yap" ya da "bayrağı kapat" diyor, nasıl yapılacağını
-#     söylemiyordu. Akla gelen `kubectl set env` 12'den itibaren YANLIŞ: redirect bir Argo Rollout
-#     olur ve `set env` CRD'lerde çalışmaz (bir kez merdivendeki 98 anahtarın hepsini öldürmüştü).
-#     Bu, scriptlerin kendi `setenv`'ini kullanır; Rollout'u da yamalar. W verilmezse HER uygulama
+# TR: Alıştırmalar "CACHE_CAPACITY=100 yap" ya da "bayrağı kapat" der; nasıl yapılacağı bu.
+#     Akla gelen `kubectl set env` 12'den itibaren YANLIŞ: redirect bir Argo Rollout olur ve
+#     `set env` CRD'lerde çalışmaz (bkz. repro.sh'teki `setenv`). Bu, scriptlerin kendi
+#     `setenv`'ini kullanır; Rollout'u da yamalar. W verilmezse HER uygulama
 #     iş yükünü hedefler (imajı merdiven registry'sinden gelen): bayrakların çoğunu birden fazla
 #     servis okur ve yalnızca birini değiştirmek sistemin yarısını eski değerde bırakır.
 # [Topic · Konu: Deney araçları]
@@ -23,8 +23,8 @@ source "$LADDER_ROOT/platform/lib/repro.sh"
 mode=${1:?set|unset|env|reset}; shift || true
 
 # İKİ TÜR AYRI SORULUR. `get deploy,rollout` Argo Rollouts CRD'si yokken (make minimal/standard,
-# 00-11) TAMAMEN başarısız olur; hatayı yutan ilk hâl bunu "iş yükü yok" diye okudu ve `make reset`
-# hiçbir şey yapmadan başarı döndü — tuzaklar açık kaldı. Rollout yalnızca CRD varsa aranır; gerçek
+# 00-11) TAMAMEN başarısız olur; hatayı yutan bir sorgu bunu "iş yükü yok" diye okur ve `make reset`
+# hiçbir şey yapmadan başarı döner — tuzaklar açık kalır. Rollout yalnızca CRD varsa aranır; gerçek
 # bir kubectl hatası ise "yok" değil HATA olarak yükselir.
 # EN: query the kinds separately; a missing Rollouts CRD must not read as "no workloads".
 _app_names() { jq -r '.items[] | select(.spec.template.spec.containers[0].image | test("/linkly-ladder/"))

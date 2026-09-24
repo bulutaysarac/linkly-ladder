@@ -7,10 +7,14 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/bulutaysarac/linkly-ladder/11-observability-deep/internal/tracing"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 //go:embed migrations/*.sql
@@ -101,12 +105,60 @@ func OpenWithMode(ctx context.Context, dsn string, maxConns int32, m *DBMetrics,
 	if !usePrepared {
 		cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeExec
 	}
+	if m != nil {
+		cfg.ConnConfig.Tracer = acquireTracer{m: m}
+	}
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("havuz: %w", err)
 	}
 	return &Postgres{pool: pool, m: m}, nil
 }
+
+// acquireTracer — havuzdan bağlantı ALMA süresini, beklemenin gerçekten olduğu yerde ölçer.
+//
+// EN: The wait for a connection happens INSIDE QueryRow/Exec/Begin, when they block on an empty
+//
+//	pool — not around them in track(). pgxpool calls this tracer around EVERY Acquire, the
+//	implicit ones inside QueryRow/Exec/Begin included, so the histogram observes the wait
+//	itself. That is what lets "the pool is waiting" (P02-06, P05-03, a script's `acq > 0.05`
+//	check) show up when the pool is full. A failed acquire (the context ran out while
+//	waiting) is observed too: that request waited, and then gave up.
+//
+// TR: Bağlantı beklemesi track()'in etrafında değil, QueryRow/Exec/Begin boş bir havuzda
+//
+//	bloklandığında onların İÇİNDE olur. pgxpool bu tracer'ı QueryRow/Exec/Begin'in içindekiler
+//	dahil HER Acquire'ın etrafında çağırır; histogram beklemenin kendisini gözler. "Havuz
+//	bekliyor" iddiası (P02-06, P05-03, bir scriptin `acq > 0.05` kontrolü) havuz dolduğunda
+//	ancak böyle görünür. Başarısız alma (bağlam beklerken doldu) da gözlenir: o istek bekledi
+//	ve sonra vazgeçti.
+//
+// [Topic · Konu: Bağlantı havuzu, doğru yerde ölçmek]
+type acquireTracer struct{ m *DBMetrics }
+
+type acquireStartKey struct{}
+
+func (t acquireTracer) TraceAcquireStart(ctx context.Context, _ *pgxpool.Pool, _ pgxpool.TraceAcquireStartData) context.Context {
+	return context.WithValue(ctx, acquireStartKey{}, time.Now())
+}
+
+func (t acquireTracer) TraceAcquireEnd(ctx context.Context, _ *pgxpool.Pool, _ pgxpool.TraceAcquireEndData) {
+	if start, ok := ctx.Value(acquireStartKey{}).(time.Time); ok {
+		wait := time.Since(start)
+		t.m.AcquireWait.Observe(wait.Seconds())
+		// Aynı sayı trace'te: db.<op> span'inin üstünde bir olay (histogram toplamı söyler,
+		// olay TEK isteğin ne kadar sırada beklediğini).
+		trace.SpanFromContext(ctx).AddEvent("pool.acquire",
+			trace.WithAttributes(attribute.Float64("wait_ms", float64(wait.Microseconds())/1000)))
+	}
+}
+
+// ConnConfig.Tracer'ın tipi pgx.QueryTracer: pgxpool AcquireTracer'ı ancak o alana konan nesnede
+// arar. Sorgu tarafını track() zaten ölçüyor; bu iki metot bilerek boş.
+func (acquireTracer) TraceQueryStart(ctx context.Context, _ *pgx.Conn, _ pgx.TraceQueryStartData) context.Context {
+	return ctx
+}
+func (acquireTracer) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
 
 // Open — geriye uyumlu sarmalayıcı (prepared statement KAPALI: Pooler güvenli varsayılan).
 func Open(ctx context.Context, dsn string, maxConns int32, m *DBMetrics) (*Postgres, error) {
@@ -118,16 +170,23 @@ func (p *Postgres) Close()              { p.pool.Close() }
 
 func (p *Postgres) Ping(ctx context.Context) error { return p.pool.Ping(ctx) }
 
-// track — her sorguyu ölç: süre, sonuç ve havuz bekleme süresi.
+// track — her sorguyu ölç: süre ve sonuç. Havuz BEKLEMESİ burada değil, acquireTracer'da ölçülür.
+//
+// Duration = havuz beklemesi + sorgu (isteğin gördüğü toplam); AcquireWait = yalnızca bekleme.
+// İkisinin farkı sorgunun kendisidir — "DB yavaş" ile "havuz dolu" ancak böyle ayrılır.
 func (p *Postgres) track(ctx context.Context, op string, fn func(context.Context) error) error {
-	acquireStart := time.Now()
+	// Boş havuz tahmini: şu an boşta bağlantı yok ve havuz tavanda → bu alma BEKLEYECEK.
 	stat := p.pool.Stat()
 	if stat.IdleConns() == 0 && stat.TotalConns() >= stat.MaxConns() {
 		p.m.EmptyAcquire.Inc()
 	}
+	// 11: her sorgu bir "db.<op>" span'i; havuz beklemesi bu span'e olay olarak düşer
+	// (acquireTracer). Trace'te "sorgu mu yavaş, sıra mı bekledi?" ayrımı buradan okunur.
+	ctx, span := tracing.Start(ctx, "db."+op,
+		attribute.String("db.system", "postgresql"), attribute.String("db.operation", op))
+	defer span.End()
 	start := time.Now()
 	err := fn(ctx)
-	p.m.AcquireWait.Observe(start.Sub(acquireStart).Seconds())
 	p.m.Duration.WithLabelValues(op).Observe(time.Since(start).Seconds())
 	switch {
 	case err == nil:
@@ -138,6 +197,8 @@ func (p *Postgres) track(ctx context.Context, op string, fn func(context.Context
 		p.m.Queries.WithLabelValues(op, "not_found").Inc()
 	default:
 		p.m.Queries.WithLabelValues(op, "error").Inc()
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 	}
 	return err
 }

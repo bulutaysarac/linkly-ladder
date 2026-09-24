@@ -1,17 +1,14 @@
-// Command linkly — seviye 02, "kalıcılık ve yatay ölçek".
+// Command linkly — seviye 03, "süreç içi önbellek".
 //
-// EN: The application is now STATELESS. That single word is what buys N replicas, clean rollouts,
+// EN: The stateless app from 02 plus a bounded in-process LRU (TTL, singleflight, negative entries) in
 //
-//	node drains and horizontal scaling — none of which were available at level 01, not because of
-//	missing Kubernetes features but because the data lived inside the process. The cost is that
-//	every request now crosses a network to a database that this level treats as always-up and
-//	infinitely fast. It is neither (P02-01 … P02-08).
+//	front of Postgres. It removes most of the read load measured in P02-01 and creates N copies of
+//	the truth that do not know when they go stale (P03-01 … P03-07).
 //
-// TR: Uygulama artık DURUMSUZ. N replika, temiz rollout, node drain ve yatay ölçeklenme bu tek
+// TR: 02'nin durumsuz uygulaması + Postgres'in önünde pod belleğinde sınırlı bir LRU (TTL, singleflight,
 //
-//	kelimenin karşılığı — hiçbiri 01'de yoktu, Kubernetes özelliği eksik olduğu için değil, veri
-//	sürecin içinde yaşadığı için. Bedeli: artık her istek, bu seviyenin hep ayakta ve sonsuz hızlı
-//	varsaydığı bir veritabanına ağ üzerinden gidiyor. İkisi de doğru değil (P02-01 … P02-08).
+//	negatif kayıt). P02-01'de ölçülen okuma yükünün çoğunu kaldırır; karşılığında ne zaman bayatladığını
+//	bilmeyen N kopya gerçek üretir (P03-01 … P03-07).
 package main
 
 import (
@@ -156,8 +153,21 @@ func runMigrations(cfg config.Config, log *slog.Logger) error {
 	if err := goose.SetDialect("postgres"); err != nil {
 		return err
 	}
+	// ÖNCE/SONRA SÜRÜMÜNÜ YAZ. "migration koşuluyor" satırı, yapacak işi olmayan (şema zaten
+	// hedefte) bir pod'da da basılır; bu satırları sayan bir ölçü, her pod bir no-op koşmuşken
+	// "iş N kez yapıldı" der. from=1 to=2 diyen pod işi GERÇEKTEN yaptığını sanıyor;
+	// birden fazla pod bunu diyorsa aynı tek seferlik iş birden fazla kez koşmuştur (P02-07).
+	// EN: the "migration running" line is printed by pods that have nothing to do, so counting those
+	// lines proves no race. from/to shows who actually applied something.
 	log.Info("migration koşuluyor", "target", cfg.MigrateTarget)
-	return goose.UpTo(sqlDB, "migrations", cfg.MigrateTarget)
+	from, _ := goose.GetDBVersion(sqlDB)
+	start := time.Now()
+	if err := goose.UpTo(sqlDB, "migrations", cfg.MigrateTarget); err != nil {
+		return err
+	}
+	to, _ := goose.GetDBVersion(sqlDB)
+	log.Info("migration bitti", "from", from, "to", to, "target", cfg.MigrateTarget, "sure_ms", time.Since(start).Milliseconds())
+	return nil
 }
 
 // waitForSchema — şema gelene kadar bekle (migration Job'ı henüz bitmemiş olabilir).

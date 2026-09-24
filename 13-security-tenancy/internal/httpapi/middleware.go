@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/subtle"
 	"log/slog"
-	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -32,10 +31,19 @@ const ctxRequestID ctxKey = "request_id"
 //	rateLimit en sonda ki reddedilen istek ucuz olsun — iş mantığına hiç ulaşmasın.
 //
 // [Topic · Konu: Katmanlı koruma, middleware sırası]
-func Chain(h http.Handler, log *slog.Logger, m *metrics.Metrics, rl *ratelimit.Limiter, handlerTimeout time.Duration) http.Handler {
-	h = rateLimit(h, m, rl)
+//
+// 11: sunucu span'i (tracing.HTTPServer) requestID ile accessLog ARASINA giriyor. accessLog'un
+// İÇİNDE (örneğin handler'da) açılsaydı, log satırı ve exemplar isteğin bağlamını span yokken
+// okurdu: trace_id hep boş.
+// EN: the server span must wrap accessLog; opened inside the handler it is invisible to the layer
+// that writes trace_id into the log line and the exemplar.
+//
+// ipOf — isteğin istemci adresi; limiter'ın kovası ve access log'un `ip` alanı aynı değerdir.
+func Chain(h http.Handler, log *slog.Logger, m *metrics.Metrics, rl *ratelimit.Limiter, handlerTimeout time.Duration, ipOf func(*http.Request) string) http.Handler {
+	h = rateLimit(h, m, rl, ipOf)
 	h = timeout(h, handlerTimeout)
-	h = accessLog(h, log, m)
+	h = accessLog(h, log, m, ipOf)
+	h = tracing.HTTPServer(h, routeOf)
 	h = requestID(h)
 	h = recoverPanic(h, log, m)
 	return h
@@ -89,7 +97,10 @@ func (r *recorder) Write(b []byte) (int, error) {
 	return r.ResponseWriter.Write(b)
 }
 
-func accessLog(next http.Handler, log *slog.Logger, m *metrics.Metrics) http.Handler {
+// accessLog — `ip`, limiter'ın kullandığı istemci adresidir (ipOf): logdaki bir 429, onu üreten
+// kovayla aynı adresi gösterir. X-Forwarded-For'un ilk girdisini client yazar; log'a o yazılsa,
+// istediği adresi seçen bir client log'da da istediği kişi olarak görünürdü.
+func accessLog(next http.Handler, log *slog.Logger, m *metrics.Metrics, ipOf func(*http.Request) string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		m.InFlight.Inc()
@@ -100,6 +111,8 @@ func accessLog(next http.Handler, log *slog.Logger, m *metrics.Metrics) http.Han
 			rec.status = http.StatusOK
 		}
 		d := time.Since(start)
+		// Span'i dıştaki tracing.HTTPServer açtı; burada yalnızca OKUNUYOR. Örneklenmemiş
+		// isteklerde (%95) ikisi de boş döner — bkz. tracing.SpanIDs.
 		traceID, spanID := tracing.SpanIDs(r.Context())
 		// route = ŞABLON, gerçek yol değil. "/{code}" yerine "/abc123" yazsaydık her link yeni bir
 		// zaman serisi olurdu — kardinalite patlaması (bkz. TRAP_METRIC_LABEL_CODE).
@@ -107,11 +120,11 @@ func accessLog(next http.Handler, log *slog.Logger, m *metrics.Metrics) http.Han
 		// Exemplar: metrikten trace'e köprü. Kardinalite ödemeden tekil isteğe ulaşmanın yolu.
 		m.ObserveDurationWithExemplar(route, d.Seconds(), traceID)
 		m.ObserveRequest(route, r.Method, strconv.Itoa(rec.status), shortCodeOf(r), tenantOf(r))
-		// trace_id ve span_id HER log satırında. Grafana'nın Loki datasource'unda tanımlı
-		// derived field bunu yakalayıp Tempo'ya link veriyor — log'dan trace'e tek tıkla geçiş.
+		// trace_id ve span_id örneklenen HER isteğin log satırında. Grafana'nın Loki datasource'unda
+		// tanımlı derived field bunu yakalayıp Tempo'ya link veriyor — log'dan trace'e tek tıkla geçiş.
 		log.Info("http",
 			"method", r.Method, "route", route, "path", r.URL.Path, "status", rec.status,
-			"dur_ms", d.Milliseconds(), "ip", clientIP(r), "request_id", RequestID(r.Context()),
+			"dur_ms", d.Milliseconds(), "ip", ipOf(r), "request_id", RequestID(r.Context()),
 			"trace_id", traceID, "span_id", spanID)
 	})
 }
@@ -173,26 +186,26 @@ const LoadTestHeader = "X-Ladder-Loadtest"
 
 // loadTestExempt — bu istek hız sınırından muaf bir yük testi mi?
 //
-// EN: From level 08 on, every load experiment came from ONE client IP, and two limiters — the
+// EN: From level 08 on, every load experiment comes from ONE client IP, and two limiters — the
 //
 //	ingress (400 rps, answering 503) and this one (300 per 10 s per IP = 30 rps) — silently
-//	capped what reached the application. P14-05's game day reported "4.37% availability"
-//	while the application itself had returned almost no errors: it had measured the limiters,
-//	not the system. Real load tests do not pretend to be the public; they carry an identity the
-//	limiter recognises. The token comes from a Secret, an EMPTY token exempts nobody (otherwise
-//	every client without the header would match), and every exemption is COUNTED as
-//	decision="exempt" — an exemption you cannot see is indistinguishable from a protection that
-//	was switched off.
+//	cap what reaches the application. A game day (P14-05) run through them reports a
+//	single-digit availability while the application itself returns almost no errors: it
+//	measures the limiters, not the system. Real load tests do not pretend to be the public;
+//	they carry an identity the limiter recognises. The token comes from a Secret, an EMPTY
+//	token exempts nobody (otherwise every client without the header would match), and every
+//	exemption is COUNTED as decision="exempt" — an exemption you cannot see is
+//	indistinguishable from a protection that was switched off.
 //
-// TR: 08'den itibaren her yük deneyi TEK bir istemci IP'sinden geldi ve iki limiter — ingress
+// TR: 08'den itibaren her yük deneyi TEK bir istemci IP'sinden gelir ve iki limiter — ingress
 //
 //	(400 rps, 503 döner) ve bu (IP başına 10 sn'de 300 = 30 rps) — uygulamaya ulaşanı sessizce
-//	kıstı. P14-05'in game day'i "%4.37 erişilebilirlik" raporladı; uygulamanın kendisi neredeyse
-//	hiç hata dönmemişti: sistemi değil limiter'ları ölçmüştü. Gerçek yük testleri kamuymuş gibi
-//	davranmaz, limiter'ın tanıdığı bir kimlik taşır. Jeton bir Secret'tan gelir, BOŞ jeton
-//	kimseyi muaf tutmaz (yoksa başlığı olmayan herkes eşleşirdi) ve her muafiyet
-//	decision="exempt" olarak SAYILIR — göremediğin bir muafiyet, kapatılmış bir korumadan ayırt
-//	edilemez.
+//	kısar. Bunların arkasından koşan bir game day (P14-05) tek haneli bir erişilebilirlik
+//	raporlar, oysa uygulamanın kendisi neredeyse hiç hata dönmez: sistemi değil limiter'ları
+//	ölçer. Gerçek yük testleri kamuymuş gibi davranmaz, limiter'ın tanıdığı bir kimlik taşır.
+//	Jeton bir Secret'tan gelir, BOŞ jeton kimseyi muaf tutmaz (yoksa başlığı olmayan herkes
+//	eşleşirdi) ve her muafiyet decision="exempt" olarak SAYILIR — göremediğin bir muafiyet,
+//	kapatılmış bir korumadan ayırt edilemez.
 func loadTestExempt(r *http.Request, token string) bool {
 	if token == "" {
 		return false
@@ -213,9 +226,9 @@ func reject(w http.ResponseWriter, dec ratelimit.Decision) {
 	http.Error(w, `{"error":"rate_limited","scope":"`+dec.KeyType+`"}`, http.StatusTooManyRequests)
 }
 
-func rateLimit(next http.Handler, m *metrics.Metrics, rl *ratelimit.Limiter) http.Handler {
+func rateLimit(next http.Handler, m *metrics.Metrics, rl *ratelimit.Limiter, ipOf func(*http.Request) string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ip := clientIP(r)
+		ip := ipOf(r)
 		if !rl.Allow(ip) {
 			m.RateLimit.WithLabelValues("reject", "ip").Inc()
 			w.Header().Set("Retry-After", "1")
@@ -225,22 +238,4 @@ func rateLimit(next http.Handler, m *metrics.Metrics, rl *ratelimit.Limiter) htt
 		m.RateLimit.WithLabelValues("allow", "ip").Inc()
 		next.ServeHTTP(w, r)
 	})
-}
-
-// clientIP — X-Forwarded-For'un SON hop'una değil, ingress'in eklediği ilk değere bakıyoruz.
-// UYARI: bu haliyle header spoof edilebilir; 08'de sadece güvenilen proxy hop'undan alınacak.
-func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		for i := 0; i < len(xff); i++ {
-			if xff[i] == ',' {
-				return xff[:i]
-			}
-		}
-		return xff
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
 }

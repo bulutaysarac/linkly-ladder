@@ -3,8 +3,8 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # P00-08 · Bellek sınırsız büyür → OOMKilled
 #
 # ÖLÇÜM NOTU: yükü TEK VU ile veriyoruz (P00-01 maskelemesi). Paralel istekte süreç önce eşzamanlı
-# map yazımından çöker; o zaman "OOM mu oldu, crash mi?" ayırt edilemez — nitekim ilk denemede
-# reason=Error (crash) görünürken working set 3 MB'taydı. Tek VU'da yarış yok: yalnızca bellek büyür.
+# map yazımından çöker; o zaman "OOM mu oldu, crash mi?" ayırt edilemez — paralel yükte
+# reason=Error (crash) görünür, working set ise birkaç MB'ta kalır. Tek VU'da yarış yok: yalnızca bellek büyür.
 # Ayrım: reason=OOMKilled → bu sorun · reason=Error → P00-01.
 ensure_healthy
 ensure_fresh_pod

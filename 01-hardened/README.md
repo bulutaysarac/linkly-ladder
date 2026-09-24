@@ -1,5 +1,16 @@
 # 01 — hardened · "Tek süreç ama düzgün"
 
+> **Bu seviyede ne yaşayacaksın?**
+> - Aynı 50 kullanıcının artık süreci çökertmemesi (kilit), dağıtımın hatasız geçmesi (readiness + graceful shutdown), slowloris'in timeout'a takılması — `make verify-prev` 00'ın sorunlarını burada koşup kapandıklarını gösterir
+> - Restart'ta linklerin hâlâ kaybolması — ama artık panelde görünmesi (P01-01); tek pod'un tavanını pod bazında ölçmek (P01-02)
+> - Tek replika + PodDisruptionBudget'ın düğüm boşaltmada neden koruma sağlamadığı (P01-03); belleğin OOM'dan önce görünür olması (P01-04)
+> - Süreç içi hız sınırının N replikada N katına çıkması (P01-05); tıklama sayacının hâlâ istek yolunda olması (P01-08)
+> - Tuzaklar: kısa kodu metrik etiketi yapınca Prometheus'un şişmesi (P01-06); sağlık uçlarını iş zincirinin arkasına koyunca pod'ların trafikten düşmesi (P01-07)
+>
+> **Bu seviye olmasa ne olur?** 00'ın çöküşleri ve dağıtım hataları sürer. Daha önemlisi: sonraki 13 seviyenin her sorunu 01'in eklediği metriklerle ölçülür — metrik yoksa "sorun var mı?" sorusunun cevabı tahmindir.
+>
+> **Yeni gelen teknolojiler:** `sync.RWMutex`, readiness/liveness probe, graceful shutdown, `log/slog` (JSON log), `/metrics` (client_golang), ServiceMonitor, PodDisruptionBudget ([her biri tek cümleyle](../README.md#kullanılan-teknolojiler)).
+
 ## 1. Bu seviye ne?
 
 00 ile **aynı** tek süreç ve **aynı** bellek içi store — ama çökmesini, yalan söylemesini ve istek
@@ -78,14 +89,14 @@ Bu seviyede yeni: `GET /{code}` artık **302** + `Cache-Control: no-store`; `/he
 
 | ID | Sorun | Reproduce | Grafana'da | Çözüm |
 |---|---|---|---|---|
-| P01-01 | Restart = tüm linkler gider (artık görünür) | `CONFIRM=1 make repro P=P01-01` | App Business → links_total dikey düşüş | 02 |
-| P01-02 | Ölçeklenemez (artık pod bazında görünür) | `CONFIRM=1 make repro P=P01-02` | App Business → redirect 404 by pod | 02 |
-| P01-03 | Tek replika + PDB = güvenlik yanılsaması | `CONFIRM=1 make repro P=P01-03` | App RED → 5xx; Pods → Pending | 02 |
-| P01-04 | Bellek sınırsız (artık önceden görülür) | `make repro P=P01-04` | Pods → Heap alloc + working set | 02 · 03 |
-| P01-05 | Süreç içi limit N replikada N katı | `CONFIRM=1 make repro P=P01-05` | Rate limit → allow by pod | 08 |
-| P01-06 | **TRAP** kısa kod label → kardinalite patlaması | `make repro P=P01-06` | App RED → seri sayısı | seviye içi |
-| P01-07 | **TRAP** sağlık ucu zincirin arkasında → restart fırtınası | `make repro P=P01-07` | Pods → Restart; Rate limit → reject | seviye içi |
-| P01-08 | Tıklama sayacı istek yolunda ve bellekte | `CONFIRM=1 make repro P=P01-08` | App RED → p99 /{code} | 05 · 06 |
+| P01-01 | Restart = tüm linkler gider (artık görünür) | `CONFIRM=1 make repro P=P01-01` | [03 · App Business](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl01&from=now-15m&to=now&refresh=10s) → "Kayıtlı link sayısı (pod'a göre)" | 02 |
+| P01-02 | Ölçeklenemez (artık pod bazında görünür) | `CONFIRM=1 make repro P=P01-02` | [03 · App Business](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl01&from=now-15m&to=now&refresh=10s) · [01 · Pods & Resources](http://grafana.localtest.me/d/ladder-pods?var-level=lvl01&from=now-15m&to=now&refresh=10s) → "404 (pod'a göre)" | 02 |
+| P01-03 | Tek replika + PDB = güvenlik yanılsaması | `CONFIRM=1 make repro P=P01-03` | [01 · Pods & Resources](http://grafana.localtest.me/d/ladder-pods?var-level=lvl01&from=now-15m&to=now&refresh=10s) · [15 · k6](http://grafana.localtest.me/d/ladder-k6?var-level=lvl01&from=now-15m&to=now&refresh=10s) → "Hazır pod adresi (endpoint) sayısı" | 02 |
+| P01-04 | Bellek sınırsız (artık önceden görülür) | `make repro P=P01-04` | [01 · Pods & Resources](http://grafana.localtest.me/d/ladder-pods?var-level=lvl01&from=now-15m&to=now&refresh=10s) · [03 · App Business](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl01&from=now-15m&to=now&refresh=10s) → "Heap bellek (Go)" | 02 · 03 |
+| P01-05 | Süreç içi limit N replikada N katı | `CONFIRM=1 make repro P=P01-05` | [10 · Rate limit](http://grafana.localtest.me/d/ladder-ratelimit?var-level=lvl01&from=now-15m&to=now&refresh=10s) → "İzin verilen (pod'a göre)" | 08 |
+| P01-06 | **TRAP** kısa kod label → kardinalite patlaması | `make repro P=P01-06` | [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl01&from=now-15m&to=now&refresh=10s) → "İstek / saniye (uç noktaya göre)" | seviye içi |
+| P01-07 | **TRAP** sağlık ucu zincirin arkasında → restart fırtınası | `make repro P=P01-07` | [01 · Pods & Resources](http://grafana.localtest.me/d/ladder-pods?var-level=lvl01&from=now-15m&to=now&refresh=10s) · [10 · Rate limit](http://grafana.localtest.me/d/ladder-ratelimit?var-level=lvl01&from=now-15m&to=now&refresh=10s) → "Hazır pod adresi (endpoint) sayısı" | seviye içi |
+| P01-08 | Tıklama sayacı istek yolunda ve bellekte | `CONFIRM=1 make repro P=P01-08` | [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl01&from=now-15m&to=now&refresh=10s) · [03 · App Business](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl01&from=now-15m&to=now&refresh=10s) → "p99 süre (uç noktaya göre)" | 05 · 06 |
 
 ---
 
@@ -100,8 +111,11 @@ grafiğinde **dikey bir düşüş** olarak görünmesi.
 1. `CONFIRM=1 make repro P=P01-01` — 25 link oluşturur, `links_total`'ı okur, pod'u siler, tekrar okur
 2. Elle: link oluştur → `kubectl -n lvl01 delete pod -l app.kubernetes.io/name=linkly` → aynı kodu iste → 404
 
-**Grafana:** `03 · App Business` → "links_total" (restartta sıfıra düşer), "redirect sonuçları" → `not_found` sıçraması.
-PromQL: `max(links_total{namespace="lvl01"})`
+**Grafana'da gör:** [`03 · App Business`](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl01&from=now-15m&to=now&refresh=10s) — script pod'u sildikten sonra aç (giriş: admin / ladder)
+- "Kayıtlı link sayısı (pod'a göre)" → eski pod'un çizgisi scriptin oluşturduğu 25+ linkin seviyesinde biter, yeni pod adıyla **0**'dan başlayan bir çizgi belirir: dikey düşüş, yani kaybın büyüklüğü.
+- "Kayıtlı link sayısı" → büyük sayı restarttan sonra `0`; arkadaki küçük eğri aynı düşüşü çizer.
+- "Yönlendirme sonuçları" → restarttan sonra `not_found` serisinde küçük bir tümsek: script kanarya kodunu yalnızca bir kez ister; aynı kodu elle birkaç kez istersen belirginleşir.
+
 **Nerede çözülüyor:** 02 (Postgres). 01'in kazancı kaybı **ölçebilmek**: 00'da bu grafik yoktu, kaybın
 büyüklüğünü söyleyemiyordun bile.
 
@@ -116,7 +130,11 @@ büyüklüğünü söyleyemiyordun bile.
 1. `CONFIRM=1 make repro P=P01-02` — 3 replikaya çıkar, endpoint'lerin yetişmesini bekler, 60 kez okur
 2. Script ayrıca **metrikten** aynı gerçeği gösterir: `sum by (pod) (redirect_total{result="not_found"})`
 
-**Grafana:** `03 · App Business` → "redirect 404 by pod" — üç pod, üç ayrı sayaç.
+**Grafana'da gör:** [`03 · App Business`](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl01&from=now-15m&to=now&refresh=10s) ve [`01 · Pods & Resources`](http://grafana.localtest.me/d/ladder-pods?var-level=lvl01&from=now-15m&to=now&refresh=10s) — script çalışırken ya da hemen sonra aç (giriş: admin / ladder)
+- "404 (pod'a göre)" → her pod kendi sayacını çizer: linkin yazıldığı pod'un çizgisi 0'da kalır, **diğer ikisi** yükselir — 404'ü linki hiç görmemiş pod'lar veriyor. 00'da bu panel boştu.
+- "Yönlendirme sonuçları" → aynı pencerede `ok` ile `not_found` yan yana; `not_found` kabaca iki katı (60 okumanın ~%66'sı).
+- "Hazır pod adresi (endpoint) sayısı" → deney boyunca 1'den **3**'e çıkar, script bitince 1'e döner: 404'lerin başladığı an, pod sayısının arttığı an.
+
 **Nerede çözülüyor:** 02. Not: ölçekledikten sonra Service endpoint'lerinin gerçekten artmasını
 beklemek şart; beklemezsen tüm istekler tek pod'a düşer ve yanlış negatif alırsın.
 
@@ -137,11 +155,16 @@ bir şey de yoktur — sadece bakımı kilitler. [Topic · Konu: HA, PDB, yedekl
    **(b)** operatörün gerçekte yaptığı: zorla sil → pod ölür, yedeği yok → 5xx
 2. Sonunda node uncordon edilir
 
-**İlk koşuşta çıkan gerçek çıktı:** `minAvailable=1 · izin verilen kesinti=0` →
+**Ölçülen çıktı:** `minAvailable=1 · izin verilen kesinti=0` →
 `error when evicting pods/"linkly-…" -n "lvl01": global timeout reached: 45s`. Yani PDB sözünü
 tuttu: kimse ölmedi — ama node'a da dokunamadın.
 
-**Grafana:** `02 · App RED` → 5xx; `01 · Pods & Resources` → "Pod fazları" (Pending).
+**Grafana'da gör:** [`01 · Pods & Resources`](http://grafana.localtest.me/d/ladder-pods?var-level=lvl01&from=now-15m&to=now&refresh=10s), [`15 · k6`](http://grafana.localtest.me/d/ladder-k6?var-level=lvl01&from=now-15m&to=now&refresh=10s) ve [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl01&from=now-15m&to=now&refresh=10s) — scripti başlatınca aç; deney ~2 dk sürer (giriş: admin / ladder)
+- "Hazır pod adresi (endpoint) sayısı" → uç (a) boyunca **1'de kalır**: PDB tahliyeyi reddediyor, kimse ölmüyor. Uç (b)'de pod zorla silinince hazır adres kalmaz — çizgi **kesilir** (boşluk = 0 hazır adres) ve yeni pod hazır olunca 1'e döner.
+- "Pod durumları" → zorla silmeden hemen sonra kısa bir `Pending` katmanı: yeni pod başka bir node'da açılıyor. Birkaç saniye sürerse örneklemeye yakalanmayabilir; o zaman yukarıdaki boşluğa bak.
+- "Dönen durum kodları" (k6) → boşluğun olduğu anda `503` (ingress: gönderilecek pod yok); ardından `302`'nin yerini `404` alır — yeni pod'un belleği boş (P01-01).
+- "İstek / saniye (durum koduna göre)" (App RED) → `503` **görmezsin**: kesintiyi uygulama değil ingress yaşadı, uygulama yalnızca sonrasındaki `404`'leri sayar. İki panel arasındaki fark aradaki katmandır; bkz. [Grafana'yı okumak](../README.md#grafanayı-okumak).
+
 **Nerede çözülüyor:** 02 (3 replika + anti-affinity). PDB'nin kendisi 02'de anlam kazanır.
 
 ---
@@ -156,11 +179,15 @@ tuttu: kimse ölmedi — ama node'a da dokunamadın.
 2. Uzun sürüm: `DURATION=240s URL_SIZE=8000 make repro P=P01-04` → OOMKilled (P00-08'in aynısı, 256Mi limitte)
 
 **Ölçüm notu:** "Öncesi/sonrası heap" ölçmek yanıltır — süreç test sırasında OOM olup yeniden
-doğarsa son ölçüm sıfırdan başlar ve *büyüme yok* gibi görünür (ilk denemede tam olarak bu oldu,
-script NOT-REPRODUCED verdi). Bu yüzden pencere içindeki **tepe** değere ve `OOMKilled` kanıtına
-bakıyoruz. Aynı tuzağa P00-08'de de düşmüştük: **anlık ölçüm, ölüp dirilen bir süreci göremez.**
+doğarsa son ölçüm sıfırdan başlar, *büyüme yok* gibi görünür ve hüküm yanlış negatif olur. Bu yüzden
+pencere içindeki **tepe** değere ve `OOMKilled` kanıtına bakıyoruz. P00-08'deki örnekleme dersiyle aynı
+kök: **anlık ölçüm, ölüp dirilen bir süreci göremez.**
 
-**Grafana:** `01 · Pods & Resources` → "Heap alloc", "Bellek working set" (limit çizgisiyle).
+**Grafana'da gör:** [`01 · Pods & Resources`](http://grafana.localtest.me/d/ladder-pods?var-level=lvl01&from=now-15m&to=now&refresh=10s) ve [`03 · App Business`](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl01&from=now-15m&to=now&refresh=10s) — scripti başlatınca aç; yük 90 sn sürer (giriş: admin / ladder)
+- "Heap bellek (Go)" → yük boyunca **monoton** tırmanır, yük bitince de inmez: store hiçbir şeyi bırakmıyor. 00'da bu panel boştu — eğriyi çarpmadan önce görmek 01'in kazancı.
+- "Bellek kullanımı" → heap'i izleyerek `sınır: …` çizgisine (256 MiB) doğru tırmanır. Uzun sürümde (`DURATION=240s URL_SIZE=8000`) konteyner limite çarpar ve aynı dashboard'daki "Son sonlanma nedeni" panelinde `OOMKilled` belirir (örnekleme yüzünden çizgi limite değmeden kesilebilir — P00-08).
+- "Kayıtlı link sayısı (pod'a göre)" → heap ile aynı biçimde tırmanır: bellek = link sayısı × link boyutu.
+
 **Nerede çözülüyor:** 02 (durum DB'de) · 03 (bounded LRU). 01'in kazancı: eğriyi görüp **alarm
 yazabilmek** — tavan aynı yerde ama artık çarpmadan önce haberin oluyor.
 
@@ -177,7 +204,10 @@ replika sayısıyla çarpılır. [Topic · Konu: Dağıtık durum, hız sınırl
 1. `CONFIRM=1 make repro P=P01-05` — limiti 50 rps'e çeker, önce 1 pod sonra 3 pod ile aynı yükü verir
 2. Kabul edilen istek sayısını karşılaştırır (beklenen: ~3 kat)
 
-**Grafana:** `10 · Rate limit` → "allow by pod" — üç ayrı kova, üç ayrı sayaç.
+**Grafana'da gör:** [`10 · Rate limit`](http://grafana.localtest.me/d/ladder-ratelimit?var-level=lvl01&from=now-15m&to=now&refresh=10s) — scripti başlatınca aç; iki faz 20'şer sn, panellerin 1 dk'lık ortalaması yüzünden geçiş yumuşak görünür (giriş: admin / ladder)
+- "İzin verilen (pod'a göre)" → ilk fazda (1 pod) **tek** çizgi, limit civarında (~50/s); ikinci fazda (3 pod) **üç ayrı** çizgi, her biri yine limit civarında: üç ayrı kova, üç ayrı sayaç, toplam ~3 katı.
+- "Kararlar (anahtar türüne göre)" → `ip allow` ikinci fazda yaklaşık üç katına çıkar; yük aynı, değişen yalnızca pod sayısı.
+
 **Nerede çözülüyor:** 08 (Redis'te Lua ile atomik, paylaşılan limiter). Orada da yeni bir sorun
 doğacak: limiter'ın kendi bağımlılığı düşerse fail-open mı fail-closed mı (P08-01)?
 
@@ -196,7 +226,11 @@ IP, tenant id, user id) label olamaz. [Topic · Konu: Kardinalite]
    `prometheus_tsdb_head_series` farkını basar; sonra tuzağı kapatır
 3. Route şablonunun (`/{code}`) neden tek bir seri ürettiğini `internal/httpapi/middleware.go:routeOf`'ta gör
 
-**Grafana:** `02 · App RED` → "rps by route" panelinde tek çizgi yerine yüzlerce seri.
+**Grafana'da gör:** [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl01&from=now-15m&to=now&refresh=10s) — script 400 kodu ziyaret ederken aç (giriş: admin / ladder)
+- "İstek / saniye (uç noktaya göre)" → **yine birkaç çizgi** (`/{code}`, `/api/links` …): panel `sum by (route)` ile topladığı için `short_code` label'ı ekranda eriyip gider. Patlama panelde değil, altındaki seri sayısında — dashboard'a bakarak kardinaliteyi göremezsin.
+- Explore'da: `count(count by (short_code) (http_requests_total{namespace="lvl01"}))` → tuzak açıkken ziyaret edilen kod sayısı kadar (yüzlerce) çıkar; tuzak kapanıp pod yenilenince düşer.
+- Explore'da: `prometheus_tsdb_head_series` → aynı anda yüzlerce seri **basamak** yapar ve tuzak kapansa da hemen inmez: Prometheus bu serileri belleğinde bir süre daha taşır.
+
 **Düzeltme:** Tekil kimlikler metriğe değil **log'a** ve **trace'e** gider (11'de exemplar ile
 metrikten trace'e atlayacağız — kardinalite ödemeden).
 
@@ -216,8 +250,8 @@ Yük artışı kendi kendine bir **kesintiye** dönüşür. [Topic · Konu: Prob
 3. Birim test karşılığı: `internal/httpapi/trap_test.go` — tuzak kapalıyken `/healthz` 200, açıkken 429
 
 **Ölçüm notu:** Yük, probe'un **toleransından uzun** sürmeli. Bu deployment'ta liveness
-`failureThreshold: 6 × periodSeconds: 10` = 60 sn tolerans; ilk denemede yükü tam 60 sn verdiğimiz
-için restart olmadı ve script NOT-REPRODUCED dedi. Tolerans, tasarımın parçasıdır: probe'un ne
+`failureThreshold: 6 × periodSeconds: 10` = 60 sn tolerans; tam 60 sn'lik bir yük restart üretmez ve
+hüküm yanlış negatif olur, bu yüzden yük 150 sn sürer. Tolerans, tasarımın parçasıdır: probe'un ne
 kadar sabırlı olduğunu bilmeden "probe çalışıyor mu?" sorusuna cevap veremezsin.
 Ayrıca readiness de aynı kovadan içer: pod daha restart olmadan **Endpoints'ten düşer**.
 
@@ -225,10 +259,15 @@ Ayrıca readiness de aynı kovadan içer: pod daha restart olmadan **Endpoints't
 Dikkat: baskın etki **restart değil, readiness**. Pod daha ölmeden Endpoints'ten düşüyor — yani
 ingress ona trafik göndermeyi bırakıyor. Tek replikada bu doğrudan **kesinti** demek; N replikada
 ise düşen pod'un yükü diğerlerine biner, onların da probe'ları düşer: **kaskad**. Liveness'ın restart
-üretmesi için 6 ardışık hata (60 sn) gerekiyordu — yani en görünür belirti (restart) aslında en
+üretmesi için 6 ardışık hata (60 sn) gerekir — yani en görünür belirti (restart) aslında en
 *geç* gelen belirti. "Restart yok, demek ki sorun yok" demek bu yüzden yanlış.
 
-**Grafana:** `01 · Pods & Resources` → "Restart sayısı" ve **"hazır endpoint sayısı"**; `10 · Rate limit` → "reject/s".
+**Grafana'da gör:** [`01 · Pods & Resources`](http://grafana.localtest.me/d/ladder-pods?var-level=lvl01&from=now-15m&to=now&refresh=10s), [`10 · Rate limit`](http://grafana.localtest.me/d/ladder-ratelimit?var-level=lvl01&from=now-15m&to=now&refresh=10s) ve [`15 · k6`](http://grafana.localtest.me/d/ladder-k6?var-level=lvl01&from=now-15m&to=now&refresh=10s) — scripti başlatınca aç; yük 150 sn sürer (giriş: admin / ladder)
+- "Hazır pod adresi (endpoint) sayısı" → yük boyunca 1 ile boşluk arasında **kesik kesik** gider: readiness düştükçe pod Endpoints'ten çıkıyor (ölçülen tur: 77 readiness olayı). Tek replikada her boşluk bir kesinti.
+- "Yeniden başlatma sayısı" → çoğu turda **kıpırdamaz** (ölçülen tur: restart 0): liveness'ın 60 sn toleransı var. En görünür belirti en geç gelen belirtidir — "restart yok" sorun yok demek değil.
+- "Reddedilen / sn" → yük boyunca yüksek: limit 30 rps'e çekildi, üstü reddediliyor.
+- "Dönen durum kodları" (k6) → `429` baskın; pod Endpoints'ten düştüğü anlarda `503` (ingress: hazır pod yok). Kodların anlamı: [Grafana'yı okumak](../README.md#grafanayı-okumak).
+
 **Düzeltme (varsayılan):** Sağlık uçları zincirin dışında. Liveness yalnızca "süreç kurtarılamaz mı?"
 sorusunu sorar; **bağımlılık kontrolü liveness'a girmez** — aynı tuzağın büyük hâli 10'da (P10-02).
 
@@ -245,7 +284,11 @@ pod restart olunca tüm tıklamalar sıfırlanıyor.
 1. `CONFIRM=1 make repro P=P01-08` — 300 tıklama yapar, sayacı okur, hot-key yükünde p99'u ölçer,
    pod'u yeniden başlatır ve sayacın sıfırlandığını gösterir
 
-**Grafana:** `02 · App RED` → "p99 by route" (`/{code}`); `03 · App Business` → "redirect ok/s".
+**Grafana'da gör:** [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl01&from=now-15m&to=now&refresh=10s) ve [`03 · App Business`](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl01&from=now-15m&to=now&refresh=10s) — scripti başlatınca aç; hot-key yükü 30 sn sürer (giriş: admin / ladder)
+- "p99 süre (uç noktaya göre)" → hot-key yükü sırasında `/{code}` çizgisi yükselir: her redirect, yanıt dönmeden önce aynı sayaç kilidini bekliyor.
+- "Başarılı yönlendirme / sn" → 300 tıklama ve hot-key yükü burada görünür — Prometheus bu tıklamaları hatırlıyor; uygulamanın kendi `clicks` alanı ise restartta link ile birlikte yok oluyor (script sonunda `restart sonrası tıklama: link yok`).
+- "Kayıtlı link sayısı (pod'a göre)" → restartta eski pod'un çizgisi biter, yenisi 0'dan başlar: sayaç da link de aynı bellekteydi.
+
 **Nerede çözülüyor:** 05 (bounded kuyruk + batch writer ile istek yolundan çıkar) · 06 (olay akışı
 ile dayanıklı olur). Uyarı: 02'de bu mutex bir **DB satır kilidine** dönüşecek ve hot link'te
 redirect gecikmesini doğrudan belirleyecek (P02-08).
@@ -271,17 +314,17 @@ Elle denemeye değer:
 
 | Dashboard | Durum | Neden |
 |---|---|---|
-| `00 · Overview` | **Dolu** | Artık availability ve p99 da hesaplanabiliyor |
-| `01 · Pods & Resources` | **Dolu** | cAdvisor + KSM + **Go runtime** (goroutine, heap, GC) |
-| `02 · App RED` | **Dolu** ✨ | 00'da boştu: `/metrics` yoktu |
-| `03 · App Business` | **Dolu** ✨ | `links_total`, `redirect_*`, `create_*`, `create_rejected_unsafe_*` |
-| `10 · Rate limit` | **Dolu** (kısmen) | Süreç içi limiter; `key_type="ip"` tek tür |
-| `15 · k6` | Dolu | Client tarafı |
-| `04 · Cache` | Boş | Cache yok (03) |
-| `05 · Postgres` · `06 · Redis` · `07 · Analytics` · `08 · Stream` | Boş | O bileşenler yok |
-| `09 · Autoscaling` | Boş | HPA yok (07) |
-| `11 · Resilience` · `12 · SLO` · `13 · Rollout` | Boş | 10/11/12'de gelir |
-| `14 · Security` | Kısmen | `create_rejected_unsafe_total` dolu; 401/403 yok (13) |
+| [`00 · Overview`](http://grafana.localtest.me/d/ladder-overview?var-level=lvl01&from=now-15m&to=now) | **Dolu** | Artık availability ve p99 da hesaplanabiliyor |
+| [`01 · Pods & Resources`](http://grafana.localtest.me/d/ladder-pods?var-level=lvl01&from=now-15m&to=now) | **Dolu** | cAdvisor + KSM + **Go runtime** (goroutine, heap, GC) |
+| [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl01&from=now-15m&to=now) | **Dolu** ✨ | 00'da boştu: `/metrics` yoktu |
+| [`03 · App Business`](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl01&from=now-15m&to=now) | **Dolu** ✨ | `links_total`, `redirect_*`, `create_*`, `create_rejected_unsafe_*` |
+| [`10 · Rate limit`](http://grafana.localtest.me/d/ladder-ratelimit?var-level=lvl01&from=now-15m&to=now) | **Dolu** (kısmen) | Süreç içi limiter; `key_type="ip"` tek tür |
+| [`15 · k6`](http://grafana.localtest.me/d/ladder-k6?var-level=lvl01&from=now-15m&to=now) | Dolu | Client tarafı |
+| [`04 · Cache`](http://grafana.localtest.me/d/ladder-cache?var-level=lvl01&from=now-15m&to=now) | Boş | Cache yok (03) |
+| [`05 · Postgres`](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl01&from=now-15m&to=now) · [`06 · Redis`](http://grafana.localtest.me/d/ladder-redis?var-level=lvl01&from=now-15m&to=now) · [`07 · Analytics`](http://grafana.localtest.me/d/ladder-analytics?var-level=lvl01&from=now-15m&to=now) · [`08 · Stream`](http://grafana.localtest.me/d/ladder-stream?var-level=lvl01&from=now-15m&to=now) | Boş | O bileşenler yok |
+| [`09 · Autoscaling`](http://grafana.localtest.me/d/ladder-autoscaling?var-level=lvl01&from=now-15m&to=now) | Boş | HPA yok (07) |
+| [`11 · Resilience`](http://grafana.localtest.me/d/ladder-resilience?var-level=lvl01&from=now-15m&to=now) · [`12 · SLO`](http://grafana.localtest.me/d/ladder-slo?var-level=lvl01&from=now-15m&to=now) · [`13 · Rollout`](http://grafana.localtest.me/d/ladder-rollout?var-level=lvl01&from=now-15m&to=now) | Boş | 10/11/12'de gelir |
+| [`14 · Security`](http://grafana.localtest.me/d/ladder-security?var-level=lvl01&from=now-15m&to=now) | Kısmen | `create_rejected_unsafe_total` dolu; 401/403 yok (13) |
 
 Not: `Pods & Resources` → "CPU throttling" paneli bu ortamda **boş kalır** — kind + Docker Desktop
 (cgroup v1) cAdvisor'ı `container_cpu_cfs_throttled_seconds_total` yayınlamıyor. Ortam sınırı,

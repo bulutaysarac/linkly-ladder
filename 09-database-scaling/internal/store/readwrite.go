@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -93,10 +94,14 @@ func (rw *ReadWrite) Get(ctx context.Context, code string) (*Link, error) {
 	l, err := src.Get(ctx, code)
 	// KENDİ YAZDIĞINI OKUYAMAMA, tam burada ölçülür: okuma REPLİKAYA gitti, satır YOK ve o kodu
 	// az önce biz yazdık. Bu üçü aynı anda doğruysa kullanıcı 404 aldı — sistem "çalışıyor"du.
-	// Sayacı burada artırmak, ihlali sunucu tarafında GÖRÜNÜR kılar; daha önce yalnızca k6
-	// tarafında sayılıyordu ve `ryw_violations_total` hiçbir zaman artmadığı için ölçüm
-	// scriptleri 0'ı "sorun yok" diye okuyordu.
-	if err != nil && src != rw.primary && rw.recent.WroteRecently(code, rywDetectWindow) {
+	// Sayacın sunucu tarafında olması, ihlali istemcinin (k6) raporundan bağımsız GÖRÜNÜR kılar.
+	// YALNIZCA "YOK" CEVABI İHLALDİR: replikadan gelen zaman aşımı ya da bağlantı hatası, replikanın
+	// YAVAŞ olduğunu söyler, BAYAT olduğunu değil. Onu da saymak, kimsenin 404 görmediği bir
+	// koşuda "replika geçmişten okuyor" raporlatırdı (P09-01). Yavaş replika ile bayat replika
+	// farklı arızalardır.
+	// EN: only "not found" is a read-your-writes violation. A timeout from the replica means it is
+	// SLOW, not STALE; counting it would report stale reads that never happened.
+	if errors.Is(err, ErrNotFound) && src != rw.primary && rw.recent.WroteRecently(code, rywDetectWindow) {
 		rw.m.RYWViolations.Inc()
 	}
 	return l, err

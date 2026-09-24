@@ -36,7 +36,7 @@ step "3 tüketici ile AYNI yük"
 three=$(measure 3)
 active=$(promq "count(count by (pod) (rate(consumer_records_total{namespace=\"$NS\",result=\"ok\"}[2m]) > 0))")
 note "3 replika → tepe işleme hızı $(awk -v v="$three" 'BEGIN{printf "%.0f", v}') kayıt/s · gerçekten iş yapan pod: ${active%%.*}"
-grafana_hint "08 · Stream → 'consumer lag by partition' + 'consumer commit/s & pods'"
+grafana_hint "08 · Stream → 'Tüketici gecikmesi (bölüme göre)' + 'Onaylama / sn ve tüketici pod sayısı'"
 note "Partition sayısı tüketici paralelliğinin TAVANIDIR. ${parts:-1} partition ile 3 pod açmak,"
 note "2 pod'u boşta oturtmak demektir — üstelik onlar da kaynak tüketir ve 'ölçekledik' yanılsaması yaratır."
 note "Çözüm: partition sayısını artır (rpk topic add-partitions clicks -n 6)."

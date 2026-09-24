@@ -18,14 +18,14 @@ apply_one() {
 # Chaos nesnesini silerken FINALIZER'A TAKILMA.
 # EN: Chaos Mesh puts a finalizer on every chaos object; deleting it makes the controller ask the
 #     chaos-daemon on each target pod to undo the injection. If that daemon is unhealthy, the
-#     finalizer never completes and `kubectl delete` blocks FOREVER — in this ladder a cleanup step
-#     hung for 19 minutes and stalled the whole verification round without printing anything.
+#     finalizer never completes and `kubectl delete` blocks FOREVER — the cleanup step hangs
+#     without printing anything and everything queued behind it stalls.
 #     Delete without waiting, then verify; if the object is still there, drop the finalizer by hand
 #     and say so. A cleanup that can hang is worse than a cleanup that can fail loudly.
 # TR: Chaos Mesh her chaos nesnesine bir finalizer koyar; silmek, controller'ın her hedef pod'daki
 #     chaos-daemon'dan enjeksiyonu geri almasını istemesi demektir. Daemon sağlıksızsa finalizer
-#     asla tamamlanmaz ve `kubectl delete` SONSUZA KADAR bekler — bu merdivende bir temizlik adımı
-#     19 dakika asılı kalıp hiçbir şey basmadan bütün doğrulama turunu durdurdu. Beklemeden sil,
+#     asla tamamlanmaz ve `kubectl delete` SONSUZA KADAR bekler — temizlik adımı hiçbir şey
+#     basmadan asılı kalır, arkasında sıradaki her şey durur. Beklemeden sil,
 #     sonra DOĞRULA; nesne hâlâ duruyorsa finalizer'ı elle düşür ve bunu söyle.
 #     Asılı kalabilen bir temizlik, yüksek sesle başarısız olan bir temizlikten kötüdür.
 delete_one() {

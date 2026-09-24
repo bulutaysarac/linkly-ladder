@@ -149,8 +149,8 @@ func (a *API) handleGet(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleDelete(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := a.dbCtx(r)
 	defer cancel()
-	// NOT (ölçüm dersi): burada bir zamanlar `defer time.Sleep(...)` duruyordu ve "DB yazımı ile
-	// geçersiz kılma arasındaki pencereyi büyütüyorum" diye yazıyordu. Büyütmüyordu: defer,
+	// NOT (ölçüm dersi): cache-aside yarışının penceresi BURADA büyütülmez. Buraya konan bir
+	// `defer time.Sleep(...)` "DB yazımı ile geçersiz kılma arasındaki pencereyi" büyütmez: defer,
 	// fonksiyon DÖNERKEN çalışır — yani silme de geçersiz kılma da çoktan bitmiş olur. Üstelik o
 	// pencere doğru pencere de değil: orada anahtar HÂLÂ önbellektedir, okuyanlar bayat değeri
 	// zaten hit olarak alır ve geçersiz kılma sonrası düzelir. KALICI bayatlık ters yönden gelir:

@@ -133,8 +133,21 @@ func runMigrations(cfg config.Config, log *slog.Logger) error {
 	if err := goose.SetDialect("postgres"); err != nil {
 		return err
 	}
+	// ÖNCE/SONRA SÜRÜMÜNÜ YAZ. "migration koşuluyor" satırı, yapacak işi olmayan (şema zaten
+	// hedefte) bir pod'da da basılır; bu satırları sayan bir ölçü, her pod bir no-op koşmuşken
+	// "iş N kez yapıldı" der. from=1 to=2 diyen pod işi GERÇEKTEN yaptığını sanıyor;
+	// birden fazla pod bunu diyorsa aynı tek seferlik iş birden fazla kez koşmuştur (P02-07).
+	// EN: the "migration running" line is printed by pods that have nothing to do, so counting those
+	// lines proves no race. from/to shows who actually applied something.
 	log.Info("migration koşuluyor", "target", cfg.MigrateTarget)
-	return goose.UpTo(sqlDB, "migrations", cfg.MigrateTarget)
+	from, _ := goose.GetDBVersion(sqlDB)
+	start := time.Now()
+	if err := goose.UpTo(sqlDB, "migrations", cfg.MigrateTarget); err != nil {
+		return err
+	}
+	to, _ := goose.GetDBVersion(sqlDB)
+	log.Info("migration bitti", "from", from, "to", to, "target", cfg.MigrateTarget, "sure_ms", time.Since(start).Milliseconds())
+	return nil
 }
 
 // waitForSchema — şema gelene kadar bekle (migration Job'ı henüz bitmemiş olabilir).

@@ -34,7 +34,7 @@ wait $kpid || true
 e5=$(k6_5xx)
 grafana_hint "01 · Pods & Resources → 'hazır endpoint sayısı' (sıfıra iniyor) · 02 · App RED → 5xx"
 note "DB kesintisi sırasında EN DÜŞÜK hazır endpoint sayısı: $min_ep · sıfırda geçen süre: ~${zero_seconds} sn · k6 5xx: $e5"
-note "Karşılaştır: P02-03'te (tuzak KAPALI) endpoint'ler 3'te kalıyordu — aynı DB arızası, farklı yıkım."
+note "Karşılaştır: P02-03'te (tuzak KAPALI) endpoint'ler 3'te kalır — aynı DB arızası, farklı yıkım."
 note "Kural: readiness 'BEN hazır mıyım?' sorusudur. 'Bağımlılığım iyi mi?' sorusunun cevabı METRİKTİR,"
 note "ve buna verilecek tepki devre kesici/degrade moddur (10), pod'u trafikten düşürmek değil."
 { (( min_ep == 0 )) || (( e5 > 0 )); } \

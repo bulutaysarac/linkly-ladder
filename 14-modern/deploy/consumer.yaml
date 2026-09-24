@@ -61,16 +61,16 @@ spec:
               value: "10"          # kendi havuzu: uygulamanınkinden AYRI ve daha küçük
             - name: SHUTDOWN_GRACE
               value: "20s"
-            # TRAP'ler varsayılan kapalı: TRAP_COMMIT_BEFORE_WRITE · TRAP_NO_DLQ
+            # TRAP'ler varsayılan kapalı: TRAP_COMMIT_BEFORE_WRITE · TRAP_NO_DLQ · TRAP_COMMIT_DELAY_MS
           # KONTEYNER SERTLEŞTİRME (P13-08).
-          # EN: the level claimed "container hardening" and shipped no securityContext at all —
-          #     P13-08 measured it and said so. distroless already gives a small attack surface;
+          # EN: "container hardening" without a securityContext is only a word, and P13-08
+          #     measures exactly that. distroless already gives a small attack surface;
           #     this adds the kernel-level half: no privilege escalation, no capabilities, a
           #     read-only root filesystem and a non-root UID that Kubernetes ENFORCES rather than
           #     trusting the image to have set. "The image runs as nonroot" is a claim about the
           #     image; runAsNonRoot is a claim the API server checks.
-          # TR: seviye "konteyner sertleştirme" diyordu ve hiç securityContext göndermiyordu —
-          #     P13-08 bunu ÖLÇÜP söyledi. distroless zaten saldırı yüzeyini küçültüyor; bu,
+          # TR: securityContext olmadan "konteyner sertleştirme" yalnızca bir sözdür ve P13-08 tam
+          #     olarak bunu ÖLÇER. distroless zaten saldırı yüzeyini küçültüyor; bu,
           #     çekirdek tarafındaki yarısını ekliyor: yetki yükseltme yok, capability yok,
           #     salt-okunur kök dosya sistemi ve imajın ayarladığına GÜVENMEK yerine Kubernetes'in
           #     DOĞRULADIĞI bir non-root UID. "İmaj nonroot koşuyor" imaj hakkında bir iddiadır;

@@ -1,0 +1,51 @@
+# ingress-nginx'in X-Forwarded-For davranışı — Ingress ANNOTASYONU DEĞİL, controller ConfigMap'i.
+#
+# EN: There is no `nginx.ingress.kubernetes.io/use-forwarded-headers` Ingress annotation; the
+#     setting lives only here, in the controller ConfigMap. With the defaults ingress-nginx
+#     REPLACES X-Forwarded-For with the TCP peer, so every address a client (k6's abuser.js) puts
+#     in the header is thrown away before the app sees it: P08-03's TRAP_TRUST_ANY_XFF would have
+#     nothing to trust and every k6 client would land in one per-IP bucket.
+#     What the app expects (internal/httpapi/clientip.go, TRUSTED_PROXY_HOPS=1): the client's list
+#     arrives intact and each proxy of ours APPENDS the address it saw, so counting hops from the
+#     right finds the last address a proxy of ours vouches for. That is
+#     `compute-full-forwarded-for`; the controller template only honours it together with
+#     `use-forwarded-headers` (checked in controller v1.15.1's nginx.tmpl:
+#     `{{ if and $cfg.UseForwardedHeaders $cfg.ComputeFullForwardedFor }}`).
+#     `use-forwarded-headers` also switches on nginx's realip module, which rewrites nginx's OWN
+#     client address — the key of the Ingress `limit-rps` — from the header. Its default trust
+#     list is 0.0.0.0/0, i.e. the LEFTMOST entry, which the client writes: the edge limit would
+#     become opt-in exactly like TRAP_TRUST_ANY_XFF. `proxy-real-ip-cidr` limits trust to private
+#     networks: nginx walks the list from the right and stops at the first address that is not
+#     one of "ours", so an entry a client prepends is never reached.
+#     In this lab the only thing on a private network in front of the ingress is the host running
+#     k6 (the kind gateway, e.g. 172.19.0.1), which therefore plays the role of a trusted L7 load
+#     balancer: P08-03/P08-06 use that to give each simulated client its own address.
+# TR: `nginx.ingress.kubernetes.io/use-forwarded-headers` diye bir Ingress annotasyonu YOK; ayar
+#     yalnızca burada, controller ConfigMap'inde yaşar. Varsayılanlarla ingress-nginx
+#     X-Forwarded-For'u TCP eşinin adresiyle DEĞİŞTİRİR; yani bir client'ın (k6'nın abuser.js'i)
+#     başlığa yazdığı her adres uygulama görmeden çöpe gider: P08-03'ün TRAP_TRUST_ANY_XFF'inin
+#     güvenecek bir şeyi kalmaz ve bütün k6 client'ları tek bir IP kovasına düşer.
+#     Uygulamanın beklediği (internal/httpapi/clientip.go, TRUSTED_PROXY_HOPS=1): client'ın listesi
+#     bozulmadan gelir ve BİZİM her proxy'miz gördüğü adresi SONA EKLER; sağdan hop sayarak,
+#     proxy'lerimizden birinin kefil olduğu son adres bulunur. Bunun adı
+#     `compute-full-forwarded-for`; controller şablonu onu yalnızca `use-forwarded-headers` ile
+#     BİRLİKTE uygular (controller v1.15.1 nginx.tmpl'de kontrol edildi).
+#     `use-forwarded-headers` ayrıca nginx'in realip modülünü açar ve nginx'in KENDİ client
+#     adresini — Ingress `limit-rps`inin anahtarını — başlıktan yeniden yazar. Varsayılan güven
+#     listesi 0.0.0.0/0, yani EN SOLDAKİ girdi, ki onu client yazar: kenardaki limit de
+#     TRAP_TRUST_ANY_XFF gibi isteğe bağlı olurdu. `proxy-real-ip-cidr` güveni özel ağlarla
+#     sınırlar: nginx listeyi sağdan okur ve "bizden" olmayan ilk adreste durur; client'ın başa
+#     eklediği girdiye hiç ulaşılmaz.
+#     Bu laboratuvarda ingress'in önünde özel ağda duran tek şey k6'yı koşan makine (kind ağ
+#     geçidi, ör. 172.19.0.1); o yüzden güvenilir bir L7 yük dengeleyici rolünü o oynuyor:
+#     P08-03/P08-06 her sanal client'a kendi adresini bununla veriyor.
+# [Topic · Konu: Güven sınırı, X-Forwarded-For]
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ingress-nginx-controller
+  namespace: ingress-nginx
+data:
+  use-forwarded-headers: "true"
+  compute-full-forwarded-for: "true"
+  proxy-real-ip-cidr: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8"

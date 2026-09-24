@@ -1,5 +1,16 @@
 # 00 — naive · "Tek dosya, tek pod, bellek"
 
+> **Bu seviyede ne yaşayacaksın?**
+> - 50 eşzamanlı kullanıcıda sürecin `concurrent map writes` ile çökmesi (P00-01) ve her çöküşte bütün linklerin gitmesi (P00-02)
+> - İkinci bir replika açınca linklerin rastgele 404 vermesi (P00-03) ve her dağıtımda bir hata dalgası (P00-04)
+> - 4 karakterlik kodların çakışması (P00-05); `javascript:` linklerinin, iç ağ adreslerinin ve 5 MB'lık gövdelerin kabul edilmesi (P00-06)
+> - Tek bir yavaş istemcinin bağlantıyı sonsuza kadar tutması — slowloris (P00-07) ve belleğin sınırsız büyüyüp OOMKilled olması (P00-08)
+> - Bütün bunların hiçbir uygulama metriğinde görünmemesi (P00-09) ve 301'in tıklamaları tarayıcıda yutması (P00-10)
+>
+> **Bu seviye olmasa ne olur?** Merdivenin geri kalanındaki her parça — kilit, probe, veritabanı, önbellek, kuyruk — bir cevaptır; bu seviye soruları üretir. Soruyu yaşamadan öğrenilen bir çözüm ezberdir: neyi önlediğini hiç görmemiş olursun.
+>
+> **Yeni gelen teknolojiler:** Go `net/http`, Kubernetes (Deployment, Service, Ingress), ingress-nginx, k6, Prometheus + Grafana — bu seviyede yalnızca konteyner düzeyinde (cAdvisor, kube-state-metrics) ([her biri tek cümleyle](../README.md#kullanılan-teknolojiler)).
+
 ## 1. Bu seviye ne?
 
 Bir URL kısaltıcının akla gelen en kısa hali: tek `main.go`, bellekte bir `map`, korumasız. Kubernetes'te
@@ -50,16 +61,16 @@ Bu seviyenin farkları: `GET /{code}` **301** döner (01'den itibaren 302), `X-T
 
 | ID | Sorun | Reproduce | Grafana'da | Çözüm |
 |---|---|---|---|---|
-| P00-01 | Eşzamanlı map yazımı → süreç çöker | `make repro P=P00-01` | Pods & Resources → Restart / Son sonlanma nedeni | 01 |
-| P00-02 | Restart = tüm linkler kaybolur | `CONFIRM=1 make repro P=P00-02` | App Business → links_total (sıfırlanır) | 02 |
-| P00-03 | `replicas>1` → rastgele 404 | `CONFIRM=1 make repro P=P00-03` | App Business → redirect 404 by pod | 02 |
-| P00-04 | Rollout sırasında hata dalgası | `make repro P=P00-04` | k6 → failed rate; App RED → 5xx | 01 |
-| P00-05 | 4 karakter kod, çakışma kontrolü yok | `make repro P=P00-05` | (görünmez — metrik yok) | 01 |
-| P00-06 | Giriş doğrulaması yok | `make repro P=P00-06` | Security → unsafe reddi (hep 0) | 01 |
-| P00-07 | Sunucu timeout'u yok (slowloris) | `make repro P=P00-07` | Pods & Resources → Goroutine (01'de) | 01 |
-| P00-08 | Bellek sınırsız → OOMKilled | `make repro P=P00-08` | Pods & Resources → working set + OOMKilled | 01 (ölçüm) · 02 (asıl) |
-| P00-09 | Gözlemlenebilirlik sıfır | `make repro P=P00-09` | App RED / App Business tamamen boş | 01 |
-| P00-10 | 301 + Cache-Control yok | `make repro P=P00-10` | App Business → redirect ok/s (eksik sayar) | 01 |
+| P00-01 | Eşzamanlı map yazımı → süreç çöker | `make repro P=P00-01` | [01 · Pods & Resources](http://grafana.localtest.me/d/ladder-pods?var-level=lvl00&from=now-15m&to=now&refresh=10s) · [15 · k6](http://grafana.localtest.me/d/ladder-k6?var-level=lvl00&from=now-15m&to=now&refresh=10s) → "Yeniden başlatma sayısı" | 01 |
+| P00-02 | Restart = tüm linkler kaybolur | `CONFIRM=1 make repro P=P00-02` | [01 · Pods & Resources](http://grafana.localtest.me/d/ladder-pods?var-level=lvl00&from=now-15m&to=now&refresh=10s) · [03 · App Business](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl00&from=now-15m&to=now&refresh=10s) → "Bellek kullanımı" | 02 |
+| P00-03 | `replicas>1` → rastgele 404 | `CONFIRM=1 make repro P=P00-03` | [01 · Pods & Resources](http://grafana.localtest.me/d/ladder-pods?var-level=lvl00&from=now-15m&to=now&refresh=10s) · [03 · App Business](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl00&from=now-15m&to=now&refresh=10s) → "Hazır pod adresi (endpoint) sayısı" | 02 |
+| P00-04 | Rollout sırasında hata dalgası | `make repro P=P00-04` | [15 · k6](http://grafana.localtest.me/d/ladder-k6?var-level=lvl00&from=now-15m&to=now&refresh=10s) · [01 · Pods & Resources](http://grafana.localtest.me/d/ladder-pods?var-level=lvl00&from=now-15m&to=now&refresh=10s) → "Dönen durum kodları" | 01 |
+| P00-05 | 4 karakter kod, çakışma kontrolü yok | `make repro P=P00-05` | görünmez — kanıt terminalde ↓ | 01 |
+| P00-06 | Giriş doğrulaması yok | `make repro P=P00-06` | [14 · Security](http://grafana.localtest.me/d/ladder-security?var-level=lvl00&from=now-15m&to=now&refresh=10s) · [01 · Pods & Resources](http://grafana.localtest.me/d/ladder-pods?var-level=lvl00&from=now-15m&to=now&refresh=10s) → "Tehlikeli URL reddi (sebebe göre)" | 01 |
+| P00-07 | Sunucu timeout'u yok (slowloris) | `make repro P=P00-07` | görünmez — kanıt terminalde ↓ | 01 |
+| P00-08 | Bellek sınırsız → OOMKilled | `make repro P=P00-08` | [01 · Pods & Resources](http://grafana.localtest.me/d/ladder-pods?var-level=lvl00&from=now-15m&to=now&refresh=10s) → "Son sonlanma nedeni" | 01 (ölçüm) · 02 (asıl) |
+| P00-09 | Gözlemlenebilirlik sıfır | `make repro P=P00-09` | [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl00&from=now-15m&to=now&refresh=10s) · [03 · App Business](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl00&from=now-15m&to=now&refresh=10s) → "Saniyedeki istek" | 01 |
+| P00-10 | 301 + Cache-Control yok | `make repro P=P00-10` | görünmez — kanıt terminalde ↓ | 01 |
 
 ---
 
@@ -78,8 +89,12 @@ tespit ederse süreci **tümden** öldürür: recover edilemez. [Topic · Konu: 
 5. `kubectl -n lvl00 logs -l app.kubernetes.io/name=linkly --previous | head -20` → `concurrent map writes`
 6. Otomatik: `make repro P=P00-01`
 
-**Grafana:** `01 · Pods & Resources` → "Restart sayısı", "Son sonlanma nedeni" (=`Error`).
-PromQL: `kube_pod_container_status_restarts_total{namespace="lvl00"}`
+**Grafana'da gör:** [`01 · Pods & Resources`](http://grafana.localtest.me/d/ladder-pods?var-level=lvl00&from=now-15m&to=now&refresh=10s) ve [`15 · k6`](http://grafana.localtest.me/d/ladder-k6?var-level=lvl00&from=now-15m&to=now&refresh=10s) — yükü verdikten sonra aç (giriş: admin / ladder)
+- "Yeniden başlatma sayısı" → yükle birlikte **basamak basamak** artar; her basamak bir çöküş.
+- "Son sonlanma nedeni" → `Error`: süreç kendi kendine öldü (`OOMKilled` olsaydı bellek, `Completed` olsaydı dışarıdan kapatma olurdu).
+- "Hazır pod adresi (endpoint) sayısı" → normalde 1; her çöküşte çizgi **kopar** (0'a inmez, boşluk olur): hazır pod kalmayınca sayılacak seri de kalmaz. Boşluk = o anda trafiği alacak pod yok.
+- "Dönen durum kodları" (k6) → `503` (pod yokken ingress'in "servis yok" cevabı) ve `502` (pod istek işlerken öldü) çizgileri, `201`'i (başarılı oluşturma) ezer. Hatalar anında döndüğü için sayıca şişer; bkz. [Grafana'yı okumak](../README.md#grafanayı-okumak).
+- `02 · App RED` bu seviyede **boştur** — 00'ın `/metrics` ucu yok (P00-09). Çöküşü yalnızca dışarıdan görürsün.
 
 **Ölçüm notu:** Script deneye **taze bir pod** ile başlar (`ensure_fresh_pod`). Sebep: pod bir kez
 CrashLoopBackOff'a düştüğünde kubelet'in geri çekilme süresi 5 dakikaya kadar çıkar; o pencerede
@@ -103,8 +118,11 @@ sayaç değil, Go runtime'ın ölüm mesajıdır: `fatal error: concurrent map w
 4. Pod hazır olunca aynı curl → `404`
 5. Otomatik: `CONFIRM=1 make repro P=P00-02`
 
-**Grafana:** `03 · App Business` → "links_total" — 00'da bu panel boş (metrik yok), yani **kaybı ölçemezsin
-bile**. 01'de sayaç görünür ve restartta sıfıra düşer.
+**Grafana'da gör:** [`01 · Pods & Resources`](http://grafana.localtest.me/d/ladder-pods?var-level=lvl00&from=now-15m&to=now&refresh=10s) ve [`03 · App Business`](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl00&from=now-15m&to=now&refresh=10s) — pod'u sildikten sonra aç (giriş: admin / ladder)
+- "Bellek kullanımı" → eski pod'un çizgisi biter, yeni pod adıyla yeni bir çizgi başlar: bellek — ve içindeki bütün linkler — yeni pod'da boş başladı.
+- "Yeniden başlatma sayısı" → **artmaz**: pod yeniden başlatılmadı, yenisiyle değiştirildi; yeni pod'un çizgisi 0'dan başlar. Veri kaybını restart sayacından okuyamazsın.
+- "Kayıtlı link sayısı" → **No data**: 00 bu metriği üretmiyor (P00-09), yani **kaybı ölçemezsin bile**. 01'de sayaç görünür ve restartta dikey olarak sıfıra düşer (P01-01).
+
 **Nerede çözülüyor:** 02 (Postgres). Not: P00-01 ve P00-08 bu sorunu *sürekli* tetikler — çökme ve OOM
 zaten restart demek.
 
@@ -125,10 +143,12 @@ olasılığı 1/N. [Topic · Konu: Yatay ölçekleme, stateless servis]
 
 **Ölçüm notu:** Script ölçekledikten sonra Service endpoint'lerinin gerçekten 3'e çıkmasını bekler.
 Beklemezsen ingress'in upstream listesi birkaç saniye geriden gelir, tüm istekler tek pod'a düşer ve
-sonuç yanlış negatif olur (ilk denemede tam olarak bu oldu: 30 okumada 0 adet 404).
+sonuç yanlış negatif olur: 30 okumada 0 adet 404.
 
-**Grafana:** `03 · App Business` → "redirect 404 by pod" (01+ dolu). 00'da yalnızca ingress'in gördüğü
-404'ler üzerinden dolaylı bakabilirsin.
+**Grafana'da gör:** [`01 · Pods & Resources`](http://grafana.localtest.me/d/ladder-pods?var-level=lvl00&from=now-15m&to=now&refresh=10s) ve [`03 · App Business`](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl00&from=now-15m&to=now&refresh=10s) — script çalışırken ya da hemen sonra aç (giriş: admin / ladder)
+- "Hazır pod adresi (endpoint) sayısı" → 1'den **3**'e çıkar: Service istekleri artık üç ayrı belleğe dağıtıyor. Script bitince eski replika sayısına (1) döner.
+- "404 (pod'a göre)" → **No data**: 00'da redirect metriği yok (P00-09). 404'leri yalnızca scriptin çıktısında görürsün (`60 okumadan 40 tanesi 404`); 01'de (P01-02) aynı panel pod başına ayrı çizgi çizer.
+
 **Nerede çözülüyor:** 02. Bu, "ölçeklenebilirlik" sözünün neden **stateless** ile başladığının kanıtı.
 
 ---
@@ -152,7 +172,12 @@ fırlar ve "rollout mu çökme mi kaybettirdi?" ayırt edilemez. Ayrıca k6'nın
 oranına bakmak yanıltır: rollout'tan sonra gelen **404'ler P00-02'dir** (yeni pod'un belleği boş),
 rollout penceresinin kendisi ise **5xx** üretir. Bu yüzden senaryolar 5xx ve 404'ü ayrı sayar.
 
-**Grafana:** `15 · k6` → "failed rate" tepe yapar; `01 · Pods & Resources` → pod değişimi aynı anda.
+**Grafana'da gör:** [`15 · k6`](http://grafana.localtest.me/d/ladder-k6?var-level=lvl00&from=now-15m&to=now&refresh=10s) ve [`01 · Pods & Resources`](http://grafana.localtest.me/d/ladder-pods?var-level=lvl00&from=now-15m&to=now&refresh=10s) — scripti başlatınca aç; yük yaklaşık 1 dk sürer (giriş: admin / ladder)
+- "Dönen durum kodları" → yük `301` ile başlar; ilk `rollout restart`'tan sonra `301`'in yerini `404` alır — yeni pod'un belleği boş (P00-02, ayrı sorun). Her rollout anında `502`/`503` belirir: bu sorunun kendisi. Diğer çizgilerin yanında çok küçük kaldığı için lejantta `502`'ye (ya da `503`'e) tıklayıp tek başına bak.
+- "Başarısız oran (zaman içinde)" → ilk rollout'ta yükselir ve bir daha inmez: k6 404'ü de hata sayar. Tek başına bu panel iki sorunu karıştırır (bkz. Ölçüm notu).
+- "Bellek kullanımı" → her rollout'ta eski pod'un çizgisi biter, yeni pod adıyla yeni bir çizgi başlar; bu geçişler 15 · k6'daki "Dönen durum kodları" panelinin 5xx anlarıyla üst üste düşer.
+- `02 · App RED` bu seviyede **boştur** (P00-09): 5xx'i yalnızca istemci tarafından görürsün; bkz. [Grafana'yı okumak](../README.md#grafanayı-okumak).
+
 **Nerede çözülüyor:** 01 (probe'lar + `preStop` + `Server.Shutdown` sırası).
 
 ---
@@ -171,12 +196,14 @@ tahmin edilebilir. [Topic · Konu: Anahtar üretimi, doğum günü paradoksu]
 3. Ölçülen tur: **10000 üretim, 9997 benzersiz → 3 çakışma** (beklenen n²/2N = 3.4 ile birebir)
 
 **Ölçüm notu:** Üretim **sıralı** yapılır. Paralel denersen P00-01 devreye girer: süreç çöker, üretim
-durur, map sıfırlanır ve çakışmayı ölçemezsin (ilk denemede 10.000 istekten yalnızca 362'si tamamlandı).
+durur, map sıfırlanır ve çakışmayı ölçemezsin (paralel bir turda 10.000 istekten yalnızca 362'si tamamlanır).
 **Sorunlar birbirini maskeler** — bir katmandaki hata, alttakini görünmez yapar. Bu, merdivenin
 tekrar tekrar karşına çıkacak dersi.
 
-**Grafana:** Görünmez. `03 · App Business` → "create sonuçları" panelinde `collision` serisi olurdu ama
-00'da böyle bir metrik yok — **sessiz veri kaybının en saf örneği**.
+**Grafana'da gör:** Grafana'da görünmez — `03 · App Business` → "create sonuçları" panelinde `collision` serisi olurdu ama 00'da böyle bir metrik yok; çakışma hiçbir katmanda iz bırakmaz — **sessiz veri kaybının en saf örneği**. Kanıt terminalde:
+- `make repro P=P00-05` → `10000 üretim, 9997 benzersiz kod → 3 çakışma` ve ardından çakışan kodun şu an **kime** ait olduğu ("Bu kodu İKİ kullanıcı aldı; kayıtta yalnızca sonuncusu var").
+- `curl -s http://lvl00.localtest.me/api/links/<çakışan-kod>` → yalnızca son yazanın URL'i; ilk kullanıcının linki hata vermeden yok oldu.
+
 **Nerede çözülüyor:** 01 (`crypto/rand`, 7 karakter, `CreateUnique` + retry, `create_total{result="collision"}` sayacı).
 
 ---
@@ -201,8 +228,10 @@ Bu yüzden script uygulamanın kendi davranışını görmek için ingress'i atl
 uygulama 5 MB'ı sorunsuz belleğe alır. **Başkasının verdiği korumaya güvenemezsin** — o katman
 yarın değişir, kaldırılır ya da atlanır (servis-içi çağrı, port-forward, service mesh bypass).
 
-**Grafana:** `14 · Security` → "unsafe URL reddi by reason" — 00'da hep 0, çünkü hiçbir şey reddedilmiyor.
-`01 · Pods & Resources` → büyük gövdede working set sıçraması.
+**Grafana'da gör:** [`14 · Security`](http://grafana.localtest.me/d/ladder-security?var-level=lvl00&from=now-15m&to=now&refresh=10s) ve [`01 · Pods & Resources`](http://grafana.localtest.me/d/ladder-pods?var-level=lvl00&from=now-15m&to=now&refresh=10s) — scripti koştuktan sonra aç (giriş: admin / ladder)
+- "Tehlikeli URL reddi (sebebe göre)" → **No data** (sıfır değil): 00 hiçbir şeyi reddetmiyor, üstelik reddi sayacak metriği de yok (P00-09). 01'de aynı panelde `scheme` ve `private_address` çizgileri belirir.
+- "Bellek kullanımı" → script 5 MB'lık gövdeyi doğrudan pod'a gönderdiği anda çizgi yukarı sıçrar ve eski seviyesine dönmez: uygulama gövdeyi kabul edip map'te sakladı.
+
 **Nerede çözülüyor:** 01 (şema allowlist, host kontrolü, `MaxBytesReader`) · 13 (DNS çözümü ile özel IP reddi).
 Not: Bu bir *azaltma*, eliminasyon değil — 13'te TOCTOU sınırı anlatılıyor.
 
@@ -228,8 +257,9 @@ Apache'deki gibi worker havuzu tükenmesi yok). Gerçek belirti birikmedir: goro
 Bu yüzden test "yavaşladı mı?" diye değil, **"sunucu hiç kapatıyor mu?"** diye sorar — `ReadHeaderTimeout`
 olsaydı saniyeler içinde kapatırdı. Aynı script 01'de NOT-REPRODUCED verir.
 
-**Grafana:** `01 · Pods & Resources` → "Goroutine" (01'den itibaren). 00'da **bu paneli dolduramıyorsun** —
-yani sorunun varlığını sunucu tarafından kanıtlayamıyorsun; bu, P00-09'un pratik sonucu.
+**Grafana'da gör:** Grafana'da görünmez — birikim goroutine ve FD olarak olur; `01 · Pods & Resources` → "Goroutine" paneli 01'den itibaren dolar, 00'da **bu paneli dolduramıyorsun** (`/metrics` yok). Script 300 bağlantıyı yalnızca ~5 sn tuttuğu için bellek çizgisinde de iz kalmaz. Yani sorunun varlığını sunucu tarafından kanıtlayamıyorsun; bu, P00-09'un pratik sonucu. Kanıt terminalde:
+- `make repro P=P00-07` → `Yarım istek 20 sn sonra: sunucu hâlâ sessizce BEKLİYOR (koruma yok)` ve `sunucu yarım bağlantıyı 20 sn boyunca kapatmadı — hiçbir timeout yok, 300 bağlantı birikti`
+
 **Nerede çözülüyor:** 01 (`ReadHeaderTimeout`, `IdleTimeout`, istek başına timeout middleware).
 
 ---
@@ -247,15 +277,18 @@ ve P00-02 gereği tüm linkler gider.
 3. `kubectl -n lvl00 describe pod … | grep -A3 'Last State'` → `OOMKilled`, `Exit Code: 137`
 4. Ölçülen tur: `restart 0 → 3 · son sonlanma: OOMKilled (exit 137)`
 
-**Ölçüm notu 1 (ayrım):** Yine tek VU. Paralel denediğimizde `reason=Error` çıkıyordu — bu **OOM değil,
+**Ölçüm notu 1 (ayrım):** Yine tek VU. Paralel yükte `reason=Error` çıkar — bu **OOM değil,
 P00-01 çökmesi**. Script bu ikisini ayırır: `OOMKilled` → P00-08, `Error` → P00-01 (ve "ölçüm kirlendi" der).
 **Ölçüm notu 2 (örnekleme):** Grafana'daki tepe bellek değeri limitin **altında** görünür (ölçülen turda
 6 MB / 128Mi). Sebep: Prometheus 15 sn'de bir örnekliyor, konteyner iki örnek arasında dolup ölüyor.
 Yani *metrik grafiği olayı kaçırabilir*; asıl kanıt `OOMKilled` + `exit 137`. Örnekleme çözünürlüğünün
 gerçeği gizlemesi 11'de (sampling, exemplar) tekrar karşına çıkacak.
 
-**Grafana:** `01 · Pods & Resources` → "Bellek working set" (limit çizgisiyle birlikte), "Son sonlanma nedeni".
-PromQL: `container_memory_working_set_bytes{namespace="lvl00"}`
+**Grafana'da gör:** [`01 · Pods & Resources`](http://grafana.localtest.me/d/ladder-pods?var-level=lvl00&from=now-15m&to=now&refresh=10s) — scripti başlatınca aç; yük 2 dk sürer (giriş: admin / ladder)
+- "Son sonlanma nedeni" → `<pod> OOMKilled` serisi belirir: konteyneri bellek limiti öldürdü (P00-01'deki `Error` ise sürecin kendi çöküşüydü).
+- "Yeniden başlatma sayısı" → yük boyunca **basamak basamak** artar (ölçülen tur: 0 → 3); her basamak bir OOM ve P00-02 gereği tüm linklerin kaybı.
+- "Bellek kullanımı" → `sınır: …` çizgisi 128 MiB'de düz durur; working set çizgisi ona **değmeyebilir** — konteyner iki örnek arasında dolup ölüyor (ölçülen turda tepe 6 MB göründü, bkz. Ölçüm notu 2). Grafik olayı kaçırabilir; asıl kanıt yukarıdaki iki panel.
+
 **Nerede çözülüyor:** 01 kısmen (ölçüm + `links_total`), asıl 02 (durum DB'de) · 03 (bounded LRU).
 
 ---
@@ -274,7 +307,12 @@ hiçbir şey söylemezler. [Topic · Konu: Gözlemlenebilirlik, RED metrikleri]
 3. Prometheus'ta `http_requests_total{namespace="lvl00"}` → boş sonuç
 4. Grafana → `02 · App RED` ve `03 · App Business` → tüm paneller "No data"
 
-**Grafana:** Boş olmasının **kendisi** kanıt. `01 · Pods & Resources` dolu (cAdvisor), diğerleri boş.
+**Grafana'da gör:** [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl00&from=now-15m&to=now&refresh=10s), [`03 · App Business`](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl00&from=now-15m&to=now&refresh=10s) ve [`01 · Pods & Resources`](http://grafana.localtest.me/d/ladder-pods?var-level=lvl00&from=now-15m&to=now&refresh=10s) — scripti koştuktan sonra aç; boş olmasının **kendisi** kanıt (giriş: admin / ladder)
+- "Saniyedeki istek" → **No data** — oysa script az önce 40 istek gönderdi.
+- "Bulunamayan link / sn (404)" → **No data**: 10 tane 404 ürettin, kaç tane olduğunu Prometheus'a soramıyorsun.
+- "CPU kullanımı (çekirdek)" → **dolu** (cAdvisor): konteyneri dışarıdan görüyorsun. Pod'un çalıştığını söyler; kaç isteğin 404 olduğunu ya da p99'u söylemez — altyapı metriği, uygulama metriği değil.
+- Explore'da: `http_requests_total{namespace="lvl00"}` → boş sonuç: Prometheus'ta bu seviyenin tek bir uygulama serisi yok.
+
 **Nerede çözülüyor:** 01 (Prometheus metrikleri sıfırla pre-register, slog JSON, request-id, ServiceMonitor).
 
 ---
@@ -294,8 +332,10 @@ kalıcıdır" demektir; tarayıcı bunu süresiz saklayabilir ve bir daha sunucu
 4. Chrome'da aynı adresi tekrar aç → hâlâ yönlendirir (Network sekmesinde `(disk cache)`)
 5. `curl -I` ile aynı adres → `404`
 
-**Grafana:** `03 · App Business` → "redirect ok/s" gerçek tıklamanın altında kalır (tarayıcı sunucuya
-uğramıyor). 05'te bu, analitiklerin neden eksik saydığının kökü olarak geri gelir (P05-06).
+**Grafana'da gör:** Grafana'da görünmez — tarayıcı 301'i önbellekten uyguladığında istek sunucuya **hiç uğramaz**; hiçbir sunucu metriği görmediği tıklamayı sayamaz. `03 · App Business` → "redirect ok/s" 00'da zaten boş; 01+'da da gerçek tıklamanın altında kalır. 05'te bu, analitiklerin neden eksik saydığının kökü olarak geri gelir (P05-06). Kanıt terminalde:
+- `make repro P=P00-10` → `GET /<code> → HTTP 301 ; Cache-Control: '<yok>'`
+- `curl -s -o /dev/null -w '%{http_code}\n' http://lvl00.localtest.me/<code>` (DELETE'ten sonra) → `404` — ama Chrome aynı adresi yönlendirmeye devam eder (Network sekmesinde `(disk cache)`).
+
 **Nerede çözülüyor:** 01 (`302` + `Cache-Control: no-store`).
 
 ## 7. Seviye içi alıştırmalar (TRAP_ bayrakları)
@@ -314,12 +354,12 @@ Elle denemeye değer:
 
 | Dashboard | Durum | Neden |
 |---|---|---|
-| `00 · Overview` | Kısmen | Pod/restart satırları dolu; availability/p99 boş (uygulama metriği yok) |
-| `01 · Pods & Resources` | **Dolu** | cAdvisor + kube-state-metrics; Go runtime satırları boş (01'de gelir) |
-| `15 · k6` | **Dolu** | Client tarafı; yükü buradan görürsün — sunucudan değil |
-| `02 · App RED` | Boş | P00-09: `/metrics` yok |
-| `03 · App Business` | Boş | P00-09 |
-| `04 · Cache` … `14 · Security` | Boş | Bu seviyede o bileşenler yok |
+| [`00 · Overview`](http://grafana.localtest.me/d/ladder-overview?var-level=lvl00&from=now-15m&to=now) | Kısmen | Pod/restart satırları dolu; availability/p99 boş (uygulama metriği yok) |
+| [`01 · Pods & Resources`](http://grafana.localtest.me/d/ladder-pods?var-level=lvl00&from=now-15m&to=now) | **Dolu** | cAdvisor + kube-state-metrics; Go runtime satırları boş (01'de gelir) |
+| [`15 · k6`](http://grafana.localtest.me/d/ladder-k6?var-level=lvl00&from=now-15m&to=now) | **Dolu** | Client tarafı; yükü buradan görürsün — sunucudan değil |
+| [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl00&from=now-15m&to=now) | Boş | P00-09: `/metrics` yok |
+| [`03 · App Business`](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl00&from=now-15m&to=now) | Boş | P00-09 |
+| [`04 · Cache`](http://grafana.localtest.me/d/ladder-cache?var-level=lvl00&from=now-15m&to=now) … [`14 · Security`](http://grafana.localtest.me/d/ladder-security?var-level=lvl00&from=now-15m&to=now) | Boş | Bu seviyede o bileşenler yok |
 
 Bu tablo merdivenin ana fikri: **panel boşsa, o sorunu göremezsin; göremediğin sorunu çözemezsin.**
 

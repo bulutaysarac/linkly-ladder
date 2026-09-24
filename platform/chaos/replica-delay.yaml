@@ -8,7 +8,7 @@ spec:
   selector: { namespaces: ["${NS}"], labelSelectors: { cnpg.io/instanceRole: replica } }
   delay: { latency: "3s" }
   # `direction: from` HEDEFSİZ KULLANILAMAZ: webhook "from and both direction cannot be used
-  # when targets is empty" ile reddeder ve chaos hiç uygulanmaz (P09-01 tam burada öldü).
+  # when targets is empty" ile reddeder ve chaos hiç uygulanmaz.
   # `to` + hedefsiz: seçilen pod'un TÜM giden trafiği gecikir. Replika WAL'ı primary'den
   # ÇEKTİĞİ için bu, replikasyonu yavaşlatmanın en basit ve en az varsayımlı yoludur.
   # EN: `direction: from` is invalid without a target — the webhook rejects it and no chaos is

@@ -5,8 +5,8 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # koyarsan koy tek bir çekirdeğin sınırına dayanırsın. Ölçeklenemeyen şey anahtar değil, ERİŞİMDİR.
 #
 # ÖLÇÜM NOTU — neden "Redis CPU'su arttı mı?" diye BAKMIYORUZ:
-# İlk hâl dağıtık yük ile sıcak yükün Redis CPU'sunu kıyaslıyordu. İkisi de AYNI sayıda komut
-# üretir; CPU da doğal olarak aynı çıkar ve script "sorun yok" der. Oysa sorun CPU'nun artması
+# Dağıtık yük ile sıcak yükün Redis CPU'sunu kıyaslamak işe yaramaz: ikisi de AYNI sayıda komut
+# üretir; CPU da doğal olarak aynı çıkar ve hüküm "sorun yok" olur. Oysa sorun CPU'nun artması
 # değil, TAVANIN YERİ: tek anahtarın tavanı tek instance'ın tavanıdır ve sharding onu yükseltmez.
 # Bu yüzden tavanı DOĞRUDAN ölçüyoruz (redis-benchmark) ve uygulamanın ona ne kadar yaklaştığını
 # gösteriyoruz. Ölçemediğin bir sınırı, sınırın KENDİSİNİ ölçerek göster.
@@ -14,7 +14,7 @@ ensure_healthy
 rpod=$(dep_pod app.kubernetes.io/name=redis) || exit 2   # bağımlılık hazır değilse ölçüm anlamsız
 # redis-benchmark'ın ÇIKTISI bir metin değil, bir EKRANDIR: ilerleme satırlarını \r ile üstüne
 # yazar ve `-q` bunu susturmuyor. `tr -d '\r'` hepsini TEK satıra yapıştırınca alan numarası da,
-# "ilk sayı" da anlamsızlaşıyor (ilk denemede "tavanın %1126716'sı" gibi bir satır çıktı).
+# "ilk sayı" da anlamsızlaşıyor (sonuç "tavanın %1126716'sı" gibi saçma bir satır olur).
 # Doğrusu: \r'yi SATIR SONUNA çevir, "N requests per second" kalıbının SONUNCUSUNU al.
 # Ders: bir aracın çıktısını ayrıştırırken, o çıktının insan için mi makine için mi yazıldığını sor.
 bench() {

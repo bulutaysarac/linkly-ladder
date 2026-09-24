@@ -17,7 +17,7 @@ req_p99=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds
 share=$(awk -v a="$rl_p50" -v b="$req_p50" 'BEGIN{printf "%.0f", (b>0? a*100/b : 0)}')
 redis_ops=$(promq "sum(rate(redis_commands_processed_total{namespace=\"$NS\"}[2m]))")
 http_rps=$(promq "sum(rate(http_requests_total{namespace=\"$NS\",route=\"/{code}\"}[2m]))")
-grafana_hint "10 · Rate limit → 'decisions by key type' · 06 · Redis → 'ops/s' · 02 · App RED → p50"
+grafana_hint "10 · Rate limit → 'Kararlar (anahtar türüne göre)' · 06 · Redis → 'Komut / sn' · 02 · App RED → 'Gecikme (p50 / p95 / p99)' (kontrol süresi: Explore, ratelimit_check_duration_seconds)"
 note "limit kontrolü: p50=$(awk -v v="$rl_p50" 'BEGIN{printf "%.2f", v*1000}') ms · p99=$(awk -v v="$rl_p99" 'BEGIN{printf "%.2f", v*1000}') ms"
 note "istek toplam: p50=$(awk -v v="$req_p50" 'BEGIN{printf "%.2f", v*1000}') ms · p99=$(awk -v v="$req_p99" 'BEGIN{printf "%.2f", v*1000}') ms"
 note "limit kontrolü isteğin ~%$share'ini alıyor"

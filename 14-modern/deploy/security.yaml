@@ -98,14 +98,14 @@ spec:
             matchExpressions:
               - key: app.kubernetes.io/name
                 operator: In
-                # topics: tek seferlik Job. İlk kurulumda UNUTULDU ve Job "cluster health"
-                # çağrısında zaman aşımına uğradı — yani varsayılan-reddet, topic'leri yaratan
-                # işi de kesti ve tüketici boş bir broker'ı dinledi. Varsayılan-reddetin bedeli
-                # budur: listeye girmeyen HER ŞEY sessizce kopar, hata mesajı da "timeout" der.
-                # EN: `topics` is a one-shot Job. It was missing from this list at first, so the
-                # Job timed out on `cluster health` — default-deny cut the very job that creates
-                # the topics. That is the cost of default-deny: anything not on the list breaks
-                # silently, and the error you get says "timeout", not "policy".
+                # topics: tek seferlik Job. Listede olmasa Job "cluster health" çağrısında zaman
+                # aşımına uğrar — varsayılan-reddet, topic'leri yaratan işi de keser ve tüketici
+                # boş bir broker'ı dinler. Varsayılan-reddetin bedeli budur: listeye girmeyen HER
+                # ŞEY sessizce kopar, hata mesajı da "timeout" der.
+                # EN: `topics` is a one-shot Job. Left off this list, it times out on `cluster
+                # health` — default-deny cuts the very job that creates the topics. That is the
+                # cost of default-deny: anything not on the list breaks silently, and the error
+                # you get says "timeout", not "policy".
                 values: [redirect, api, analytics, topics]
         - namespaceSelector:
             matchLabels: { kubernetes.io/metadata.name: keda }

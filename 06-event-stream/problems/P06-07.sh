@@ -24,7 +24,7 @@ for _ in $(seq 1 40); do
 done
 unknown=$(promq "sum(increase(consumer_records_total{namespace=\"$NS\",result=\"unknown_version\"}[10m]))")
 restarts=$(kubectl -n "$NS" get pods -l app.kubernetes.io/name=analytics -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}' 2>/dev/null) || true
-grafana_hint "08 · Stream → 'consumer records by result' (unknown_version)"
+grafana_hint "08 · Stream → 'Tüketilen kayıtlar (sonuca göre)' (unknown_version)"
 note "bilinmeyen sürüm sayacı: ${unknown%%.*} · tüketici restart: ${restarts:-0}"
 note "sonraki normal tıklamalar: $(( after - before )) / $N (boru hattı akmaya devam etti mi?)"
 note "Tüketici v99'u ATLADI ve SAYDI — patlamadı. Bu, şema evriminin birinci kuralıdır:"
@@ -34,7 +34,7 @@ note "Üçüncü kural: üreticiyi yeni sürüme geçirmeden ÖNCE tüketicileri
 note "Daha güçlü çözüm: şema kayıt defteri (Schema Registry) + uyumluluk kuralları — 14'te opsiyonel."
 # BORU HATTI HİÇ AKMADIYSA HÜKÜM YOK. Hem bilinmeyen sürüm sayacı hem normal olaylar sıfırsa,
 # tüketici o pencerede HİÇBİR ŞEY işlememiştir: bu, "bilinmeyen sürüm zarar vermedi" değil
-# "deneyi koşamadık" demektir. (Ölçüldü: 0 / 150.)
+# "deneyi koşamadık" demektir.
 # EN: if both the unknown-version counter and the normal events are zero, the consumer processed
 # nothing at all — that is "we could not run the experiment", not "the unknown version was
 # harmless".

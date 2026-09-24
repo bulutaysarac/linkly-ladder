@@ -235,7 +235,7 @@ type countingRecorder struct {
 	n  map[string]int
 }
 
-func (c *countingRecorder) Record(code string) {
+func (c *countingRecorder) Record(_ context.Context, code string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.n == nil {

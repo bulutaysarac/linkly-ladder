@@ -16,8 +16,12 @@ metadata:
     # karar uygulamada. Tek katmana güvenmek, ya çok gevşek ya çok sıkı olmak demektir.
     nginx.ingress.kubernetes.io/limit-rps: "400"
     nginx.ingress.kubernetes.io/limit-burst-multiplier: "3"
-    # X-Forwarded-For'a gerçek client adresini ekle (uygulama sağdan TRUSTED_PROXY_HOPS kadar okur)
-    nginx.ingress.kubernetes.io/use-forwarded-headers: "true"
+    # X-Forwarded-For burada AYARLANMAZ: `use-forwarded-headers` bir Ingress annotasyonu değil,
+    # controller ConfigMap ayarıdır. Buraya yazılan bir annotasyon hiçbir şey yapmaz ve ingress
+    # client'ın XFF'ini ezmeye devam eder. Ayar ve gerekçesi: platform/manifests/ingress-nginx-config.yaml
+    # (client'ın listesi korunur, ingress gördüğü adresi SONA ekler; uygulama sağdan
+    # TRUSTED_PROXY_HOPS kadar okur).
+    # EN: not an Ingress annotation — it is a controller ConfigMap key; see the platform manifest.
 spec:
   ingressClassName: nginx
   rules:

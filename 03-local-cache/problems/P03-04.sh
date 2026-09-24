@@ -4,11 +4,11 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # Load balancer istekleri rastgele dağıtıyor; aynı anahtar N farklı pod'a düşebiliyor. Sabit bir
 # çalışma kümesi için her pod'un gördüğü örneklem küçülüyor → ısınma N kat uzuyor, hit oranı düşüyor.
 #
-# ÖLÇÜM NOTU (iki kez yanıldık, ikisi de öğretici):
+# ÖLÇÜM NOTU (iki kurulum tuzağı, ikisi de öğretici):
 #  1) Çalışma kümesi küçükken (200 kod) etki ölçülemez: 6 pod × 200 ıska, 60 sn'lik yükün toplam
 #     istek sayısının yanında gürültü kalır. Etkinin büyüklüğü N×K/(istek sayısı) — K'yi büyüt.
-#  2) `increase(...[3m])` iki ölçümü birbirine karıştırıyordu: ölçekleme + restart + yük, iki ölçüm
-#     arasında 3 dakikadan kısa sürüyor. Artık sayacın KENDİSİNİ yükten önce ve sonra okuyup fark
+#  2) `increase(...[3m])` iki ölçümü birbirine karıştırır: ölçekleme + restart + yük, iki ölçüm
+#     arasında 3 dakikadan kısa sürer. Bu yüzden sayacın KENDİSİNİ yükten önce ve sonra okuyup fark
 #     alıyoruz — pencere hizalama derdi yok.
 SEEDN=${SEEDN:-4000}
 ensure_healthy
@@ -21,8 +21,8 @@ misses() { promq "sum(cache_ops_total{namespace=\"$NS\",result=\"miss\"})"; }
 # ASIL ÖLÇÜ: ISKA SAYISI, hit oranı değil.
 # Hit oranı paydası (toplam istek) ve payı (ısınma maliyeti) aynı anda oynadığı için kırılgan:
 # seed sayısı ya da throughput biraz değişince oran da değişir ve deney yanlış sonuç verir
-# (gerçekte oldu: 04'te paylaşılan önbellek olmasına rağmen "oran düştü" dedi — çünkü iki koşuda
-# oluşturulan link sayısı farklıydı). Iska sayısı doğrudan şunu ölçer: kaç (pod, anahtar) çifti
+# (paylaşılan önbellekli 04'te bile, iki koşuda oluşturulan link sayısı farklıysa "oran düştü"
+# der). Iska sayısı doğrudan şunu ölçer: kaç (pod, anahtar) çifti
 # ısıtıldı? Pod içi önbellekte bu sayı pod sayısıyla ÇARPILIR; paylaşılan önbellekte SABİT kalır.
 measure() {
   local reps=$1 h0 a0 m0 h1 a1 m1

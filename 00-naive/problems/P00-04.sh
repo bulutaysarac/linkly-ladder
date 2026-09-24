@@ -17,16 +17,18 @@ step "Yapısal durum: pod'un trafik almaya hazır olduğunu kim söylüyor?"
 probes=$(kubectl -n "$NS" get "$(app_workload)" -o jsonpath='{.spec.template.spec.containers[0].readinessProbe}') || true
 prestop=$(kubectl -n "$NS" get "$(app_workload)" -o jsonpath='{.spec.template.spec.containers[0].lifecycle.preStop}') || true
 # `${var:-varsayılan}` İÇİNDEKİ KESME İŞARETİ TIRNAK AÇAR.
-# EN: bash processes quotes inside the `word` of `${var:-word}` even within double quotes, so the
-#     apostrophe in "Endpoint'e" opened a single-quoted section that swallowed the closing `}`.
-#     The script died with `bad substitution: no closing '}'` — but ONLY when the variable was
+# EN: bash processes quotes inside the `word` of `${var:-word}` even within double quotes, so an
+#     apostrophe as in "Endpoint'e" opens a single-quoted section that swallows the closing `}`.
+#     The script dies with `bad substitution: no closing '}'` — but ONLY when the variable is
 #     empty, i.e. exactly when level 00 has no readinessProbe, which is the case the note exists
-#     to describe. A fallback that only runs on the failure path is a fallback nobody tested.
+#     to describe. Hence the fallback text is assigned in a separate statement below. A fallback
+#     that only runs on the failure path is a fallback nobody tests.
 # TR: bash, `${var:-kelime}` içindeki `kelime` kısmında tırnakları çift tırnak içinde bile işler;
-#     "Endpoint'e" içindeki kesme işareti tek tırnak açıp kapanış `}`ını yuttu. Script
-#     `bad substitution` ile öldü — ama YALNIZCA değişken boşken, yani tam olarak 00'ın
-#     readinessProbe'u olmadığı durumda; notun var olma sebebi olan durumda. Yalnızca hata
-#     yolunda çalışan bir varsayılan, kimsenin denemediği bir varsayılandır.
+#     "Endpoint'e" gibi bir kesme işareti tek tırnak açıp kapanış `}`ını yutar. Script
+#     `bad substitution` ile ölür — ama YALNIZCA değişken boşken, yani tam olarak 00'ın
+#     readinessProbe'u olmadığı durumda; notun var olma sebebi olan durumda. Bu yüzden varsayılan
+#     metin aşağıda ayrı bir atamayla veriliyor. Yalnızca hata yolunda çalışan bir varsayılan,
+#     kimsenin denemediği bir varsayılandır.
 probes_txt=$probes; [[ -z "${probes_txt:-}" ]] && probes_txt="YOK — konteyner başlar başlamaz Endpoint'e ekleniyor"
 prestop_txt=$prestop; [[ -z "${prestop_txt:-}" ]] && prestop_txt="YOK — pod, ingress'in listesinden düşmeden ölmeye başlıyor"
 note "readinessProbe: $probes_txt"

@@ -58,20 +58,20 @@ func NewMetrics(reg prometheus.Registerer, layer string) *Metrics {
 	// AYNI METRİK ADI, İKİ SAHİP — 14'te L1 ve L2 aynı anda var.
 	// EN: level 14 constructs the cache metrics twice, once per layer ("l1" and "l2"), and the
 	//     metric names are shared on purpose: `layer` is a LABEL, not part of the name. With
-	//     MustRegister the second call panicked at startup with "duplicate metrics collector
-	//     registration attempted" and api-svc never came up — level 14 had never actually run.
+	//     MustRegister the second call panics at startup with "duplicate metrics collector
+	//     registration attempted" and api-svc never comes up.
 	//     Prometheus has a contract for exactly this: if registration fails with
 	//     AlreadyRegisteredError, use the collector that is already there.
 	//     A metric name is a CONTRACT; when it has two owners, both must write to ONE series.
-	//     (The same bug hit `ratelimit_decisions_total` at level 08 — same shape, same fix.)
+	//     (`ratelimit_decisions_total` has two owners from level 08 on — same shape, same answer.)
 	// TR: 14, önbellek metriklerini katman başına iki kez kuruyor ("l1" ve "l2") ve metrik adları
 	//     BİLEREK ortak: `layer` adın parçası değil, bir ETİKET. MustRegister ile ikinci çağrı
-	//     açılışta "duplicate metrics collector registration attempted" diye panikliyor ve
-	//     api-svc hiç ayağa kalkmıyordu — yani 14 hiç çalışmamıştı.
+	//     açılışta "duplicate metrics collector registration attempted" diye panikler ve
+	//     api-svc hiç ayağa kalkmaz.
 	//     Prometheus'un tam da bunun için bir sözleşmesi var: kayıt AlreadyRegisteredError ile
 	//     düşerse, ZATEN ORADA olan collector'ı kullan.
 	//     Bir metriğin adı bir SÖZLEŞMEDİR; iki sahibi varsa ikisi de TEK seriye yazmalı.
-	//     (Aynı hata 08'de `ratelimit_decisions_total`'da çıkmıştı — aynı biçim, aynı çözüm.)
+	//     (`ratelimit_decisions_total`'ın da 08'den beri iki sahibi var — aynı biçim, aynı çözüm.)
 	register := func(c prometheus.Collector) prometheus.Collector {
 		if err := reg.Register(c); err != nil {
 			var are prometheus.AlreadyRegisteredError

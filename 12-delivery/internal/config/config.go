@@ -8,19 +8,19 @@ import (
 	"time"
 )
 
-// KALDIRILAN TUZAKLAR (ve neden buraya yazıldığı):
-// EN: TRAP_MIGRATE_IN_MAIN, TRAP_BREAKING_MIGRATION and TRAP_DROP_TENANT_FILTER used to be
-//     declared here at this level and were read NOWHERE — the mechanism they toggle stopped
-//     existing when the ladder moved migrations into a one-shot Job (07) and the breaking
-//     rename into the P12-02 experiment. A config field with no reader is worse than a
-//     missing feature: the experiment flips it, nothing changes, and the script still prints
-//     a verdict. They are removed rather than kept "for documentation".
+// BU SEVİYEDE BAYRAĞI OLMAYAN TUZAKLAR (ve neden):
+// EN: TRAP_MIGRATE_IN_MAIN, TRAP_BREAKING_MIGRATION and TRAP_DROP_TENANT_FILTER are not config
+//     at this level, because no code path here could honour them: migrations run in a one-shot
+//     Job (07), the breaking rename IS the P12-02 experiment (applied with psql and reverted),
+//     and the "forgotten WHERE tenant" of P13-02 is a query the script runs itself. A config
+//     field with no reader is worse than a missing feature: the experiment flips it, nothing
+//     changes, and the script still prints a verdict.
 // TR: TRAP_MIGRATE_IN_MAIN, TRAP_BREAKING_MIGRATION ve TRAP_DROP_TENANT_FILTER bu seviyede
-//     tanımlıydı ve HİÇBİR YERDE okunmuyordu — açtıkları mekanizma, merdiven migration'ları
-//     tek seferlik bir Job'a (07) ve kırıcı rename'i P12-02 deneyine taşıdığında ortadan
-//     kalkmıştı. Okuyucusu olmayan bir config alanı, eksik bir özellikten daha kötüdür:
-//     deney onu açar, hiçbir şey değişmez ve script yine bir karar basar.
-//     "Belgeleme olsun diye" tutulmadılar, silindiler.
+//     config değildir, çünkü burada onlara uyabilecek bir kod yolu yok: migration'lar tek
+//     seferlik bir Job'da koşar (07), kırıcı rename P12-02 deneyinin KENDİSİdir (psql ile
+//     uygulanır ve geri alınır), P13-02'nin "unutulmuş WHERE tenant"ı ise script'in kendi
+//     koştuğu bir sorgudur. Okuyucusu olmayan bir config alanı, eksik bir özellikten daha
+//     kötüdür: deney onu açar, hiçbir şey değişmez ve script yine bir karar basar.
 
 type Config struct {
 	Addr               string
@@ -56,6 +56,7 @@ type Config struct {
 	ShedEnabled      bool
 
 	OTLPEndpoint     string
+	PprofAddr        string // profil uçlarının İÇ portu (P11-08); boş = kapalı
 	TraceSampleRatio float64
 	TracingEnabled   bool
 	LogLevel         string
@@ -100,7 +101,8 @@ type Config struct {
 	TrapUnboundedQueue     bool // sınırsız analitik kuyruğu → düşürme yerine OOM (P05-02)
 	TrapRedirect301        bool // 302 yerine 301 → tarayıcı önbellekler, tıklama hiç sayılmaz (P05-06)
 	TrapCommitBeforeWrite  bool // offset'i yazmadan önce commit et → tüketici ölürse veri kaybı (P06-01)
-	TrapNoDLQ              bool // bozuk mesajı DLQ'ya taşıma → crashloop ve sonsuz lag (P06-04)
+	TrapNoDLQ              bool // bozuk mesajda çıkış yolu yok → tüketici takılır, offset ilerlemez, lag sınırsız büyür (P06-04)
+	TrapCommitDelayMs      int  // yazma ile offset commit'i arasına gecikme → tekrar teslim (P06-01) / kayıp (P06-06) penceresini vurulabilir kıl
 	TrapListNPlusOne       bool // liste yanıtında her link için AYRI stats çağrısı → N+1 (P07-06)
 	TrapReadyAlways        bool // readiness her zaman 200 → bozuk pod trafik alır (P07-08)
 	TrapIgnoreXFF          bool // XFF'i yok say → herkes ingress IP'sinde tek kovada (P08-03a)
@@ -157,6 +159,9 @@ func Load() Config {
 		ShedEnabled:      envBool("SHED_ENABLED", true),
 
 		OTLPEndpoint: env("OTLP_ENDPOINT", "alloy.monitoring.svc:4317"),
+		// Servis portundan (8080) AYRI: ingress "/"'i redirect:8080'e gönderiyor, profil ucu orada
+		// internete açık olurdu. 6060'ı hiçbir Service/Ingress göstermiyor (httpapi.PprofHandler).
+		PprofAddr: env("PPROF_ADDR", ":6060"),
 		// %5 head sampling: 20 istekten biri. Düşük tutmanın sebebi P11-03 — %100 sampling
 		// collector'ı ve Tempo'yu boğar, üstelik faydası doğrusal DEĞİLDİR.
 		TraceSampleRatio:   float64(envInt("TRACE_SAMPLE_PCT", 5)) / 100,
@@ -200,6 +205,7 @@ func Load() Config {
 		TrapRedirect301:        envBool("TRAP_REDIRECT_301", false),
 		TrapCommitBeforeWrite:  envBool("TRAP_COMMIT_BEFORE_WRITE", false),
 		TrapNoDLQ:              envBool("TRAP_NO_DLQ", false),
+		TrapCommitDelayMs:      envInt("TRAP_COMMIT_DELAY_MS", 0),
 		TrapListNPlusOne:       envBool("TRAP_LIST_N_PLUS_ONE", false),
 		TrapReadyAlways:        envBool("TRAP_READY_ALWAYS", false),
 		TrapIgnoreXFF:          envBool("TRAP_IGNORE_XFF", false),

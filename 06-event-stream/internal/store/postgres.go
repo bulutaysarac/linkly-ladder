@@ -79,6 +79,8 @@ func Open(ctx context.Context, dsn string, maxConns int32, m *DBMetrics) (*Postg
 	//     context deadline client'ın beklemesini iptal eder ama statement_timeout yoksa backend CPU
 	//     yakmaya ve kilit tutmaya devam eder. 02, olmadığında ne olduğunu ölçüyor (P02-06).
 	cfg.ConnConfig.RuntimeParams["application_name"] = "linkly"
+	// Havuzdan bağlantı alma süresi, alımın KENDİSİ etrafında ölçülür (bkz. acquireTracer).
+	cfg.ConnConfig.Tracer = acquireTracer{m: m}
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("havuz: %w", err)
@@ -91,16 +93,63 @@ func (p *Postgres) Close()              { p.pool.Close() }
 
 func (p *Postgres) Ping(ctx context.Context) error { return p.pool.Ping(ctx) }
 
-// track — her sorguyu ölç: süre, sonuç ve havuz bekleme süresi.
-func (p *Postgres) track(ctx context.Context, op string, fn func(context.Context) error) error {
-	acquireStart := time.Now()
-	stat := p.pool.Stat()
-	if stat.IdleConns() == 0 && stat.TotalConns() >= stat.MaxConns() {
-		p.m.EmptyAcquire.Inc()
+// acquireTracer — havuzdan bağlantı ALMA süresini, alımın KENDİSİNİN etrafında ölç.
+//
+// EN: The wait for a connection happens INSIDE QueryRow/Exec/Begin: each of them takes a
+//
+//	connection from the pool before it sends a single byte. Code that times the pool from the
+//	outside (reading pool.Stat(), say) sees microseconds while requests queue right behind it.
+//	pgxpool calls this tracer around EVERY Acquire — including the ones hidden inside QueryRow,
+//	Exec and Begin — so `db_pool_acquire_duration_seconds` holds exactly the queueing it is named
+//	after: waiting at the pool's ceiling and dialling a new connection alike. A metric that
+//	cannot move is worse than no metric: it reads "no pool pressure" exactly when there is some.
+//
+// TR: Bağlantı beklemesi QueryRow/Exec/Begin'in İÇİNDE olur: her biri tek bir bayt göndermeden
+//
+//	önce havuzdan bağlantı alır. Havuzu dışarıdan ölçen kod (ör. pool.Stat() okumak), istekler
+//	hemen arkasında kuyrukta beklerken mikrosaniye görür. pgxpool bu tracer'ı HER Acquire'ın
+//	etrafında çağırır — QueryRow, Exec ve Begin'in içindekiler dahil — yani
+//	`db_pool_acquire_duration_seconds` tam olarak adının söylediği beklemeyi tutar: havuz
+//	tavandayken beklemek de, yeni bağlantı kurmak da. Kıpırdayamayan bir metrik, metriğin
+//	yokluğundan kötüdür: tam da havuz baskısı varken "baskı yok" diye okunur.
+//
+// [Topic · Konu: Gözlemlenebilirlik, bağlantı havuzu]
+type acquireTracer struct{ m *DBMetrics }
+
+type acquireStartKey struct{}
+
+func (t acquireTracer) TraceAcquireStart(ctx context.Context, pool *pgxpool.Pool, _ pgxpool.TraceAcquireStartData) context.Context {
+	// Boşta bağlantı yok ve havuz üst sınırda: bu alım BEKLEYECEK.
+	if pool != nil {
+		s := pool.Stat()
+		if s.IdleConns() == 0 && s.TotalConns() >= s.MaxConns() {
+			t.m.EmptyAcquire.Inc()
+		}
 	}
+	return context.WithValue(ctx, acquireStartKey{}, time.Now())
+}
+
+// TraceAcquireEnd — başarısız alım da ölçülür: bağlantı beklerken zaman aşımına uğramak, tam
+// olarak bu histogramın göstermesi gereken acıdır.
+func (t acquireTracer) TraceAcquireEnd(ctx context.Context, _ *pgxpool.Pool, _ pgxpool.TraceAcquireEndData) {
+	if start, ok := ctx.Value(acquireStartKey{}).(time.Time); ok {
+		t.m.AcquireWait.Observe(time.Since(start).Seconds())
+	}
+}
+
+// pgx, ConnConfig.Tracer'ın bir QueryTracer olmasını ister; sorgunun kendisini track() ölçüyor.
+func (acquireTracer) TraceQueryStart(ctx context.Context, _ *pgx.Conn, _ pgx.TraceQueryStartData) context.Context {
+	return ctx
+}
+func (acquireTracer) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
+
+var _ pgxpool.AcquireTracer = acquireTracer{}
+
+// track — her sorguyu ölç: süre (havuz beklemesi DAHİL) ve sonuç. Beklemenin kendisini
+// acquireTracer ayrıca ölçer; ikisinin farkı sorgunun veritabanında geçirdiği süredir.
+func (p *Postgres) track(ctx context.Context, op string, fn func(context.Context) error) error {
 	start := time.Now()
 	err := fn(ctx)
-	p.m.AcquireWait.Observe(start.Sub(acquireStart).Seconds())
 	p.m.Duration.WithLabelValues(op).Observe(time.Since(start).Seconds())
 	switch {
 	case err == nil:

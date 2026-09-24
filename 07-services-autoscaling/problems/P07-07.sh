@@ -12,33 +12,34 @@ reps=$(kubectl -n "$NS" get "$(wl redirect)" -o jsonpath='{.status.readyReplicas
 note "replika=$reps · farklı node=$nodes · dağılım kuralı: $(kubectl -n "$NS" get "$(wl redirect)" -o jsonpath='{.spec.template.spec.topologySpreadConstraints[0].whenUnsatisfiable}')"
 need_confirm "bir worker node DONDURULACAK (docker pause) — deney sonunda çözülür"
 # AYRI BAYRAK: bu deney node'un kubelet'ini donduruyor ve çözdükten sonra containerd'nin PLEG'i
-# ölü kalabiliyor (bir kez node 49 dakika NotReady kaldı ve bütün kümeyi çürüttü). Otomatik
-# doğrulama turunda üç kez saatlerce asılı kaldı. Değerli bir deney ama YIKICI: elle, bilerek
-# çalıştır. Kural: bir deneyin bedeli ortamın tamamıysa, onu varsayılan yapma.
+# ölü kalabiliyor — node onlarca dakika NotReady kalıp bütün kümeyi çürütebilir ve otomatik bir
+# doğrulamayı saatlerce asılı bırakabilir. Değerli bir deney ama YIKICI: elle, bilerek çalıştır.
+# Kural: bir deneyin bedeli ortamın tamamıysa, onu varsayılan yapma.
 [[ "${FREEZE_NODE:-}" == 1 ]] || {
   warn "bu deney node donduruyor; elle çalıştır: FREEZE_NODE=1 CONFIRM=1 make repro P=P07-07"
   exit 2
 }
 victim=$(kubectl -n "$NS" get pods -l "$APP_SELECTOR" -o jsonpath='{.items[0].spec.nodeName}') || true
 # Temizlik yalnızca `docker unpause` DEĞİL: dondurulmuş bir node'da containerd'nin PLEG'i
-# ölüyor ve kubelet "container runtime is down" diyerek NotReady kalıyor — gerçekte oldu,
-# node 49 dakika NotReady kaldı ve kümenin geri kalanı (Chaos Mesh, Argo, KEDA) o node'a
-# düşen pod'larla birlikte çürüdü. Sonraki HER deney bozuk bir ortamı ölçtü.
+# ölebilir ve kubelet "container runtime is down" diyerek NotReady kalır — kümenin geri kalanı
+# (Chaos Mesh, Argo, KEDA) o node'a düşen pod'larla birlikte çürür ve sonraki HER deney bozuk
+# bir ortamı ölçer.
 # Bir deney, kümeyi bulduğu gibi bırakmak zorundadır — "geri aldım" demek yetmez, DOĞRULA.
 on_cleanup "for i in \$(seq 1 30); do [ \"\$(kubectl get node $victim -o jsonpath='{.status.conditions[?(@.type==\"Ready\")].status}' 2>/dev/null) = True ] && break; sleep 5; done"
 on_cleanup "docker exec $victim systemctl restart containerd >/dev/null 2>&1 || true"
 on_cleanup "docker unpause $victim"
-# ÖNCE TABAN: donma sırasındaki sayıyı neyle kıyaslayacağız? İlk koşuda 120 saniyede yalnızca
-# 13 istek tamamlandı ve 5xx=0 çıktı — script "etkisiz kaldı" dedi. Oysa asıl kanıt tam da oydu:
-# istekler ölü pod'lara yönlendirilip ASILI KALDI, yani 5xx üretmeden ÜRETKENLİK çöktü.
-# Bir arızanın işareti her zaman hata kodu değildir; bazen sadece "iş bitmiyor"dur.
+# ÖNCE TABAN: donma sırasındaki sayıyı neyle kıyaslayacağız? Donma boyunca 120 saniyede yalnızca
+# bir avuç istek tamamlanıp 5xx=0 kalabilir — yalnız 5xx'e bakan bir hüküm "etkisiz kaldı" der.
+# Oysa asıl kanıt tam da odur: istekler ölü pod'lara yönlendirilip ASILI KALIR, yani 5xx
+# üretmeden ÜRETKENLİK çöker. Bir arızanın işareti her zaman hata kodu değildir; bazen sadece
+# "iş bitmiyor"dur.
 step "Taban: donma öncesi tamamlanan istek hızı"
 with_timeout 90 k6run redirect --vus 10 --duration 30s >/dev/null 2>&1 || true
 base_reqs=$(k6_reqs); base_rps=$(awk -v r="$base_reqs" 'BEGIN{printf "%.1f", r/30}')
 note "taban: $base_reqs istek / 30 sn = $base_rps istek/s"
 step "Node '$victim' donduruluyor — kubelet cevap veremeyecek"
-# Yükü zaman sınırıyla koş: donmuş bir node'da istekler asılı kalabiliyor ve k6'nın kendisi
-# de takılabiliyor. 43 dakikalık bir takılma yaşandı; bir deney adımı SINIRLI sürmeli.
+# Yükü zaman sınırıyla koş: donmuş bir node'da istekler asılı kalabilir ve k6'nın kendisi de
+# onlarca dakika takılabilir; bir deney adımı SINIRLI sürmeli.
 ( with_timeout 200 k6run redirect --vus 10 --duration 120s >/tmp/p0707.k6 2>&1 ) & kpid=$!
 sleep 12
 with_timeout 30 docker pause "$victim" >/dev/null || warn "docker pause zaman aşımı"
@@ -52,7 +53,7 @@ sleep 20
 with_timeout 30 docker unpause "$victim" >/dev/null || warn "docker unpause zaman aşımı"
 wait $kpid 2>/dev/null || true
 e5=$(k6_5xx); reqs=$(k6_reqs)
-grafana_hint "09 · Autoscaling → 'Pod dağılımı / node' · 02 · App RED → 5xx"
+grafana_hint "09 · Autoscaling → 'Düğüm başına pod' · 15 · k6 → 'Dönen durum kodları'"
 froz_rps=$(awk -v r="$reqs" 'BEGIN{printf "%.1f", r/120}')
 note "donma sırasında: $reqs istek / 120 sn = $froz_rps istek/s (tabanın %$(awk -v a="$froz_rps" -v b="$base_rps" 'BEGIN{printf "%.0f", (b>0? a*100/b : 0)}')'i) · 5xx=$e5"
 note "Kritik ayrıntı: donmuş node'daki pod'lar Endpoints'te KALDI (kubelet cevap vermiyor ama"

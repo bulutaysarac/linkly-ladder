@@ -1,5 +1,5 @@
 # 12, 11'in sorunlarından hiçbirini ÇÖZMÜYOR.
-# P11-07 (dashboard drift) bir zamanlar buradaydı ve yanlıştı: 12 canary/GitOps getiriyor,
-# dashboard drift'ini ortadan kaldırmıyor — P11-07 11'de zaten "kod olarak dashboard" ile
-# çözülmüş durumda ve script bunu her seviyede REPRODUCED olarak raporluyor.
+# P11-07 (dashboard drift) burada değil: 12 canary/GitOps getiriyor, dashboard drift'ini ortadan
+# kaldırmıyor — P11-07 11'de zaten "kod olarak dashboard" ile çözülmüş durumda ve script bunu her
+# seviyede REPRODUCED olarak raporluyor.
 # 12'nin çözdüğü şey P12 serisinin kendi sorunları (canary, expand/contract, drift).

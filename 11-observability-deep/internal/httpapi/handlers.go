@@ -10,7 +10,6 @@ import (
 
 	"github.com/bulutaysarac/linkly-ladder/11-observability-deep/internal/shortcode"
 	"github.com/bulutaysarac/linkly-ladder/11-observability-deep/internal/store"
-	"github.com/bulutaysarac/linkly-ladder/11-observability-deep/internal/tracing"
 )
 
 type createReq struct {
@@ -95,18 +94,17 @@ func (a *API) handleCreate(w http.ResponseWriter, r *http.Request) {
 var safeCodeRe = regexp.MustCompile(`^[A-Za-z0-9]{1,16}$`)
 
 func (a *API) handleRedirect(w http.ResponseWriter, r *http.Request) {
-	ctx0, span := tracing.Start(r.Context(), "redirect")
-	defer span.End()
-	r = r.WithContext(ctx0)
+	// Span burada AÇILMIYOR: isteğin kök span'ini middleware (tracing.HTTPServer) açtı. Buradan
+	// aşağıdaki her adım — önbellek, guard, sorgu, Kafka — o span'in çocuğu olarak görünür.
 	code := r.PathValue("code")
 	// İSTEK BAŞINA DEBUG LOGU — "geliştirici debug seviyesini üretimde unuttu" senaryosu.
-	// EN: P11-05 measures what debug logging costs, but the level had ZERO `.Debug()` calls on any
-	//     path, so `LOG_LEVEL=debug` changed nothing and the experiment measured run-to-run noise
-	//     (151650 vs 144136 bytes/s). A trap that no code honours is not a trap. slog itself skips
-	//     the call when the level is above debug, so this costs nothing at info.
-	// TR: P11-05 debug loglamanın bedelini ölçüyor ama seviyede HİÇBİR yolda `.Debug()` çağrısı
-	//     yoktu; `LOG_LEVEL=debug` hiçbir şeyi değiştirmiyor ve deney iki koşunun gürültüsünü
-	//     ölçüyordu (151650 vs 144136 bayt/s). Hiçbir kodun uymadığı bir tuzak, tuzak değildir.
+	// EN: P11-05 measures what debug logging costs, so the hot path needs a real `.Debug()` call:
+	//     without one, `LOG_LEVEL=debug` changes nothing and the experiment measures run-to-run
+	//     noise. A trap that no code honours is not a trap. slog itself skips the call when the
+	//     level is above debug, so this costs nothing at info.
+	// TR: P11-05 debug loglamanın bedelini ölçer; bu yüzden sıcak yolda gerçek bir `.Debug()`
+	//     çağrısı gerekir: o olmadan `LOG_LEVEL=debug` hiçbir şeyi değiştirmez ve deney iki koşunun
+	//     gürültüsünü ölçer. Hiçbir kodun uymadığı bir tuzak, tuzak değildir.
 	//     slog seviye debug'ın üstündeyse çağrıyı zaten atlar, yani info'da bedeli yoktur.
 	a.log.Debug("redirect isteği", "code", code, "ua", r.UserAgent(),
 		"ip", r.Header.Get("X-Forwarded-For"), "referer", r.Referer(), "proto", r.Proto)
@@ -159,13 +157,14 @@ func (a *API) handleRedirect(w http.ResponseWriter, r *http.Request) {
 	// EN: This is the whole point of level 05. The redirect no longer writes to the database; it
 	//     drops an event into a bounded in-process queue and returns. Record() never blocks and
 	//     never fails — if the queue is full the click is DROPPED and counted as dropped.
-	//     What used to be a row lock on the hottest row (P02-08) is now a channel send.
+	//     What is a row lock on the hottest row at level 02 (P02-08) is a channel send here.
 	// TR: 05'in bütün mesele bu. Redirect artık veritabanına yazmıyor; sınırlı bir süreç içi kuyruğa
 	//     bir olay bırakıp dönüyor. Record() ne bloklar ne de hata döndürür — kuyruk doluysa tıklama
-	//     DÜŞÜRÜLÜR ve düşürülmüş olarak sayılır. Eskiden en sıcak satırdaki bir satır kilidi olan
-	//     şey (P02-08), artık bir kanal gönderimi.
+	//     DÜŞÜRÜLÜR ve düşürülmüş olarak sayılır. 02'de en sıcak satırdaki bir satır kilidi olan
+	//     şey (P02-08), burada bir kanal gönderimi.
 	// [Topic · Konu: Okuma/yazma yolu ayrımı, asenkronizm]
-	a.clicks.Record(code)
+	// İsteğin bağlamı üreticiye GEÇİYOR: trace, Kafka header'ı üzerinden tüketiciye taşınsın (P11-02).
+	a.clicks.Record(r.Context(), code)
 
 	a.met.Redirect.WithLabelValues("ok").Inc()
 	// TRAP_REDIRECT_301: 01'de çözdüğümüz P00-10'u geri getirir. Burada tekrar karşımıza çıkmasının

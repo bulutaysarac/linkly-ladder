@@ -28,13 +28,13 @@ need_confirm "test linki silinecek (yalnızca bu satır)"
 psql "DELETE FROM links WHERE code='$code'" >/dev/null
 sleep 3
 after_r=$(kubectl -n "$NS" exec "$repl" -c postgres -- psql -U postgres -d linkly -tAc "SELECT count(*) FROM links WHERE code='$code'" 2>/dev/null) || true
-grafana_hint "05 · Postgres → replication lag"
+grafana_hint "05 · Postgres → 'Replikasyon gecikmesi'"
 note "silme öncesi replikada: ${before_r:-?} satır · silme sonrası: ${after_r:-?} satır"
 note "Replikasyon bir YEDEK DEĞİLDİR: hatanı da saniyeler içinde kopyalar."
 note "Yedek, ZAMANDA GERİ GİTME yeteneğidir — replika ise zamanda İLERİ gitmenin kopyasıdır."
 note "Gerçek koruma üç ayaklıdır: (1) sürekli WAL arşivleme, (2) periyodik temel yedek,"
 note "(3) DÜZENLİ GERİ YÜKLEME TATBİKATI. Üçüncüsü olmadan ilk ikisi bir temennidir."
-note "Bu merdivende (3)'ü game day olarak 14'e bıraktık; (1) ve (2) bir barmanObjectStore bloğudur."
+note "Bu merdivende üçü de kapsam dışı: 14'ün 'yolun devamı' listesinde; (1) ve (2) bir barmanObjectStore bloğudur."
 { [[ "${before_r:-0}" == "1" ]] && [[ "${after_r:-1}" == "0" ]]; } \
   && reproduced "silme replikaya da yayıldı (${before_r} → ${after_r}) — replikasyon yedek değildir, yedekleme yapılandırılmamış"
 not_reproduced "silme replikaya yansımadı (replikasyon çalışıyor mu?)"

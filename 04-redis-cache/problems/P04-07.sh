@@ -15,15 +15,15 @@ for i in $(seq 1 ${N:-4000}); do c=$(create_link "https://example.com/k/$i"); [[
 keys=$(kubectl -n "$NS" exec "$rpod" -c redis -- redis-cli DBSIZE 2>/dev/null | tr -d '\r') || true
 note "Redis'teki anahtar sayısı: ${keys:-?}"
 # TABANSIZ BİR TEPE, TEPE DEĞİLDİR.
-# EN: the verdict used to be `maxp99 > 0` — true for any request that ever completed. It claimed
-#     "KEYS * spiked redirect latency" while never measuring what the latency was WITHOUT the
-#     KEYS calls, so it could not fail and therefore could not tell you anything. Now the same
+# EN: a verdict like `maxp99 > 0` is true for any request that ever completed. It would claim
+#     "KEYS * spiked redirect latency" without ever measuring what the latency is WITHOUT the
+#     KEYS calls, so it cannot fail and therefore cannot tell you anything. So the same
 #     load runs twice: once clean, once with KEYS * in the middle, and the spike is the
 #     DIFFERENCE. Each phase reads its own window (`[${dur}s:15s]`) so phase 2 cannot inherit
 #     phase 1's peak.
-# TR: hüküm `maxp99 > 0` idi — tamamlanan herhangi bir istek için doğru. "KEYS * gecikmeyi tepe
-#     yaptırdı" diyordu ama gecikmenin KEYS ÇAĞRISI OLMADAN ne olduğunu hiç ölçmüyordu; yani
-#     düşemezdi ve bu yüzden hiçbir şey söyleyemezdi. Artık aynı yük iki kez koşuyor: biri temiz,
+# TR: `maxp99 > 0` gibi bir hüküm tamamlanan herhangi bir istek için doğrudur. "KEYS * gecikmeyi
+#     tepe yaptırdı" der ama gecikmenin KEYS ÇAĞRISI OLMADAN ne olduğunu hiç ölçmez; yani
+#     düşemez ve bu yüzden hiçbir şey söyleyemez. Bu yüzden aynı yük iki kez koşuyor: biri temiz,
 #     biri ortasında KEYS * ile; tepe ikisinin FARKI. Her faz kendi penceresini okuyor
 #     (`[${dur}s:15s]`), yani 2. faz 1. fazın tepesini devralamıyor.
 PHASE_P99=""

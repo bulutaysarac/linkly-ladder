@@ -23,7 +23,7 @@ goroutines=$(promq "max_over_time(sum(go_goroutines{namespace=\"$NS\",pod=~\"red
 dep_p99=$(promq "histogram_quantile(0.99, sum(rate(dependency_request_duration_seconds_bucket{namespace=\"$NS\",dep=\"postgres\"}[2m])) by (le))")
 timeouts=$(promq "sum(increase(dependency_requests_total{namespace=\"$NS\",dep=\"postgres\",result=\"timeout\"}[3m]))")
 bulk=$(promq "sum(increase(dependency_requests_total{namespace=\"$NS\",dep=\"postgres\",result=\"bulkhead\"}[3m]))")
-grafana_hint "11 · Resilience → 'in-flight by pod' + 'dependency p99 by dep' · 01 · Pods → Goroutine"
+grafana_hint "11 · Resilience → 'Şu an işlenen istek (pod'a göre)' + 'Bağımlılık gecikmesi p99' · 01 · Pods & Resources → 'Goroutine sayısı'"
 note "tepe in-flight=${inflight%%.*} · tepe goroutine=${goroutines%%.*} · bağımlılık p99=$(awk -v v="$dep_p99" 'BEGIN{printf "%.0f", v*1000}') ms"
 note "bağımlılık timeout=${timeouts%%.*} · bulkhead reddi=${bulk%%.*}"
 note "Bulkhead reddi GÖRÜNÜYORSA koruma çalışıyor demektir: yavaş bağımlılık, kendisine ayrılan"

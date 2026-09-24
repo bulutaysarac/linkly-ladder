@@ -5,8 +5,8 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # Okumalar çalışmaya devam eder, hit oranı bir süre yüksek görünür — ama yeni hiçbir şey
 # önbelleğe girmez. Önbellek hâlâ "ayakta"dır ve artık hiçbir işe yaramamaktadır.
 #
-# ÖLÇÜM NOTU: ilk hâl 6000 küçük link oluşturup 64 MB'lık Redis'i doldurmayı umuyordu —
-# ~3 MB yazıp "doldurma gözlenmedi" diyordu. Deneyi ÖLÇEĞE uydur: ya veriyi büyüt ya sınırı
+# ÖLÇÜM NOTU: 6000 küçük link 64 MB'lık Redis'i dolduramaz — ~3 MB yazılır ve "doldurma
+# gözlenmedi" sonucu çıkar. Deneyi ÖLÇEĞE uydur: ya veriyi büyüt ya sınırı
 # küçült. Burada ikisini de yapıyoruz (maxmemory 4 MB + ~6 KB'lık URL'ler) ki deney dakikalar
 # değil saniyeler sürsün. Sınırı geçici olarak küçültmek meşrudur — DEĞİŞTİRDİĞİNİ SÖYLEDİĞİN sürece.
 N=${N:-1200}

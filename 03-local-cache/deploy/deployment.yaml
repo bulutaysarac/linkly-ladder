@@ -1,4 +1,4 @@
-# Seviye 02: uygulama DURUMSUZ. Artık 3 replika, anti-affinity ve gerçek bir PDB anlamlı.
+# Seviye 03: uygulama durumsuz; 3 replika, anti-affinity ve PDB. Önbellek her pod'un kendi belleğinde.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

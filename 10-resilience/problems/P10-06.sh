@@ -8,29 +8,34 @@ APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
 on_cleanup "setenv "$(wl redirect)" SHED_ENABLED=true SHED_MAX_INFLIGHT=200"
 # YÜK ATMA ANCAK SİSTEM DOYDUĞUNDA GÖRÜNÜR — VE BU SİSTEM ÇOK HIZLI.
-# In-flight ≈ rps × gecikme. Bu kümede redirect p99'u 2 ms; 400 rps'te in-flight ~1 kalıyor ve
-# eşik 60'a çekilse bile HİÇ aşılmıyor (ölçüldü: iki fazda da atılan=0). Yani deney, ölçmek
-# istediği doygunluk rejimini hiç kurmuyordu. Eşiği indirmek yetmez; isteklerin SÜRMESİ gerekir.
+# In-flight ≈ rps × gecikme. Bu kümede redirect p99'u 2 ms; 400 rps'te in-flight ~1 kalır ve
+# eşik 60'a çekilse bile HİÇ aşılmaz: iki fazda da atılan=0 olur, yani deney ölçmek istediği
+# doygunluk rejimini hiç kurmaz. Eşiği indirmek yetmez; isteklerin SÜRMESİ gerekir.
 # Bağımlılığa 200 ms gecikme enjekte edilince in-flight ≈ 400 × 0.2 = 80 olur ve eşik anlam kazanır.
 # EN: in-flight ≈ rps × latency. At 2 ms p99 the in-flight count stays around 1, so even a
-# threshold of 60 is never crossed and nothing is ever shed — the experiment never built the
-# saturation regime it wants to measure. Lowering the threshold is not enough; requests must TAKE
+# threshold of 60 is never crossed and nothing is ever shed — without a delay the experiment never
+# builds the saturation regime it wants to measure. Lowering the threshold is not enough; requests must TAKE
 # time. A 200 ms dependency delay makes in-flight ≈ 80 and the threshold meaningful.
 chaos_apply redis-delay-200ms
 run_overload() {
   kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=180s >/dev/null 2>&1 || true
   for _ in $(seq 1 20); do serving && break; sleep 2; done
   settle_rollout "$(wl redirect)"
-  # FAZ BAŞINA PENCERE. Sabit `[2m]` / `[4m]` pencereleri iki fazın ortasından geçiyordu: yük atma
-  # KAPALIYKEN bile "atılan=5393" göründü (birinci fazın atılanları) ve p99'lar birbirine karıştı.
-  # EN: the fixed windows straddled both phases — 5393 requests appeared "shed" with shedding
-  # DISABLED, because those were phase 1's.
+  # FAZ BAŞINA PENCERE. Sabit `[2m]` / `[4m]` pencereleri iki fazın ortasından geçer: yük atma
+  # KAPALIYKEN bile birinci fazın atılanları "atılan" görünür ve p99'lar birbirine karışır.
+  # EN: a fixed window straddles both phases — with shedding DISABLED it would still report
+  # phase 1's shed requests.
   local t0 dur p99 shed
   t0=$(date +%s)
   k6run stairs >/dev/null 2>&1 || true
   sleep 20
   dur=$(( $(date +%s) - t0 ))
-  p99=$(promq "max_over_time(histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",code!=\"503\"}[30s])) by (le))[${dur}s:15s])")
+  # KABUL EDİLENLERİN p99'u = uygulamanın kendi histogramı. `code!="503"` gibi bir süzgeç burada
+  # hiçbir şey süzmez: histogramın `code` etiketi YOK (yalnızca `route`). Süzmeye gerek de yok:
+  # shedder metrik katmanının ÖNÜNDE duruyor, attığı 503'ler bu histograma hiç girmez.
+  # EN: a `code!="503"` filter would filter nothing — the histogram has no `code` label. It does not need one:
+  # the shedder sits in front of the metrics layer, so shed requests never reach this histogram.
+  p99=$(promq "max_over_time(histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\"}[30s])) by (le))[${dur}s:10s])")
   shed=$(promq "sum(increase(load_shed_total{namespace=\"$NS\"}[${dur}s]))")
   echo "$p99 ${shed%%.*}"
 }
@@ -50,7 +55,7 @@ if (( ${s_on:-0} == 0 )); then
   warn "Bu bir hüküm değil, EKSİK ÖLÇÜMdür."
   exit 2
 fi
-grafana_hint "11 · Resilience → 'load shed/s' + 'kabul edilen isteklerin p99 (503 hariç)'"
+grafana_hint "11 · Resilience → 'Atılan yük / sn' + 'Kabul edilen isteklerin p99 süresi' · 15 · k6 → 'Dönen durum kodları'"
 note "Doğru metrik KABUL EDİLEN isteklerin p99'udur. Toplam p99'a bakarsan shedding 'kötü' görünür"
 note "(çok 503 var); kabul edilenlere bakarsan iyi görünür (hızlı cevap). Hangi soruyu sorduğun,"
 note "hangi cevabı alacağını belirler."

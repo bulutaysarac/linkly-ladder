@@ -3,10 +3,8 @@ global:
   domain: argocd.localtest.me
 configs:
   params:
-    server.insecure: true   # ingress TLS'siz (13'te cert-manager gelecek)
+    server.insecure: true   # ingress TLS'siz: localtest.me için sertifika yok (13 §9)
   cm:
-    # Uygulamaların GitOps kaynağı cluster İÇİNDEKİ Gitea olacak — GitHub'a bağımlı olmadan
-    # drift/self-heal derslerini koşabilmek için.
     timeout.reconciliation: 30s
 server:
   ingress:
@@ -17,6 +15,11 @@ server:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { memory: 512Mi }
 controller:
+  # 13 · Rollout → "Git ile uyumsuz uygulamalar" argocd_app_info'yu okur; metrik + ServiceMonitor olmadan panel boş kalır.
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { memory: 768Mi }

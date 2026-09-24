@@ -53,7 +53,7 @@ deploy: ## kubectl apply -k deploy/ (IMAGE_TAG yerine gerçek tag)
 	@# Namespace TAMAMEN gitmiş olmalı. Yalnızca "Terminating değil" demek yetmiyor: silme
 	@# finalize olurken namespace bir an için sorgulanamaz hâle geliyor, apply namespace'i
 	@# yeniden yaratıyor ve ardından eski silme işlemi onu TEKRAR siliyor — CNPG o pencerede
-	@# "namespace is being terminated" diyerek Cluster'ı kuramıyor (14 gece turunda böyle düştü).
+	@# "namespace is being terminated" diyerek Cluster'ı kuramıyor.
 	@for i in $$(seq 1 120); do \
 	  ph=$$(kubectl get ns $(NS) -o jsonpath='{.status.phase}' 2>/dev/null || echo YOK); \
 	  case "$$ph" in Terminating) [ $$i = 1 ] && echo "  $(NS) siliniyor, bitmesi bekleniyor..."; sleep 3;; *) break;; esac; \
@@ -66,20 +66,20 @@ deploy: ## kubectl apply -k deploy/ (IMAGE_TAG yerine gerçek tag)
 	@# --wait=false DEĞİL: silme tamamlanmadan apply çalışırsa yeni Job, devam eden silmeye
 	@# yakalanıp SESSİZCE kaybolur. Sonuç: şema hiç uygulanmaz, uygulama ayakta ama her yazma
 	@# store_error döner ve smoke "link oluşturulamadı" der — silme yarışından bahseden hiçbir
-	@# şey görünmez. `make wait` artık Job'ları saydığı için bu bir kez daha olursa fark edilir.
+	@# şey görünmez. `make wait` Job'ları da beklediği için bu durum orada yakalanır.
 	@# EN: not --wait=false: if apply runs while the delete is still in flight, the new Job is
 	@# swallowed by the pending deletion. The schema is never applied, the app is UP, every write
 	@# returns store_error, and nothing in the output mentions a delete race.
 	@kubectl -n $(NS) delete job migrate topics --ignore-not-found --timeout=90s >/dev/null 2>&1 || true
 	@# YENİDEN DENE: yüklü bir kümede admission webhook'ları (CNPG, Kyverno) anlık olarak
 	@# "connection refused" verebiliyor — operatör pod'u yeniden başlıyorsa. Tek denemede
-	@# pes etmek, geçici bir arızayı "seviye kurulamadı"ya çeviriyor (11 gece turunda böyle düştü).
+	@# pes etmek, geçici bir arızayı "seviye kurulamadı"ya çevirir.
 	@for i in 1 2 3; do 	  if kubectl kustomize deploy/ | sed 's|:IMAGE_TAG|:$(TAG)|g' | kubectl apply -f -; then exit 0; fi; 	  echo "  apply başarısız (deneme $$i/3), 20 sn sonra tekrar"; sleep 20; 	done; exit 1
 
 wait: ## Deployment/StatefulSet + (varsa) Argo Rollout hazır olana kadar bekle
 	@# SIRA ÖNEMLİ: önce VERİTABANI, sonra uygulama. Uygulamanın readiness'i DB ping'ine bağlı,
-	@# yani DB'den önce beklenen bir Deployment kaçınılmaz olarak zaman aşımına uğrar. Bu tam
-	@# olarak 14'ün kurulamama sebebiydi: `deploy/api` 240 sn bekledi, CNPG ondan sonra gelecekti.
+	@# yani DB'den önce beklenen bir Deployment kaçınılmaz olarak zaman aşımına uğrar: `deploy/api`
+	@# sınırına kadar bekler, CNPG ise ancak ondan sonra sıraya girer.
 	@# Bir bekleme sırası, bağımlılık sırasının TERSİ olamaz.
 	@# CNPG Cluster'ı Deployment/StatefulSet döngüsü GÖRMEZ: operatör pod'ları doğrudan yaratır.
 	@for c in $$(kubectl -n $(NS) get cluster.postgresql.cnpg.io -o name 2>/dev/null); do \
@@ -95,13 +95,13 @@ wait: ## Deployment/StatefulSet + (varsa) Argo Rollout hazır olana kadar bekle
 	@# olmadığı için düşer. İkisi aynı görünür, sebepleri farklıdır.
 	@# EN: wait for the one-shot Jobs too — without the schema the app is UP but every write
 	@# returns store_error, and smoke fails for a reason that looks exactly like "DB not ready".
-	@# YALNIZCA BİZİM Job'larımız. İlk hâl namespace'teki HER Job'ı bekliyordu ve CNPG'nin
-	@# bootstrap Job'ı (pg-1-initdb) başarıyla bitince operatör tarafından SİLİNİYOR — yani
-	@# bekleme, "tamamlanmadı" diyerek kurulumu düşürdü. Bir kaynağı beklemek, onun yaşam
-	@# döngüsünün SAHİBİ kim olduğunu bilmeyi gerektirir: senin yaratmadığın bir nesnenin ne
-	@# zaman kaybolacağına dair varsayım yapma.
-	@# EN: only OUR Jobs. Waiting for every Job in the namespace broke the install: CNPG deletes
-	@# its own bootstrap Job (pg-1-initdb) once it succeeds, so the wait reported "not complete".
+	@# YALNIZCA BİZİM Job'larımız. Namespace'teki HER Job'ı beklemek kurulumu düşürür: CNPG'nin
+	@# bootstrap Job'ı (pg-1-initdb) başarıyla bitince operatör tarafından SİLİNİR ve bekleme
+	@# "tamamlanmadı" der. Bir kaynağı beklemek, onun yaşam döngüsünün SAHİBİ kim olduğunu
+	@# bilmeyi gerektirir: senin yaratmadığın bir nesnenin ne zaman kaybolacağına dair varsayım
+	@# yapma.
+	@# EN: only OUR Jobs. Waiting for every Job in the namespace breaks the install: CNPG deletes
+	@# its own bootstrap Job (pg-1-initdb) once it succeeds, so the wait reports "not complete".
 	@# Waiting on a resource means knowing who owns its lifecycle.
 	@for j in migrate topics; do \
 	  kubectl -n $(NS) get job $$j >/dev/null 2>&1 || continue; \
@@ -121,9 +121,9 @@ wait: ## Deployment/StatefulSet + (varsa) Argo Rollout hazır olana kadar bekle
 	  echo "  $$r hazır: $${got:-0}/$${want:-1}"; \
 	done
 	@# "HAZIR" İLE "İSTENEN SÜRÜM HAZIR" AYNI ŞEY DEĞİL. Canary analizi güncellemeyi İPTAL edip
-	@# eski sürüme dönünce hazır replika sayısı yine 3/3'tür: yukarıdaki döngü ve smoke GEÇTİ,
-	@# pod'lar ise eski imajdaydı — yeni kod hiç çalışmadı ve üstüne koşulan her deney eski kodu
-	@# ölçtü. Rollout'un kendi hükmünü oku: Healthy + stable == current. İptal (Degraded) HATADIR.
+	@# eski sürüme dönünce hazır replika sayısı yine 3/3'tür: yukarıdaki döngü ve smoke GEÇER,
+	@# pod'lar ise eski imajdadır — yeni kod hiç çalışmaz ve üstüne koşulan her deney eski kodu
+	@# ölçer. Rollout'un kendi hükmünü oku: Healthy + stable == current. İptal (Degraded) HATADIR.
 	@# EN: ready replicas are 3/3 after an ABORTED canary too (it rolled back); only the Rollout's
 	@# own phase says whether the NEW revision is what is running.
 	@for r in $$(kubectl -n $(NS) get rollout -o name 2>/dev/null); do \
@@ -146,9 +146,9 @@ wait: ## Deployment/StatefulSet + (varsa) Argo Rollout hazır olana kadar bekle
 smoke: ## POST + GET 30x
 	@$(EXPORT_ENV) $(PLATFORM)/lib/smoke.sh
 
-# PROFİL `make up`'IN İLK ADIMI. Eskiden turu koşan araç uyguluyordu ve README'lerin hiçbiri
-# söylemiyordu: elle çalışan biri onu atlıyor, 6 çekirdekli VM'de her operatör birden açık kalıyor
-# ve küme deneyden önce çöküyordu. Eksik bir platform bileşenini de burada, seviye kurulmadan söyler.
+# PROFİL `make up`'IN İLK ADIMI. Yalnızca otomatik turun uyguladığı bir profili elle çalışan
+# biri atlar: 6 çekirdekli VM'de her operatör birden açık kalır ve küme deneyden önce çöker.
+# Eksik bir platform bileşenini de burada, seviye kurulmadan söyler.
 profile: ## Bu seviyenin platform bileşenlerini aç, gerisini kapat (make up bunu kendisi yapar)
 	@$(PLATFORM)/lib/profile.sh $(LEVEL)
 
@@ -161,12 +161,12 @@ down: ## Namespace'i sil
 	@#     reconciling them while the namespace terminates — so the namespace sits in Terminating
 	@#     for tens of minutes ("Unable to create required cluster objects") and the next level
 	@#     cannot start. Deleting them FIRST, and clearing the finalizer if the operator is gone,
-	@#     turns a 33-minute hang into seconds. A namespace delete is not atomic: it is a
+	@#     turns a hang of tens of minutes into seconds. A namespace delete is not atomic: it is a
 	@#     negotiation with every controller that owns something inside it.
 	@# TR: CloudNativePG Cluster/Pooler nesnelerine finalizer koyar ve controller'ı, namespace
 	@#     silinirken bile onları uzlaştırmaya devam eder — namespace onlarca dakika Terminating'te
 	@#     kalır ve bir sonraki seviye başlayamaz. Onları ÖNCE silmek (ve operatör yoksa
-	@#     finalizer'ı düşürmek) 33 dakikalık takılmayı saniyelere indiriyor.
+	@#     finalizer'ı düşürmek) onlarca dakikalık takılmayı saniyelere indirir.
 	@#     Namespace silme atomik bir işlem değildir: içindeki her şeyin sahibi olan her
 	@#     controller ile yapılan bir PAZARLIKTIR.
 	@-kubectl -n $(NS) delete pooler --all --wait=false >/dev/null 2>&1

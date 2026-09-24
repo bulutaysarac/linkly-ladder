@@ -1,5 +1,16 @@
 # 06 — event-stream · "Olay akışı, ayrı tüketici"
 
+> **Bu seviyede ne yaşayacaksın?**
+> - Pod sert ölse de tıklamaların kaybolmaması (olaylar dayanıklı logda) ve yazıcının ayrı bir servise taşınması — P05-01 ve P05-03 kapanır
+> - En-az-bir-kez teslimatın tekrar teslim üretmesi ve idempotency ile emilmesi (P06-01)
+> - Tüketici durunca verinin kaybolmayıp bayatlaması — lag (P06-02); tek partition'ın tek tüketici tavanı (P06-03)
+> - Tuzaklar: zehirli bir mesajın DLQ olmadan bütün hattı rehin alması (P06-04); commit noktasının teslimat garantisini belirlemesi (P06-06)
+> - Broker ölünce bloklamak mı düşürmek mi (P06-05); bilinmeyen bir şema sürümü geldiğinde tüketicinin çökmeden devam etmesi (P06-07)
+>
+> **Bu seviye olmasa ne olur?** Sert bir ölüm tampondaki tıklamaları siler ve yazıcı redirect ile aynı süreci, aynı bağlantı havuzunu paylaşır.
+>
+> **Yeni gelen teknolojiler:** Redpanda (Kafka API), franz-go, tüketici grubu, DLQ, `08 · Stream (Redpanda)` paneli ([her biri tek cümleyle](../README.md#kullanılan-teknolojiler)).
+
 ## 1. Bu seviye ne?
 
 Tıklama olayları süreç belleğinden çıkıp **dayanıklı bir loga** (Redpanda, Kafka API) yazılıyor;
@@ -38,9 +49,11 @@ ne de broker'a **bağımlı**: ikisi de düşse yönlendirme çalışır, yalnı
 | P05-03 | Yazıcı okumayla aynı süreç/havuzu paylaşıyor | `cmd/analytics-consumer` ayrı binary, ayrı Deployment, ayrı CPU limiti, ayrı `pgxpool` (10 bağlantı) |
 
 **P05-02 (kuyruk düşürme) listede yok** ve bu bilinçli: sorun kaybolmadı, **bir kat aşağı taşındı**.
-Kafka istemcisi de asenkron ve varsayılan olarak sınırsız tamponlar; broker düşerse kayıtlar bellekte
-birikir. Bu yüzden producer'da kendi sınırımızı tutup düşürüyoruz (P06-05). *Her asenkron sınırın
-bir üst sınırı ve bir düşürme politikası olmalı — katman değişse de kural değişmiyor.*
+Kafka istemcisi de asenkron, ama tamponu dolunca (franz-go'da varsayılan 10.000 kayıt) `Produce`
+çağıranı **bekletir** — yani redirect isteğini; broker düşerse kayıtlar önce bellekte birikir, sonra
+istek yolu takılır. Bu yüzden producer'da sınırı biz koyuyoruz, aşanı düşürüyoruz ve kaydı hiç
+beklemeyen `TryProduce` ile ekliyoruz (P06-05). *Her asenkron sınırın bir üst sınırı ve bir düşürme
+politikası olmalı — katman değişse de kural değişmiyor.*
 
 ## 4. Ayağa kaldırma
 
@@ -77,13 +90,13 @@ Her seviyede aynı: [docs/API.md](../docs/API.md). Dışarıdan davranış deği
 
 | ID | Sorun | Reproduce | Grafana'da | Çözüm |
 |---|---|---|---|---|
-| P06-01 | En az bir kez → tekrar teslim (çift sayma riski) | `CONFIRM=1 make repro P=P06-01` | Stream → records by result | seviye içi (idempotency) |
-| P06-02 | Tüketici gecikmesi: analitik bayatlıyor | `make repro P=P06-02` | Stream → consumer lag | 07 (KEDA) |
-| P06-03 | Tek partition = tek tüketici tavanı | `CONFIRM=1 make repro P=P06-03` | Stream → lag by partition | seviye içi (repartition) |
-| P06-04 | Poison message boru hattını rehin alır | `make repro P=P06-04` | Stream → dlq | seviye içi (DLQ) |
-| P06-05 | Broker düşünce tampon dolar | `CONFIRM=1 make repro P=P06-05` | Stream → producer buffer & drops | seviye içi · 14 |
-| P06-06 | **TRAP** commit noktası = teslimat garantisi | `CONFIRM=1 make repro P=P06-06` | Stream → duplicate | seçim meselesi |
-| P06-07 | Şema evrimi: bilinmeyen sürüm | `make repro P=P06-07` | Stream → unknown_version | seviye içi · 14 (registry) |
+| P06-01 | En az bir kez → tekrar teslim (çift sayma riski) | `CONFIRM=1 make repro P=P06-01` | [08 · Stream (Redpanda)](http://grafana.localtest.me/d/ladder-stream?var-level=lvl06&from=now-15m&to=now&refresh=10s) → "Tüketici gecikmesi (bölüme göre)" | seviye içi (idempotency) |
+| P06-02 | Tüketici gecikmesi: analitik bayatlıyor | `make repro P=P06-02` | [08 · Stream (Redpanda)](http://grafana.localtest.me/d/ladder-stream?var-level=lvl06&from=now-15m&to=now&refresh=10s) → "Tüketici gecikmesi (bölüme göre)" | 07 (KEDA) |
+| P06-03 | Tek partition = tek tüketici tavanı | `CONFIRM=1 make repro P=P06-03` | [08 · Stream (Redpanda)](http://grafana.localtest.me/d/ladder-stream?var-level=lvl06&from=now-15m&to=now&refresh=10s) → "Onaylama / sn ve tüketici pod sayısı" | seviye içi (repartition) |
+| P06-04 | **TRAP** Poison message boru hattını rehin alır | `make repro P=P06-04` | [08 · Stream (Redpanda)](http://grafana.localtest.me/d/ladder-stream?var-level=lvl06&from=now-15m&to=now&refresh=10s) → "Tüketilen kayıtlar (sonuca göre)" | seviye içi (DLQ) |
+| P06-05 | Broker düşünce tampon dolar | `CONFIRM=1 make repro P=P06-05` | [08 · Stream (Redpanda)](http://grafana.localtest.me/d/ladder-stream?var-level=lvl06&from=now-15m&to=now&refresh=10s) · [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl06&from=now-15m&to=now&refresh=10s) → "Üretici tamponu ve atılanlar" | seviye içi · 14 |
+| P06-06 | **TRAP** commit noktası = teslimat garantisi | `CONFIRM=1 make repro P=P06-06` | [08 · Stream (Redpanda)](http://grafana.localtest.me/d/ladder-stream?var-level=lvl06&from=now-30m&to=now&refresh=10s) → "Tüketici gecikmesi (bölüme göre)" | seçim meselesi |
+| P06-07 | Şema evrimi: bilinmeyen sürüm | `make repro P=P06-07` | [08 · Stream (Redpanda)](http://grafana.localtest.me/d/ladder-stream?var-level=lvl06&from=now-15m&to=now&refresh=10s) · [01 · Pods & Resources](http://grafana.localtest.me/d/ladder-pods?var-level=lvl06&from=now-15m&to=now&refresh=10s) → "Tüketilen kayıtlar (sonuca göre)" | seviye içi (şema kaydı kapsam dışı) |
 
 ---
 
@@ -96,16 +109,31 @@ hata değil, seçilmiş garantinin ta kendisi. Çift saymayı `processed_events`
 `INSERT … ON CONFLICT DO NOTHING RETURNING` ile hangi olayın gerçekten *iddia edildiği* belirleniyor.
 [Topic · Konu: En az bir kez, idempotency, atomiklik]
 
-**Reproduce (adım adım):** `CONFIRM=1 make repro P=P06-01` — tüketiciyi **önce durdurup** 2000
-tıklamalık bir birikim yaratır, sonra açıp birikimi işlerken üç kez öldürür, son sayımı ve
-`duplicate` sayacını gösterir.
+**Reproduce (adım adım):** `CONFIRM=1 make repro P=P06-01`
+  1. Tüketicide `TRAP_COMMIT_DELAY_MS=30000` açılır: yazma ile offset commit'i arasına 30 sn (§7).
+  2. Tüketici **durdurulur**, 2000 tıklamalık birikim topic'te bekler.
+  3. Tüketici açılır; ilk parti veritabanında görünür görünmez (tıklama sayısı artmaya başladığı an)
+     pod öldürülür — offset'i henüz commit edilmemiştir (script pod'un commit sayacını da basar: 0).
+  4. Yeni pod, sert öldürülen üyenin oturumu dolunca (~45 sn) partition'ı alır ve aynı partiyi
+     **yeniden** okur. Hüküm yeni pod'un kendi sayacına dayanır: `duplicate > 0` **ve** sayım tam N.
 
-**Ölçüm dersi:** İlk hâlde tıklamalar üretilirken tüketici de çalışıyordu; olayları anında işleyip
-commit ettiği için öldürdüğümüzde ortada **commit edilmemiş parti kalmıyordu**. Deney, ölçmek
-istediği durumu hiç oluşturmadan "tekrar teslim gözlenmedi" diyordu. *Bir yarışı ölçmek istiyorsan
-önce o yarışın oluşacağı koşulu kurmak zorundasın.*
+**Ölçüm dersi:** Tekrar teslim kendiliğinden görünmez. Tıklamalar üretilirken tüketici de
+çalışıyorsa ortada commit edilmemiş parti kalmaz. Birikim kurulsa bile tüketiciyi açıldıktan sabit
+bir süre (ör. 35 sn) sonra öldürmek pencereyi kaçırır: 2000 kayıt tek poll'da okunup tek
+transaction'da yazılır ve hemen commit edilir — partition'ı aldıktan sonra bir saniyeden kısa
+sürede. Öldürme geldiğinde birikim çoktan yazılmış **ve** commit edilmiştir, tekrar teslim olamaz;
+`sayım == N` hükmü yine de geçer, çünkü hiç öldürülmemiş sağlıklı bir tüketici de tam N sayar.
+*Bir yarışı ölçmek istiyorsan önce penceresini kurmalı, sonra ona denk geldiğini kanıtlamalısın.*
+`TRAP_COMMIT_DELAY_MS` yaz → commit sırasını değiştirmez; her en-az-bir-kez tüketicide var olan
+boşluğu bilerek vurulabilecek kadar açık tutar.
 
-**Grafana:** `08 · Stream` → "consumer records by result"; `07 · Analytics` → tıklama farkı.
+**Grafana'da gör:** [`08 · Stream (Redpanda)`](http://grafana.localtest.me/d/ladder-stream?var-level=lvl06&from=now-15m&to=now&refresh=10s) — scripti başlatınca aç; deney ~4 dk sürer (giriş: admin / ladder)
+- "Tüketici gecikmesi (bölüme göre)" → tüketici kapalıyken `bölüm 0` üretilen tıklama kadar (≈2000) yükselir ve yatay kalır. İlk pod birikimi yazdığı hâlde commit etmeden öldüğü için **inmez**; ancak yeni pod partiyi yeniden işleyip 30 sn sonra commit edince 0'a düşer.
+- "Onaylama / sn ve tüketici pod sayısı" → `tüketici pod` önce 0'a iner (birikim kuruluyor), sonra 1'e döner; ilk pod hiç commit etmeden öldüğü için `onaylama / sn` ancak yeni pod'la belirir.
+- "Tüketilen kayıtlar (sonuca göre)" → yeni pod devraldıktan sonra bir `duplicate` tepesi: aynı olaylar ikinci kez geldi ve idempotency onları saymadı. İlk pod'un `ok`'u çoğu zaman görünmez — yazar yazmaz öldürüldü, kazınmaya vakit kalmadı; script bu yüzden sayaçları Prometheus'tan değil doğrudan pod'dan okur.
+- "Üretilen ve tüketilen olaylar (toplam)" → `üretilen` birikim sırasında N kadar sıçrar; `tüketilen` (yalnızca `ok`) N'in **üstüne çıkmaz**: tekrar teslim edilenler çift sayılmadı. İlk pod'un sayacı kaybolduğu için altında da kalabilir; kesin sayım scriptin veritabanından okuduğu sayıdır.
+- `07 · Analytics` → tıklama farkı paneli bu deneyde boş kalır: tıklamalar k6 ile değil `curl` ile üretiliyor ve `analytics_*` metriği yok.
+
 **Kritik ayrıntı:** İddia ve sayım **aynı transaction'da** commit ediliyor. Aralarında bir çökme,
 tam da engellemeye çalıştığımız çift sayımı yeniden yaratırdı.
 **Bedeli:** Saklama penceresi boyunca tıklama başına bir satır. *"Tam bir kez etki"nin fiyatı budur;
@@ -123,7 +151,11 @@ birikmiş olaylar işlenir ve sayı yakalar.
 **Reproduce (adım adım):** `make repro P=P06-02` — tüketiciyi `replicas=0` yapar, 2000 tıklama
 üretir (paralel), bayatlığı ölçer, geri açıp yakalama süresini ölçer.
 
-**Grafana:** `08 · Stream` → "consumer lag by partition", "produced vs consumed vs written".
+**Grafana'da gör:** [`08 · Stream (Redpanda)`](http://grafana.localtest.me/d/ladder-stream?var-level=lvl06&from=now-15m&to=now&refresh=10s) — scripti başlatınca aç; tüketici ~2 dk kapalı kalır (giriş: admin / ladder)
+- "Tüketici gecikmesi (bölüme göre)" → tüketici durunca `bölüm 0` üretilen tıklama kadar (≈2000) yükselir ve 120 sn boyunca **yatay** kalır: kimse müdahale etmedikçe kendiliğinden inmez. Script tüketiciyi elle açınca 0'a düşer.
+- "Onaylama / sn ve tüketici pod sayısı" → `tüketici pod` 0'da, `onaylama / sn` yok: lag büyürken tüketiciyi geri getiren bir şey yok (07'de KEDA bu çizgiyi lag'e göre yükseltecek).
+- "Üretilen ve tüketilen olaylar (toplam)" → `üretilen` yükselir, `tüketilen` yatay kalır; aradaki açıklık lag'in kendisidir. Tüketici açılınca `tüketilen` yetişir: veri kaybolmadı, yalnızca bekledi.
+
 **Nerede çözülüyor:** 07 — KEDA lag'i **ölçekleme sinyali** yapacak. Ama dikkat: tek partition varsa
 tüketici artırmak işe yaramaz (P06-03). Lag bir hata değil bir **ölçüdür**; eşiği bir ürün kararıdır.
 **05 ile fark:** Aynı senaryo 05'te kalıcı kayıptı. Şimdi yalnızca gecikme.
@@ -139,7 +171,11 @@ yalnızca bir tüketici okuyabilir. [Topic · Konu: Partition, paralellik tavan�
 **Reproduce (adım adım):** `CONFIRM=1 make repro P=P06-03` — 1 ve 3 replika ile işleme hızını ve
 gerçekten iş yapan pod sayısını karşılaştırır.
 
-**Grafana:** `08 · Stream` → "consumer lag by partition", "consumer commit/s & pods".
+**Grafana'da gör:** [`08 · Stream (Redpanda)`](http://grafana.localtest.me/d/ladder-stream?var-level=lvl06&from=now-15m&to=now&refresh=10s) — scripti başlatınca aç; iki yük fazı var: önce 1, sonra 3 tüketici (giriş: admin / ladder)
+- "Onaylama / sn ve tüketici pod sayısı" → `tüketici pod` 1'den 3'e çıkar ama `onaylama / sn` iki fazda da aynı tepeye çıkar: pod sayısı üç katına çıktı, iş hızı değişmedi.
+- "Tüketici gecikmesi (bölüme göre)" → tek çizgi (`bölüm 0`), çünkü tek partition var; iki fazda da yük sırasında yükselir ve benzer sürede erir.
+- Explore'da: `sum by (pod) (rate(consumer_records_total{namespace="lvl06",result="ok"}[1m]))` → 3 replikalı fazda üç `analytics-…` pod'undan yalnızca **biri** sıfırdan büyük; diğer ikisi partition alamadığı için 0'da düz.
+
 **Çözüm:** `rpk topic add-partitions clicks -n 6`.
 **Bedeli:** Partition **başına** sıra garantisi vardır, global sıra yoktur. Anahtarı kısa kod seçmemiz
 bu yüzden: aynı linkin olayları aynı partition'a düşer ve sırası korunur. Aynı seçim P06-05'te
@@ -147,19 +183,33 @@ sıcak bir linkin tek partition'a yüklenmesi demek — *aynı madalyonun iki y�
 
 ---
 
-### P06-04 · Poison message boru hattını rehin alır
+### P06-04 · TRAP · Poison message boru hattını rehin alır
 
 **Belirti:** Ayrıştırılamayan tek bir mesaj, DLQ olmadan **arkasındaki her şeyi** durdurur:
 offset ilerlemez, lag sınırsız büyür.
 **Neden:** Tüketici işleyemediği mesajda sadece hata verirse, aynı mesaj sonsuza kadar yeniden
 teslim edilir. [Topic · Konu: Poison message, DLQ]
 
-**Reproduce (adım adım):** `make repro P=P06-04` — topic'e bozuk JSON basar, ardından geçerli
-tıklamalar üretir ve **arkadakilerin işlenip işlenmediğini** ölçer.
+**Reproduce (adım adım):** `make repro P=P06-04` — iki faz, aynı bozuk kayıt:
+  1. `TRAP_NO_DLQ=true` (§7): önce 20 geçerli tıklamanın işlendiği doğrulanır (tüketici sağlam).
+     Sonra topic'e, tıklamalarla aynı partition'a düşecek biçimde 3 bozuk JSON ve **arkasından**
+     200 geçerli tıklama basılır. 30 sn sonra: kaçı işlendi, grup gecikmesi (`rpk group describe`)
+     ne, tüketici aynı kaydı yeniden deniyor mu?
+  2. Tuzak kapatılır (DLQ açık): yeni tüketici aynı bozuk kaydı `clicks-dlq`'ya taşır ve bekleyen
+     200 tıklamayı işler.
+  Hüküm: 1. fazda 0/200, 2. fazda 200/200 işlenirse REPRODUCED. Tuzak açıkken tıklamalar yine
+  işlendiyse iddia yanlıştır (NOT-REPRODUCED).
 
-**Grafana:** `08 · Stream` → "consumer records by result" (`dlq`), "consumer lag by partition".
+**Grafana'da gör:** [`08 · Stream (Redpanda)`](http://grafana.localtest.me/d/ladder-stream?var-level=lvl06&from=now-15m&to=now&refresh=10s) — scripti başlattıktan ~1 dk sonra aç; iki faz ~4 dk sürer (giriş: admin / ladder)
+- "Tüketilen kayıtlar (sonuca göre)" → tuzak fazında `ok` sıfıra iner ve yerine sabit hızda bir `error` serisi akar (~3/sn): **aynı** 3 bozuk kayıt her saniye yeniden deneniyor, arkasındaki 200 tıklamanın hiçbiri işlenmiyor. DLQ fazında `dlq`'da küçük bir tepe, hemen ardından bekleyen tıklamaların `ok` tepesi.
+- "Tüketici gecikmesi (bölüme göre)" → tuzak fazında `bölüm 0` ~200'e çıkar ve orada kalır — üretim sürseydi büyümeye devam ederdi: offset ilerlemiyor. DLQ açılınca 0'a iner.
+- "Onaylama / sn ve tüketici pod sayısı" → tuzak fazında `tüketici pod` 1, `onaylama / sn` 0: süreç ayakta, `/healthz` 200 dönüyor, ama hiçbir şey commit edilmiyor.
+- "Ölü mektup kutusuna giden / sn" → yalnızca ikinci fazda küçük bir tepe (3 kayıt, bir dakikaya yayılır).
+
 **Kural:** Bir tüketici, işleyemediği mesaj için bir **çıkış yolu** tanımlamak zorundadır —
 atla+say, DLQ'ya taşı ya da bilinçli olarak dur. *"Tanımlamamak" da bir seçimdir: sonsuza kadar dene.*
+Takılan tüketicinin sağlık ucu "iyiyim" der: *süreç ayakta* ile *iş ilerliyor* aynı şey değildir —
+ilerlemenin ölçüsü lag'dir.
 
 ---
 
@@ -168,13 +218,26 @@ atla+say, DLQ'ya taşı ya da bilinçli olarak dur. *"Tanımlamamak" da bir seç
 **Belirti:** Redpanda tamamen durdurulduğunda **redirect çalışmaya devam eder** (5xx yok);
 producer tamponu dolar ve sınırı aşan kayıtlar düşürülür.
 **Neden:** `Record()` bloklamıyor ve tampon **sınırlı**. Bloklasaydı bir broker kesintisi doğrudan
-bir site kesintisi olurdu; sınırsız tamponlasaydık (kütüphanenin varsayılanı!) bellek dolar, pod
-OOM olur ve yine site çökerdi. [Topic · Konu: Bağımlılık izolasyonu, back pressure]
+bir site kesintisi olurdu — ve kütüphanenin varsayılanı tam olarak bu: franz-go'nun tamponu 10.000
+kayıtta dolar ve `Produce` çağıranı bekletir. Sınırsız tamponlasaydık bellek dolar, pod OOM olur ve
+yine site çökerdi. Bu yüzden geçerli sınır uygulamanınki (`PRODUCER_MAX_BUFFERED`), istemcininki onun
+üstünde yalnızca bir güvenlik ağı, ve kayıt beklemeyen `TryProduce` ile ekleniyor. 10.000'de
+bloklamanın birim testi: `internal/stream/producer_test.go`.
+[Topic · Konu: Bağımlılık izolasyonu, back pressure]
 
-**Reproduce (adım adım):** `CONFIRM=1 make repro P=P06-05` — broker'ı `replicas=0` yapar, aynı yükü
-verir, p99 / 5xx / tampon / düşürme / bellek ölçer.
+**Reproduce (adım adım):** `CONFIRM=1 make repro P=P06-05` — tampon sınırını deney boyunca 500'e
+indirir (`BUF_TEST`; varsayılan 50.000 kısa bir kesintide hiç dolmaz, düşürme yolu sınanmaz),
+broker'ı `replicas=0` yapar, aynı yükü verir, p99 / 5xx / tampon / düşürme / bellek ölçer. Hüküm:
+broker yokken hata oranı %1'in altında **ve** düşürülen kayıt > 0.
 
-**Grafana:** `08 · Stream` → "producer buffer & drops"; `02 · App RED` → p99.
+**Grafana'da gör:** [`08 · Stream (Redpanda)`](http://grafana.localtest.me/d/ladder-stream?var-level=lvl06&from=now-15m&to=now&refresh=10s), [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl06&from=now-15m&to=now&refresh=10s) ve [`01 · Pods & Resources`](http://grafana.localtest.me/d/ladder-pods?var-level=lvl06&from=now-15m&to=now&refresh=10s) — iki yük fazı var: broker ayakta, sonra broker kapalı (giriş: admin / ladder)
+- "Üretici tamponu ve atılanlar" → broker kapanınca "tamponda: linkly-…" çizgileri yükselir ve sınıra (deneyde 500) dayanır; aynı anda "atılan / sn" çizgisi belirir: sınırı aşan kayıtlar bekletilmiyor, düşürülüyor. Broker geri gelince tampon 0'a iner. (Varsayılan 50.000'lik sınırla kısa bir kesintide "atılan" 0 kalır.)
+- "Üretilen kayıt / sn" → broker kapalıyken 0'a düşer: tıklama olayları broker'a ulaşmıyor.
+- "Broker ayakta mı" → çizgi 0'a inmez, **kesilir**: pod yok, kazınacak hedef de yok. Aynı sebeple "Tüketici gecikmesi (bölüme göre)" de bu arada boştur — lag'i broker'ın kendisi raporluyor.
+- "Sunucu hatası oranı (5xx)" (App RED) → iki fazda da 0 civarında: redirect broker'ı beklemiyor.
+- "Gecikme (p50 / p95 / p99)" (App RED) → iki fazı karşılaştır; broker kapalıyken de benzer kalmalı. Belirgin bir sıçrama, `Record()`'un istek yolunu bloklamaya başladığı anlamına gelir.
+- "Bellek kullanımı" (Pods) → `linkly-…` pod'larının belleği tamponla biraz artar ama limit çizgisinin altında kalır.
+
 **Nerede çözülüyor:** Kısmen seviye içi (sınır + düşürme), tam çözüm 14 (3 broker + replikasyon).
 *Bir broker kesintisi analitiği bozabilir, redirect'i asla.*
 
@@ -193,10 +256,29 @@ varsayılan modda **eksilmez** (tekrarlar idempotency ile yutulur).
 
 [Topic · Konu: Teslimat garantisi, commit noktası]
 
-**Reproduce (adım adım):** `CONFIRM=1 make repro P=P06-06` — her iki modda da önce birikim yaratır
-(tüketici kapalı), sonra tüketiciyi işleme sırasında öldürüp son sayımları karşılaştırır.
+Varsayılan sırada yazma **başarısız** olursa tüketici aynı partiyi yerinde, geri çekilerek yeniden
+dener ve o partinin ötesini okumaz (`internal/stream/consumer.go · writeBatch`): offset commit'i o
+ana kadar okunan **her şeyi** kapsar, yani başarısız partiyi atlayıp devam eden bir tüketici sonraki
+sağlam partiyle onu da commit eder ve o tıklamalar bir daha gelmez. TRAP sırasında offset yazmadan
+önce commit edildiği için korunacak bir şey kalmaz: tek deneme, başarısızlık kayıptır.
 
-**Grafana:** `08 · Stream` → "consumer records by result" (`duplicate`).
+**Reproduce (adım adım):** `CONFIRM=1 make repro P=P06-06`
+  1. Tüketicide `TRAP_COMMIT_DELAY_MS=30000` açılır: iki adımın arasına 30 sn (§7). Sıra değişmez.
+  2. Her fazda tüketici **durdurulur**, 2000 tıklamalık birikim topic'te bekler, sonra tüketici açılır.
+  3. **Varsayılan faz:** ilk parti veritabanında görünür görünmez pod öldürülür (o an commit sayacı 0:
+     "yazıldı, commit edilmedi"). Yeni pod partiyi yeniden okur; idempotency tekrarı yutar.
+  4. **TRAP fazı** (`TRAP_COMMIT_BEFORE_WRITE=true`): pod'un commit sayacı artar artmaz, parti
+     veritabanına yazılmadan öldürülür ("commit edildi, yazılmadı"). Yeni pod commit edilmiş
+     offset'ten devam eder; o parti bir daha gelmez.
+  5. Sayım, broker'daki grup gecikmesi 0'a inip tıklama sayısı durulunca okunur. Hüküm iki gözleme
+     dayanır: varsayılan faz **tam** N, TRAP fazı N'in **altında**. Öldürme aralığa denk gelmediyse
+     (öldürme anındaki commit/yazma sayıları tutmuyorsa) script hüküm vermez, `exit 2` ile çıkar.
+
+**Grafana'da gör:** [`08 · Stream (Redpanda)`](http://grafana.localtest.me/d/ladder-stream?var-level=lvl06&from=now-30m&to=now&refresh=10s) — iki faz var (varsayılan, sonra TRAP), her biri ~3 dk; 30 dk'lık pencere ikisini de kapsar (giriş: admin / ladder)
+- "Tüketici gecikmesi (bölüme göre)" → iki tepe, her faz için bir tane: tüketici kapalıyken birikimle (`N`, varsayılan 2000) yükselir. Varsayılan fazda ilk pod yazdığı hâlde commit etmeden öldüğü için tepe **inmez**, yeni pod partiyi yeniden işleyip 30 sn sonra commit edince 0'a düşer. TRAP fazında tepe ilk pod'un commit'iyle hemen 0'a iner — ama o tıklamalar hiç yazılmadı.
+- "Tüketilen kayıtlar (sonuca göre)" → varsayılan fazda yeni pod devraldıktan sonra bir `duplicate` tepesi (tekrar teslim geldi, idempotency yuttu); TRAP fazında `duplicate` görünmez — offset yazmadan önce commit edildiği için tekrar teslim yok.
+- "Üretilen ve tüketilen olaylar (toplam)" → TRAP fazında `tüketilen`, `üretilen`in altında kalır: commit edilip yazılamayan kayıtlar bir daha gelmez. Öldürülen pod'ların sayaçları kazınamadan kaybolabilir; kesin karşılaştırma scriptin veritabanından okuduğu sayımdır.
+
 **Ders:** *Mühendislik, hangi hatayı yaşayacağını seçmektir.* "Tam bir kez teslimat" bir pazarlama
 terimidir; gerçekte olan **en-az-bir-kez + idempotent yazma**dır. Ayrıca otomatik commit'in neden
 kapalı olduğu da bu tabloda: zamanlayıcıyla commit, garantiyi sessizce ikinci satıra çevirir.
@@ -213,7 +295,11 @@ bilmediği sürümde patlarsa, üreticinin tek satırlık değişikliği tüm an
 **Reproduce (adım adım):** `make repro P=P06-07` — topic'e `v:99` bir olay basar, ardından normal
 tıklamalar üretir, `unknown_version` sayacını ve akışın devam edip etmediğini ölçer.
 
-**Grafana:** `08 · Stream` → "consumer records by result" (`unknown_version`).
+**Grafana'da gör:** [`08 · Stream (Redpanda)`](http://grafana.localtest.me/d/ladder-stream?var-level=lvl06&from=now-15m&to=now&refresh=10s) ve [`01 · Pods & Resources`](http://grafana.localtest.me/d/ladder-pods?var-level=lvl06&from=now-15m&to=now&refresh=10s) — scripti başlattıktan ~1 dk sonra aç (giriş: admin / ladder)
+- "Tüketilen kayıtlar (sonuca göre)" → `unknown_version` serisinde çok küçük bir tepe (tek kayıt, bir dakikaya yayılır); `ok` kesilmeden devam eder: tüketici v99'u atladı, akış durmadı.
+- "Ölü mektup kutusuna giden / sn" → 0 kalır: v99 bozuk değil, geçerli JSON — bu bir poison message (P06-04) değil.
+- "Yeniden başlatma sayısı" (Pods) → `analytics-…` pod'unun çizgisi yatay kalır: tüketici çökmedi.
+
 **Üç kural:**
 1. Tüketici bilmediği **alanları** yok saymalı, bilmediği **sürümü** görünür biçimde atlamalı.
 2. Alan **eklemek** uyumludur; alan **silmek** ve alanın **anlamını değiştirmek** değildir.
@@ -228,7 +314,8 @@ Daha güçlü çözüm: şema kayıt defteri + uyumluluk kuralları (14'te opsiy
 | Bayrak | Ne yapar | Reproduce | Düzeltme |
 |---|---|---|---|
 | `TRAP_COMMIT_BEFORE_WRITE` | Offset'i yazmadan önce commit eder | `CONFIRM=1 make repro P=P06-06` | Bayrağı kapat (yaz → commit) |
-| `TRAP_NO_DLQ` | Bozuk mesajı DLQ'ya taşımaz | `make repro P=P06-04` | Bayrağı kapat |
+| `TRAP_NO_DLQ` | Bozuk mesaj için çıkış yolu yok: tüketici aynı kaydı sonsuza kadar yeniden dener, offset ilerlemez, lag büyür | `make repro P=P06-04` | Bayrağı kapat (DLQ) |
+| `TRAP_COMMIT_DELAY_MS` | Yazma ile offset commit'i arasına bekleme koyar: varsayılan sırada "yazıldı, commit edilmedi", `TRAP_COMMIT_BEFORE_WRITE` ile "commit edildi, yazılmadı" penceresini açar (garantiyi değiştirmez) | `CONFIRM=1 make repro P=P06-01` · `P06-06` | Bayrağı kapat |
 | `TRAP_REDIRECT_301` | (05'ten devam) | `make repro P=P05-06` (05'te) | — |
 
 Elle denemeye değer:
@@ -245,16 +332,18 @@ Elle denemeye değer:
 
 | Dashboard | Durum | Neden |
 |---|---|---|
-| `08 · Stream` | **Dolu** ✨ | produce rate, tampon, consumer lag, commit, duplicate, DLQ |
-| `07 · Analytics` | Kısmen | `analytics_*` metrikleri **kayboldu** (kuyruk artık yok); yerine `consumer_*` geldi |
-| `05 · Postgres` | Dolu | `op=write_clicks_idem` yeni |
-| `04 · Cache` · `06 · Redis` · `02 · App RED` · `03 · App Business` | Dolu | — |
-| `09 · Autoscaling` | Boş | HPA/KEDA yok (07) |
-| `11 · Resilience` · `12 · SLO` · `13 · Rollout` | Boş | — |
+| [`08 · Stream`](http://grafana.localtest.me/d/ladder-stream?var-level=lvl06&from=now-15m&to=now) | **Dolu** ✨ | produce rate, tampon, consumer lag, commit, duplicate, DLQ |
+| [`07 · Analytics`](http://grafana.localtest.me/d/ladder-analytics?var-level=lvl06&from=now-15m&to=now) | Kısmen | `analytics_*` metrikleri **kayboldu** (kuyruk artık yok); yerine `consumer_*` geldi |
+| [`05 · Postgres`](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl06&from=now-15m&to=now) | Dolu | `op=write_clicks_idem` yeni |
+| [`04 · Cache`](http://grafana.localtest.me/d/ladder-cache?var-level=lvl06&from=now-15m&to=now) · [`06 · Redis`](http://grafana.localtest.me/d/ladder-redis?var-level=lvl06&from=now-15m&to=now) · [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl06&from=now-15m&to=now) · [`03 · App Business`](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl06&from=now-15m&to=now) | Dolu | — |
+| [`09 · Autoscaling`](http://grafana.localtest.me/d/ladder-autoscaling?var-level=lvl06&from=now-15m&to=now) | Boş | HPA/KEDA yok (07) |
+| [`11 · Resilience`](http://grafana.localtest.me/d/ladder-resilience?var-level=lvl06&from=now-15m&to=now) · [`12 · SLO`](http://grafana.localtest.me/d/ladder-slo?var-level=lvl06&from=now-15m&to=now) · [`13 · Rollout`](http://grafana.localtest.me/d/ladder-rollout?var-level=lvl06&from=now-15m&to=now) | Boş | — |
 
-Yeni ve en önemli panel: **"produced vs consumed vs written"**. Üç çizgi üst üste binmeli.
-Ayrışıyorlarsa: produced > consumed → lag (P06-02) · consumed > written → yazma hatası ·
-written > produced → **çift sayma** (idempotency bozulmuş).
+Yeni ve en önemli panel: **"Üretilen ve tüketilen olaylar (toplam)"**. İki çizgi (`üretilen`,
+`tüketilen`) üst üste binmeli. `tüketilen` yalnızca veritabanına **ilk kez** yazılan olayları sayar
+(`result="ok"`); tekrar teslim edilenler `duplicate` olarak ayrı sayılır ve bu çizgiye girmez.
+Ayrışıyorlarsa: üretilen > tüketilen → lag (P06-02) ya da yazma hatası (hangisi olduğunu "Tüketilen
+kayıtlar (sonuca göre)"deki `error` söyler) · tüketilen > üretilen → **çift sayma** (idempotency bozulmuş).
 
 ## 9. Bilerek bırakılanlar
 

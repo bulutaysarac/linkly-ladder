@@ -20,16 +20,20 @@ have=$(kubectl -n "$NS" get "$(wl redirect)" -o jsonpath='{.spec.replicas}' 2>/d
 note "manifest: ${want:-?} replika · cluster: ${have:-?} replika"
 step "DRIFT üret: kubectl ile elle değiştir"
 kubectl -n "$NS" scale "$(wl redirect)" --replicas=5 >/dev/null 2>&1 || kubectl -n "$NS" patch "$(wl redirect)" --type=merge -p '{"spec":{"replicas":5}}' >/dev/null
-sleep 5
+# Drift'i en az İKİ kazıma aralığı tut: Argo Rollouts denetleyicisi 30 sn'de bir kazınıyor; 5 sn'lik
+# bir sapma "Dağıtım aşaması (Argo Rollouts)" panelinin `istenen replika` çizgisine çoğu zaman hiç
+# düşmez — panel, o kadar kısa bir olayı gösteremeyecek kadar kaba örnekler.
+# EN: hold the drift for at least two scrape intervals (30s) or the panel usually misses it.
+sleep "${DRIFT_HOLD:-65}"
 drifted=$(kubectl -n "$NS" get "$(wl redirect)" -o jsonpath='{.spec.replicas}' 2>/dev/null) || true
 note "elle değiştirildi → cluster: ${drifted:-?} replika (manifest hâlâ ${want:-?} diyor)"
 note "Bu değişiklik: git'te YOK · gözden geçirilmedi · kim yaptı bilinmiyor · yeni bir cluster"
 note "kurduğunda KAYBOLUR. Ve en kötüsü: bir sonraki 'make up' onu sessizce geri alır."
 step "Manifest'i yeniden uygula — drift kaybolur"
-# DİKKAT: burada `make deploy` ÇAĞIRMIYORUZ. İlk hâl öyle yapıyordu ve 12'nin Makefile'ı kendi
-# NS'ini (lvl12) kullandığı için, bu script 13'ün `verify-prev`i içinde koştuğunda ÜÇÜNCÜ bir
-# seviyeyi kümeye kuruyordu: aynı anda iki seviye ayakta, etcd zaman aşımları, ve ölçtüğün
-# ortam artık ölçmek istediğin ortam değil.
+# DİKKAT: burada `make deploy` ÇAĞIRMIYORUZ. 12'nin Makefile'ı kendi NS'ini (lvl12) kullanır;
+# bu script 13'ün `verify-prev`i içinde koşarken `make deploy` ÜÇÜNCÜ bir seviyeyi kümeye
+# kurardı: aynı anda iki seviye ayakta, etcd zaman aşımları, ve ölçtüğün ortam artık ölçmek
+# istediğin ortam değil.
 # Bir önceki seviyenin scripti, BULUNDUĞU namespace'ten başka bir yere dokunamaz.
 # EN: do NOT call `make deploy` here — level 12's Makefile targets its OWN namespace, so running
 # this script inside level 13's verify-prev would stand up a THIRD level in the cluster.
@@ -39,7 +43,9 @@ kubectl -n "$NS" patch "$(wl redirect)" --type=merge -p "{\"spec\":{\"replicas\"
 sleep 8
 after=$(kubectl -n "$NS" get "$(wl redirect)" -o jsonpath='{.spec.replicas}' 2>/dev/null) || true
 note "yeniden uygulamadan sonra: ${after:-?} replika"
-grafana_hint "13 · Rollout → 'Argo CD sync durumu' (Application tanımlıysa dolar)"
+note "Grafana'da drift'in KENDİSİ görünmez: 13 · Rollout → 'Git ile uyumsuz uygulamalar (Argo CD)' boş, çünkü"
+note "lvl12 için Application yok (karşılaştıran kimse yok); 'Dağıtım aşaması (Argo Rollouts)' → 'istenen replika'"
+note "3 → 5 → 3 basamağını gösterir ama bunun bir sapma olduğunu, kimin yaptığını ve geri alındığını söylemez."
 note "Bu merdivende manifest'ler git'te ve 'make up' onları uyguluyor — yani ELDE bir GitOps var."
 note "Argo CD'nin eklediği üç şey: (1) SÜREKLİ karşılaştırma (sen uygulamasan da), (2) otomatik"
 note "self-heal (drift'i kendisi geri alır), (3) görünürlük (hangi kaynak neden farklı)."

@@ -11,25 +11,25 @@ psql() { kubectl -n "$NS" exec "$prim" -c postgres -- psql -U postgres -d linkly
 on_cleanup "kubectl -n \"$NS\" exec $prim -c postgres -- psql -U postgres -d linkly -tAc \"ALTER TABLE links RENAME COLUMN url_old TO url\" >/dev/null 2>&1 || true"
 step "Şu anki şema (expand uygulanmış: hem url hem target_url var)"
 psql "SELECT string_agg(column_name, ', ' ORDER BY ordinal_position) FROM information_schema.columns WHERE table_name='links'" | sed 's/^/    /'
-# KIRICI migration'ın metni buraya taşındı — çünkü bir DENEY, migration SIRASINDA durmamalı.
+# KIRICI migration'ın metni burada, migration sırasında DEĞİL — çünkü bir DENEY, sırada durmamalı.
 # EN: This is what everyone writes the first time: one clean statement that renames the column.
 #     It is also a guaranteed outage during a rolling update: for the seconds or minutes while
 #     old and new pods coexist, the old ones SELECT a column that no longer exists. Postgres is
 #     not the problem here — the deployment model is. Ship this on purpose once, watch the 500s,
 #     and the expand/contract discipline stops feeling like bureaucracy.
-#     It used to live as `007_breaking_rename.sql` in the migration sequence. Levels 13 and 14
-#     run migrations up to the RLS step, so goose applied the rename on the way past and the
-#     level broke its OWN app ("column url does not exist", every write 503). An experiment that
+#     It is not a file in the migration sequence on purpose. Levels 13 and 14 run migrations up
+#     to the RLS step, so goose would apply a sequenced rename on the way past and the level
+#     would break its OWN app ("column url does not exist", every write 503). An experiment that
 #     sits in the sequence stops being an experiment and becomes a cost everyone pays.
 # TR: Bu, herkesin ilk seferinde yazdığı şeydir: sütunu yeniden adlandıran tek, temiz bir ifade.
 #     Aynı zamanda rolling update sırasında GARANTİ bir kesintidir: eski ve yeni pod'lar bir arada
 #     yaşadığı saniyeler ya da dakikalar boyunca eskiler artık var olmayan bir sütunu SELECT eder.
 #     Buradaki sorun Postgres değil, DAĞITIM MODELİDİR. Bunu bilerek bir kez dağıt, 500'leri gör;
 #     expand/contract disiplini o andan sonra bürokrasi gibi gelmez.
-#     Eskiden `007_breaking_rename.sql` olarak migration sırasındaydı. 13 ve 14 migration'ları
-#     RLS adımına kadar koşuyor, yani goose yolda rename'i de uyguluyordu ve seviye KENDİ
-#     uygulamasını bozuyordu. Sıraya konmuş bir deney, deney olmaktan çıkıp herkesin ödediği
-#     bir bedele dönüşür.
+#     Bilerek migration sırasında bir dosya DEĞİL. 13 ve 14 migration'ları RLS adımına kadar
+#     koşuyor; sıraya konmuş bir rename'i goose yolda uygular ve seviye KENDİ uygulamasını
+#     bozardı ("column url does not exist", her yazma 503). Sıraya konmuş bir deney, deney
+#     olmaktan çıkıp herkesin ödediği bir bedele dönüşür.
 step "Yük altında KIRICI migration'ı uygula (url → url_old)"
 ( k6run mixed --vus 15 --duration 90s >/tmp/p1202.k6 2>&1 ) & kpid=$!
 sleep 15
@@ -44,7 +44,7 @@ psql "ALTER TABLE links RENAME COLUMN url_old TO url" >/dev/null
 t1=$(date +%s)
 wait $kpid || true
 e5=$(k6_5xx); reqs=$(k6_reqs)
-grafana_hint "05 · Postgres → 'DB queries by op' (result=error) · 02 · App RED → 5xx"
+grafana_hint "02 · App RED → 'İstek / saniye (durum koduna göre)' + '5xx (uç noktaya göre)' · 03 · App Business → 'Oluşturma sonuçları'"
 note "kırık pencere: ~$((t1-t0)) sn · DB hatası=${errs%%.*} · 5xx (Prometheus)=${e5_mid%%.*} · k6 5xx=$e5"
 note "Kritik nokta: uygulamayı GERİ ALSAN bile şema geri gelmez. Dağıtım geri alınabilir;"
 note "migration ancak SEN geri alınabilir yazdıysan geri alınabilir."

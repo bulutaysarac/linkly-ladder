@@ -15,14 +15,14 @@ note "şema sürümü (goose): ${dbver:-?} · uygulama imaj etiketi: ${appimg:-?
 note "Bu iki sayı BAĞIMSIZ ilerliyor ve hiçbir yerde birbirine bağlı değil. 'Hangi kod hangi"
 note "şemayla uyumlu?' sorusunun cevabı yalnızca insan hafızasında."
 # DÜŞEMEYEN BİR DENEY, DENEY DEĞİLDİR.
-# EN: the verdict used to be `[[ -n "$dbver" ]] && [[ -n "$appimg" ]]` — it passed whenever two
-#     strings could be read, which is true in every healthy cluster. That is not a measurement of
+# EN: a verdict like `[[ -n "$dbver" ]] && [[ -n "$appimg" ]]` passes whenever two strings can
+#     be read, which is true in every healthy cluster. That is not a measurement of
 #     the claim ("the app rolls back, the schema does not"); it is a tautology wearing a verdict's
 #     clothes, and a script that cannot fail cannot tell you anything. The falsifiable version is
 #     cheap and static: count the migrations that CANNOT be undone. If every migration in this
 #     repo had a complete Down block and no destructive statement, the script would — correctly —
 #     report NOT-REPRODUCED.
-# TR: hüküm `[[ -n "$dbver" ]] && [[ -n "$appimg" ]]` idi: iki metin okunabildiğinde geçiyordu,
+# TR: `[[ -n "$dbver" ]] && [[ -n "$appimg" ]]` gibi bir hüküm, iki metin okunabildiğinde geçer,
 #     yani sağlıklı her kümede. Bu, iddianın ("uygulama geri alınır, şema alınmaz") ölçümü değil,
 #     hüküm kılığına girmiş bir totolojidir; düşemeyen bir script sana hiçbir şey söyleyemez.
 #     Falsifiye edilebilir hâli ucuz ve statiktir: geri ALINAMAYAN migration'ları say. Bu depodaki
@@ -59,7 +59,8 @@ note "  · DROP COLUMN / DROP TABLE → veri gitti, Down bloğu onu geri GETİRE
 note "  · Veri dönüştürme (UPDATE ... SET x = f(y)) → ters fonksiyon yoksa geri alınamaz"
 note "  · NOT NULL ekleme → geri almak kolay, ama araya giren NULL'sız satırlar sorun olmaz"
 note "  · CREATE INDEX CONCURRENTLY → geri almak kolay (DROP INDEX CONCURRENTLY)"
-grafana_hint "13 · Rollout → 'Rollout fazı' · 05 · Postgres"
+note "Grafana'da görünmez: şema sürümü hiçbir metrikte yok. 13 · Rollout → 'Dağıtım aşaması (Argo Rollouts)'"
+note "uygulamanın fazını gösterir, şemanınkini değil — ikisini bağlayan kayıt yok; sorunun kendisi bu."
 note "Pratik kural: bir sürümde YALNIZCA geriye uyumlu şema değişikliği yap. Böylece uygulamayı"
 note "geri almak şemayı geri almayı GEREKTİRMEZ — expand/contract'ın asıl sebebi budur."
 note "Runbook'a yazılacak cümle: 'Uygulama geri alındığında şema İLERİ kalır ve bu SORUN DEĞİLDİR,"

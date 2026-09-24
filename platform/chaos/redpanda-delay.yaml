@@ -2,15 +2,15 @@
 # YARIŞIN PENCERESİ, ONU BESLEYEN İŞLEMİN SÜRESİDİR — ve doğru işlemi seçmek gerekir.
 #
 # EN: P06-01 needs the consumer to die AFTER the database write committed but BEFORE the Kafka
-#     offset commit landed. Its first version delayed POSTGRES (pg-delay-2s), which widens the
-#     window *before* the write: kill there and the transaction rolls back, nothing was applied,
-#     the redelivery applies it for the first time and there is no duplicate to observe. The
-#     window that matters is the offset commit, so the thing to slow down is the BROKER.
+#     offset commit landed. Delaying POSTGRES (pg-delay-2s) would widen the window *before* the
+#     write: kill there and the transaction rolls back, nothing was applied, the redelivery
+#     applies it for the first time and there is no duplicate to observe. The window that
+#     matters is the offset commit, so the thing to slow down is the BROKER.
 #     Picking the wrong process to slow down produces a perfectly executed experiment that
 #     cannot possibly show the effect.
 # TR: P06-01, tüketicinin veritabanı yazması COMMIT OLDUKTAN SONRA ama Kafka offset commit'i
-#     YERLEŞMEDEN ölmesini ister. İlk hâli POSTGRES'i geciktiriyordu (pg-delay-2s); o, pencereyi
-#     yazmanın ÖNCESİNDE genişletir: orada öldürürsen işlem geri alınır, hiçbir şey uygulanmamıştır,
+#     YERLEŞMEDEN ölmesini ister. POSTGRES'i geciktirmek (pg-delay-2s) pencereyi yazmanın
+#     ÖNCESİNDE genişletir: orada öldürürsen işlem geri alınır, hiçbir şey uygulanmamıştır,
 #     tekrar teslim onu İLK KEZ uygular ve gözlenecek bir duplicate olmaz. Önemli olan pencere
 #     offset commit'idir, yani yavaşlatılacak şey BROKER'dır.
 #     Yavaşlatılacak yanlış süreci seçmek, kusursuz koşan ama etkiyi GÖSTEREMEYEN bir deney üretir.
@@ -21,14 +21,14 @@ spec:
   action: delay
   mode: all
   selector: { namespaces: ["${NS}"], labelSelectors: { app.kubernetes.io/name: redpanda } }
-  # ÖLÇÜLDÜ: 2 sn gecikmede tüketici HİÇ İLERLEMİYOR — 2000 kayıtlık birikimden 0 tanesi
-  # işlendi ve deney "tekrar teslim gözlenmedi" dedi. Gecikme yalnızca commit'i değil FETCH'i de
-  # yavaşlatıyor, yani broker'ı yavaşlatmak tüketiciyi tamamen durdurabilir.
-  # 800 ms: tüketici ilerlemeye devam ediyor ama "yazdım / henüz commit etmedim" penceresi
-  # ölçülebilir genişlikte kalıyor. Bir yarışı gözlemek için sistemi DURDURMAK değil,
+  # ÖLÇÜLDÜ: 2 sn gecikmede tüketici HİÇ İLERLEMEZ — 2000 kayıtlık birikimden 0 tanesi işlenir
+  # ve deney "tekrar teslim gözlenmedi" der. Gecikme yalnızca commit'i değil FETCH'i de
+  # yavaşlatır, yani broker'ı fazla yavaşlatmak tüketiciyi tamamen durdurabilir.
+  # 800 ms: tüketici ilerlemeye devam eder ama "yazdım / henüz commit etmedim" penceresi
+  # ölçülebilir genişlikte kalır. Bir yarışı gözlemek için sistemi DURDURMAK değil,
   # YAVAŞLATMAK gerekir — durdurursan gözlemek istediğin geçiş hiç gerçekleşmez.
-  # EN: at 2s the consumer made NO progress at all (0 of 2000 records) and the experiment
-  # reported "no redelivery". The delay slows FETCH as well as commit. 800ms keeps the consumer
+  # EN: at 2s the consumer makes NO progress at all (0 of 2000 records) and the experiment
+  # reports "no redelivery". The delay slows FETCH as well as commit. 800ms keeps the consumer
   # moving while leaving the write-then-commit window measurably wide.
   delay: { latency: "800ms", jitter: "100ms" }
   direction: to

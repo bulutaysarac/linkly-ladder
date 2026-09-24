@@ -10,7 +10,7 @@ prev=$(ls -d "$ROOT"/[0-9][0-9]-* | sort | awk -v l="$lvl" '{b=$0; sub(".*/","",
 pl=$(basename "$prev"); plvl=${pl%%-*}
 # go.sum KOPYALANIR. Dışlanırsa yerel derleme go.work sayesinde çalışır ama Docker derlemesi
 # (go.work yok, yalnızca go.mod+go.sum) "missing go.sum entry" ile patlar — ve bunu ancak
-# deploy anında fark edersin. Gerçekte oldu: 03 ve 04 sessizce hiç ayağa kalkmadı.
+# deploy anında, seviye sessizce ayağa kalkmadığında fark edersin.
 rsync -a --exclude bin --exclude 'problems/P*.sh' --exclude problems/SOLVES "$prev/" "$ROOT/$new/"
 printf 'LEVEL := %s\nNAME  := %s\ninclude ../ladder.mk\n' "$lvl" "$nm" > "$ROOT/$new/Makefile"
 sed -i '' "s|linkly-ladder/$pl|linkly-ladder/$new|" "$ROOT/$new/go.mod"

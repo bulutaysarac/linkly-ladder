@@ -87,14 +87,14 @@ func main() {
 	}, cache.NewMetrics(met.Registry(), "l2"), "linkly:link:")
 	cached := store.NewCached(db, l2)
 
-	// TRAP_UNBOUNDED_QUEUE: tampon SINIRINI kaldır. 05'te bu bir slice'tı ve tuzak kodda
-	// okunuyordu; 06'da kuyruk Kafka üreticisine taşınınca tuzak MAIN'DE YALNIZCA BASTIRILAN bir
-	// bayrağa dönüştü — deney açıyor, hiçbir şey değişmiyordu. Sınır burada: tampon dolunca
+	// TRAP_UNBOUNDED_QUEUE: tampon SINIRINI kaldır. 05'te kuyruk bir slice'tı; 06'dan itibaren
+	// Kafka üreticisinin tamponudur ve tuzak ONUN sınırını kaldırır — yalnızca log'a basılan bir
+	// bayrak olsaydı deney açar, hiçbir şey değişmezdi. Sınır burada: tampon dolunca
 	// üretici kaydı DÜŞÜRÜR (ve sayar). Sınırsızda düşürme yerine bellek büyür ve pod OOM olur:
 	// yani "veri kaybetme" kararını almayı reddettiğinde, karar senin yerine kernel tarafından
 	// ve en kötü anda alınır (P05-02).
-	// EN: when the queue moved from a slice to the Kafka producer the trap became a flag that is
-	// only PRINTED. Bounded → the producer drops and counts; unbounded → memory grows and the pod
+	// EN: from level 06 on the queue is the Kafka producer's buffer, so the trap lifts THAT limit
+	// (a flag that is only printed would change nothing). Bounded → the producer drops and counts; unbounded → memory grows and the pod
 	// is OOM-killed, i.e. refusing to decide "lose data" hands the decision to the kernel.
 	maxBuf := cfg.ProducerMaxBuffered
 	if cfg.TrapUnboundedQueue {
@@ -119,13 +119,13 @@ func main() {
 
 	api := httpapi.New(cfg, log, met, cached, version)
 	// SetRedis OLMADAN a.rdb NIL KALIR ve ona bağlı tuzaklar SESSİZCE ÖLÜR.
-	// EN: 04-06 wired this and 07+ did not, so `TRAP_READY_CHECKS_REDIS` (P10-02) read its flag,
-	//     found `a.rdb == nil` and did nothing — the experiment ran, measured no difference and
-	//     reported "readiness is fine", which is the OPPOSITE of the lesson. A feature flag guarded
+	// EN: without this call `TRAP_READY_CHECKS_REDIS` (P10-02) reads its flag, finds
+	//     `a.rdb == nil` and does nothing — the experiment runs, measures no difference and
+	//     reports "readiness is fine", which is the OPPOSITE of the lesson. A feature flag guarded
 	//     by a nil dependency is not disabled, it is INVISIBLE: nothing fails, nothing logs.
-	// TR: 04-06 bunu bağlıyordu, 07+ bağlamıyordu; `TRAP_READY_CHECKS_REDIS` (P10-02) bayrağını
-	//     okuyup `a.rdb == nil` görüyor ve hiçbir şey yapmıyordu — deney koşuyor, fark bulamıyor ve
-	//     "readiness sorunsuz" diyordu; dersin TAM TERSİ. Nil bir bağımlılığın arkasındaki bayrak
+	// TR: bu çağrı olmadan `TRAP_READY_CHECKS_REDIS` (P10-02) bayrağını okur, `a.rdb == nil`
+	//     görür ve hiçbir şey yapmaz — deney koşar, fark bulamaz ve "readiness sorunsuz" der;
+	//     dersin TAM TERSİ. Nil bir bağımlılığın arkasındaki bayrak
 	//     kapalı değil GÖRÜNMEZdir: hiçbir şey patlamaz, hiçbir şey loglanmaz.
 	api.SetRedis(rdb)
 	api.SetDistributedLimiter(dist)

@@ -1,4 +1,4 @@
-# CloudNativePG — primary + 2 replika, otomatik failover, PgBouncer (Pooler), yedek/PITR.
+# CloudNativePG — primary + 1 replika, otomatik failover, PgBouncer (Pooler). Yedek/PITR yok (P09-06).
 #
 # EN: Level 02 deliberately shipped a single StatefulSet so you would feel its absence: a dead pod
 #     was a full outage (P02-03), the connection limit was a wall (P02-02), and a bad DELETE was

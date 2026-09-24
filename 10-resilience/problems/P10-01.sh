@@ -27,7 +27,7 @@ step "(2) TRAP_NAIVE_RETRY: 3 deneme, bütçe YOK, jitter yok"
 setenv "$(wl redirect)" TRAP_NAIVE_RETRY=true >/dev/null
 read -r c2 r2 p2 <<< "$(run)"
 note "bütçesiz: bağımlılık çağrısı=$c2 · retry=$r2 · p99=$(awk -v v="$p2" 'BEGIN{printf "%.0f", v*1000}') ms"
-grafana_hint "11 · Resilience → 'retry/s by dep' + 'dependency errors/s' · 05 · Postgres → DB CPU"
+grafana_hint "11 · Resilience → 'Yeniden deneme / sn' + 'Bağımlılık hatası / sn' · 05 · Postgres → 'Veritabanı CPU'"
 note "Bütçesiz retry, BAĞIMLILIK ÇAĞRISI sayısını artırır — yani hata anında yükü KATLAR."
 note "Üstelik jitter'sız retry'lar senkronize olur: aynı anda hata alan herkes aynı anda tekrar dener."
 note "Kural: retry bir KURTARMA aracıdır, bir KAPASİTE aracı değil. Bütçe olmadan retry, arızayı"

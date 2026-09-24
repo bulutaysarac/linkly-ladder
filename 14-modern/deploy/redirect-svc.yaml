@@ -16,6 +16,11 @@ metadata:
 spec:
   selector:
     matchLabels: { app.kubernetes.io/name: redirect }
+  # SÜRÜM ETİKETİ: Argo Rollouts her sürümün pod'larına farklı bir `rollouts-pod-template-hash`
+  # verir; bunu her seriye taşımak "stable vs canary" panellerini mümkün kılar. Uygulama metriklerinde
+  # sürüm etiketi YOK; bu etiket olmadan 13 · Rollout'un "sürüme göre" panelleri tek çizgi çizerdi.
+  # EN: carry the Rollout's per-version pod label onto every series so canary and stable separate.
+  podTargetLabels: [rollouts-pod-template-hash]
   endpoints: [{ port: http, path: /metrics, interval: 10s }]
 ---
 apiVersion: policy/v1

@@ -12,26 +12,27 @@ import (
 // RecentWrites — "bu kodu az önce YAZDIM mı?" sorusunun cevabı. Yapışkan okumanın (sticky read)
 // tek girdisi budur: cevap evetse okuma replikaya değil primary'ye gider.
 //
-// EN: The first implementation was per-pod, in memory, and its comment argued that this "covers
+// EN: A per-pod, in-memory marker covers "the common case (same client, same connection, same
 //
-//	the common case (same client, same connection, same pod)". That argument was true at level
-//	05 and FALSE from level 07 on, because the ladder splits the app in two: the create goes to
-//	api-svc and the redirect goes to redirect-svc. Two different processes. The marker was
-//	written in one and looked up in the other, so `db_sticky_reads_total` measured a steady 0 —
-//	the mechanism never fired once, and nobody noticed because a mechanism that never fires
-//	looks exactly like a mechanism that is never needed.
-//	The lesson is not "use Redis". It is that in-process state silently stops working the day
-//	you split a service, and the only thing that would have caught it was a counter nobody read.
+//	pod)". That holds for a single service and is FALSE here, because from level 07 on the
+//	ladder splits the app in two: the create goes to api-svc and the redirect goes to
+//	redirect-svc. Two different processes. A marker written in one and looked up in the other
+//	never matches, so `db_sticky_reads_total` would sit at a steady 0 — and nobody would notice,
+//	because a mechanism that never fires looks exactly like a mechanism that is never needed.
+//	That is why the marker lives in Redis, shared by both services. The lesson is not "use
+//	Redis": in-process state silently stops working the day you split a service, and the only
+//	thing that catches it is a counter someone actually reads.
 //
-// TR: İlk gerçekleştirim pod başına, hafızadaydı ve yorumu "yaygın durumu kapsıyor (aynı client,
+// TR: Pod başına, hafızada tutulan bir işaret "yaygın durumu (aynı client, aynı bağlantı, aynı
 //
-//	aynı bağlantı, aynı pod)" diye savunuyordu. Bu savunma 05'te doğruydu ve 07'den itibaren
-//	YANLIŞ, çünkü merdiven uygulamayı ikiye bölüyor: oluşturma api-svc'ye, yönlendirme
-//	redirect-svc'ye gidiyor. İki ayrı süreç. İşaret birinde yazılıp diğerinde aranıyordu, yani
-//	`db_sticky_reads_total` sabit 0 ölçüyordu — mekanizma bir kez bile çalışmadı ve kimse fark
-//	etmedi, çünkü hiç çalışmayan bir mekanizma, hiç gerekmeyen bir mekanizmaya benzer.
-//	Ders "Redis kullan" değil. Ders şu: süreç içi durum, bir servisi böldüğün gün SESSİZCE
-//	çalışmayı bırakır ve bunu yakalayabilecek tek şey, kimsenin bakmadığı bir sayaçtı.
+//	pod)" kapsar. Bu tek servisli bir dünyada doğrudur, burada YANLIŞTIR, çünkü merdiven 07'den
+//	itibaren uygulamayı ikiye böler: oluşturma api-svc'ye, yönlendirme redirect-svc'ye gider.
+//	İki ayrı süreç. Birinde yazılıp diğerinde aranan işaret hiç eşleşmez; `db_sticky_reads_total`
+//	sabit 0 kalır ve kimse fark etmez, çünkü hiç çalışmayan bir mekanizma, hiç gerekmeyen bir
+//	mekanizmaya benzer.
+//	İşaretin iki servisin paylaştığı Redis'te durmasının nedeni bu. Ders "Redis kullan" değil:
+//	süreç içi durum, bir servisi böldüğün gün SESSİZCE çalışmayı bırakır ve bunu yakalayan tek
+//	şey, birinin gerçekten baktığı bir sayaçtır.
 //
 // [Topic · Konu: Read-your-writes, yapışkan okuma, süreç içi durumun sınırı]
 type RecentWrites interface {

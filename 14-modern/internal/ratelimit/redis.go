@@ -48,19 +48,19 @@ return {1, math.floor(estimated) + 1}
 
 // TRAP_FIXED_WINDOW — sabit pencere sayacı: önceki pencereyi HİÇ hesaba katmaz.
 //
-// EN: This trap was declared in config and read NOWHERE. P08-04 claims "a fixed window lets 2x
+// EN: P08-04 claims "a fixed window lets 2x through at the boundary"; this script is what makes
 //
-//	through at the boundary" and then measured only the sliding window, so the claim was never
-//	put to the test — the script could not have failed. A trap that is not wired to code is a
-//	comment pretending to be an experiment.
+//	the claim testable. Without it the experiment could only measure the sliding window and
+//	could never fail — a trap that is not wired to code is a comment pretending to be an
+//	experiment.
 //	The failure it models is real and famous: with a 10s/300 limit, 300 requests at t=9.9s and
 //	300 more at t=10.1s both pass. 600 requests in 0.2 seconds, and every single check said
 //	"within the limit", because each one looked at a different window.
 //
-// TR: Bu tuzak config'de tanımlıydı ve HİÇBİR YERDE okunmuyordu. P08-04 "sabit pencere sınırda
+// TR: P08-04 "sabit pencere sınırda 2x geçirir" diyor; bu betik iddiayı sınanabilir kılan şey.
 //
-//	2x geçirir" diyor ve yalnızca kayan pencereyi ölçüyordu; yani iddia hiç sınanmadı — script
-//	düşemezdi. Koda bağlanmamış bir tuzak, deney taklidi yapan bir yorumdur.
+//	O olmadan deney yalnızca kayan pencereyi ölçebilir ve hiç düşemezdi — koda bağlanmamış bir
+//	tuzak, deney taklidi yapan bir yorumdur.
 //	Modellediği arıza gerçek ve meşhur: 10 sn/300 limitte, t=9.9'da 300 ve t=10.1'de 300 daha
 //	geçer. 0.2 saniyede 600 istek ve her kontrol "limit içinde" dedi, çünkü her biri BAŞKA bir
 //	pencereye baktı.
@@ -97,7 +97,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	}
 	// AYNI METRİĞİ İKİ PAKET SAHİPLENİYOR: `ratelimit_decisions_total` hem burada (dağıtık
 	// limiter) hem internal/metrics'te (süreç içi yedek limiter, Redis yokken kullanılıyor)
-	// tanımlı. MustRegister ikinci kayıtta PANİKLİYOR ve api-svc hiç açılmıyordu
+	// tanımlı. MustRegister ikinci kayıtta PANİKLERDİ ve api-svc açılmazdı
 	// ("duplicate metrics collector registration attempted"). Prometheus'un bunun için bir
 	// sözleşmesi var: kayıt hatası AlreadyRegisteredError ise VAR OLAN collector'ı kullan.
 	// Ders: bir metriğin adı bir SÖZLEŞMEDİR; iki sahip varsa çakışmayı yutup tek seriye yaz.

@@ -27,28 +27,29 @@ spec:
       failureLimit: 1
       provider:
         prometheus:
-          # ADRES YANLIŞTI ve arıza YANLIŞ SEBEPTEN "doğru" görünüyordu.
+          # ADRES: yanlış bir ad, arızayı YANLIŞ SEBEPTEN "doğru" gösterir.
           # EN: the service is `kps-prometheus`, not `kps-kube-prometheus-stack-prometheus`.
-          #     The name did not resolve, so every query failed with "network is unreachable",
-          #     consecutiveErrors passed the limit and the canary was ABORTED — which is exactly
-          #     what P12-01 expects to see. The experiment "passed" while the analysis had never
-          #     read a single metric. An analysis that fails to run and an analysis that fails a
-          #     threshold produce the same rollout status; only the message tells them apart.
+          #     A name that does not resolve fails every query with "network is unreachable",
+          #     consecutiveErrors passes the limit and the canary is ABORTED — exactly what P12-01
+          #     expects to see, while the analysis has not read a single metric. An analysis that
+          #     fails to run and an analysis that fails a threshold produce the same rollout
+          #     status; only the message tells them apart (P12-01 checks it).
           #     Whenever a guard fires, ask what it actually evaluated.
-          # TR: servis adı `kps-prometheus`, `kps-kube-prometheus-stack-prometheus` değil. Ad
-          #     çözülmediği için her sorgu "network is unreachable" ile düştü, consecutiveErrors
-          #     sınırı aştı ve canary DURDURULDU — P12-01'in görmeyi beklediği şey tam da buydu.
-          #     Deney "geçti" ama analiz tek bir metrik bile okumamıştı. Koşamayan bir analiz ile
-          #     eşiği geçemeyen bir analiz AYNI rollout durumunu üretir; ikisini yalnızca mesaj
-          #     ayırır. Bir koruma devreye girdiğinde, neyi değerlendirdiğini sor.
+          # TR: servis adı `kps-prometheus`, `kps-kube-prometheus-stack-prometheus` değil.
+          #     Çözülmeyen bir ad her sorguyu "network is unreachable" ile düşürür, consecutiveErrors
+          #     sınırı aşar ve canary DURDURULUR — P12-01'in görmeyi beklediği şey tam da bu, oysa
+          #     analiz tek bir metrik bile okumamıştır. Koşamayan bir analiz ile eşiği geçemeyen bir
+          #     analiz AYNI rollout durumunu üretir; ikisini yalnızca mesaj ayırır (P12-01 buna
+          #     bakar). Bir koruma devreye girdiğinde, neyi değerlendirdiğini sor.
           address: http://kps-prometheus.monitoring.svc.cluster.local:9090
-          # İYİ HABER ANALİZİ ÖLDÜRÜYORDU. Hiç 5xx görülmemiş bir namespace'te pay serisi YOKTUR,
-          # sorgu boş döner, Argo bunu "no data" hatası sayar ve 5 hatadan sonra canary'yi İPTAL
-          # EDER: sağlıklı her güncelleme geri alındı ve `make wait` "3/3 hazır" dediği için kimse
-          # fark etmedi — pod'lar eski sürümdeydi. Turlarda önceki deneyler 5xx serisi bıraktığı
-          # için görünmüyordu. 5xx yoksa oran 0'dır; `or vector(0)` bunu SÖYLER.
-          # EN: with no 5xx ever recorded the numerator series does not exist, the query is empty,
-          #     Argo counts "no data" as an error and aborts — every HEALTHY update was rolled back.
+          # İYİ HABER ANALİZİ ÖLDÜRMEMELİ. Hiç 5xx görülmemiş bir namespace'te pay serisi YOKTUR;
+          # sorgu boş dönerse Argo bunu "no data" hatası sayar ve 5 hatadan sonra canary'yi İPTAL
+          # EDER: sağlıklı her güncelleme geri alınır ve `make wait` "3/3 hazır" dediği için kimse
+          # fark etmez — pod'lar eski sürümde kalır. Önceki deneylerin bıraktığı 5xx serileri bunu
+          # gizler; temiz bir namespace'te ortaya çıkar. 5xx yoksa oran 0'dır; `or vector(0)` bunu SÖYLER.
+          # EN: with no 5xx ever recorded the numerator series does not exist; an empty result is
+          #     "no data" to Argo, which aborts — every HEALTHY update would be rolled back.
+          #     `or vector(0)` states the truth: no 5xx means a ratio of 0.
           query: |
             (sum(rate(http_requests_total{namespace="{{args.namespace}}",route="/{code}",code=~"5.."}[1m])) or vector(0))
             /
@@ -83,7 +84,13 @@ spec:
       app.kubernetes.io/name: redirect
   strategy:
     canary:
-      # Adımlar: önce %10 ile ANALİZ, sonra %50, sonra tam. Her duraklama bir KARAR NOKTASIDIR.
+      # Adımlar: önce küçük bir canary ile ANALİZ, sonra %50, sonra tam. Her duraklama bir KARAR NOKTASIDIR.
+      # AĞIRLIK BİR TRAFİK YÜZDESİ DEĞİL: trafik yönlendirici (trafficRouting) tanımlı olmadığı için
+      # Argo ağırlığı POD SAYISIYLA yaklaşık tutar. 3 replikada %10 → 1 canary pod, stable 3'te kalır
+      # ve Service trafiği 4 pod'a eşit böler: canary ~%25 alır. Analiz de canary'yi ayrı değil,
+      # namespace'in TOPLAM oranını ölçer (yukarıdaki sorgu) — %25 hatalı bir sürüm toplamı ~%6 yapar.
+      # EN: without a traffic router the weight is approximated by pod count: 1 canary next to 3
+      #     stable pods gets ~25%, and the analysis judges the namespace-wide ratio, not the canary's.
       steps:
         - setWeight: 10
         - analysis:
@@ -112,7 +119,9 @@ spec:
       containers:
         - name: redirect
           image: localhost:5001/linkly-ladder/13-redirect-svc:IMAGE_TAG
-          ports: [{ name: http, containerPort: 8080 }]
+          # pprof: İÇ port (P11-08). Service yalnızca `http`'yi gösteriyor, Ingress de Service'i —
+          # yani 6060'a yalnızca küme içinden (port-forward / API sunucusunun pod proxy'si) ulaşılır.
+          ports: [{ name: http, containerPort: 8080 }, { name: pprof, containerPort: 6060 }]
           envFrom: [{ secretRef: { name: postgres } }]
           env:
             - { name: SERVICE_NAME, value: redirect }
@@ -132,7 +141,8 @@ spec:
             - { name: LOADTEST_TOKEN, valueFrom: { secretKeyRef: { name: linkly-loadtest, key: LOADTEST_TOKEN, optional: true } } }
             - { name: TRUSTED_PROXY_HOPS, value: "1" }
             # API anahtarları: üretimde bir sır yöneticisinden ya da veritabanından gelir.
-            # Burada Secret'tan — ve o Secret artık SealedSecret ile şifreli git'te (P13-04).
+            # Burada Secret'tan — ve o Secret hâlâ git'te DÜZ METİN; SealedSecret'a çevirmek bir
+            # komut uzakta ama yapılmadı (P13-04). "Şifreli" demek, olmayan bir korumayı ilan etmekti.
             - name: API_KEYS
               valueFrom: { secretKeyRef: { name: linkly-api-keys, key: API_KEYS } }
             # Yönlendirme PUBLIC bir uçtur: kısa linke tıklayan kişinin API anahtarı olmaz.
@@ -148,14 +158,14 @@ spec:
             # P12-01: "kötü sürüm" bu değişkenle üretilir (varsayılan 0 = sağlıklı)
             - { name: BAD_VERSION_ERROR_PCT, value: "0" }
           # KONTEYNER SERTLEŞTİRME (P13-08).
-          # EN: the level claimed "container hardening" and shipped no securityContext at all —
-          #     P13-08 measured it and said so. distroless already gives a small attack surface;
+          # EN: "container hardening" without a securityContext is only a word, and P13-08
+          #     measures exactly that. distroless already gives a small attack surface;
           #     this adds the kernel-level half: no privilege escalation, no capabilities, a
           #     read-only root filesystem and a non-root UID that Kubernetes ENFORCES rather than
           #     trusting the image to have set. "The image runs as nonroot" is a claim about the
           #     image; runAsNonRoot is a claim the API server checks.
-          # TR: seviye "konteyner sertleştirme" diyordu ve hiç securityContext göndermiyordu —
-          #     P13-08 bunu ÖLÇÜP söyledi. distroless zaten saldırı yüzeyini küçültüyor; bu,
+          # TR: securityContext olmadan "konteyner sertleştirme" yalnızca bir sözdür ve P13-08 tam
+          #     olarak bunu ÖLÇER. distroless zaten saldırı yüzeyini küçültüyor; bu,
           #     çekirdek tarafındaki yarısını ekliyor: yetki yükseltme yok, capability yok,
           #     salt-okunur kök dosya sistemi ve imajın ayarladığına GÜVENMEK yerine Kubernetes'in
           #     DOĞRULADIĞI bir non-root UID. "İmaj nonroot koşuyor" imaj hakkında bir iddiadır;

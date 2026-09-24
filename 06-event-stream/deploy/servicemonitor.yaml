@@ -43,8 +43,8 @@ spec:
     - port: metrics
       interval: 10s
 ---
-# Broker'ın kendi metrikleri (lag, partition, üretim/tüketim hızı). 06'da unutulmuştu:
-# tüketici gecikmesini yalnızca uygulamanın sayaçlarından okuyabiliyorduk.
+# Broker'ın kendi metrikleri (lag, partition, üretim/tüketim hızı). Onsuz tüketici gecikmesi
+# yalnızca uygulamanın kendi sayaçlarından okunabilir.
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:

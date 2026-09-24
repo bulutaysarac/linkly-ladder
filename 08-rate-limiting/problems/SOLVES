@@ -2,5 +2,5 @@
 # 08'in getirdiği şey dağıtık hız sınırlama: çözdüğü sorun P02-04 (süreç içi limiter, gerçek
 # limit replika sayısıyla çarpılıyor). Ama verify-prev yalnızca BİR ÖNCEKİ seviyenin
 # scriptlerini koşar, o yüzden buraya yazılamaz.
-# P07-06 (N+1) bir zamanlar buradaydı ve yanlıştı: TRAP tabanlı, script tuzağı kendisi açıyor,
-# yani her seviyede reproduce olur. Kalıcı çözümü 14'te (toplu sorgu).
+# P07-06 (N+1) de burada YOK: TRAP tabanlı, script tuzağı kendisi açıyor, yani her seviyede
+# reproduce olur. Kalıcı çözümü 14'te (toplu sorgu).

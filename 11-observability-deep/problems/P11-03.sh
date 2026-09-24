@@ -17,12 +17,12 @@ measure() {
   mem=$(promq "max_over_time(sum(container_memory_working_set_bytes{namespace=\"monitoring\",pod=~\"alloy.*\",image!=\"\",image!~\".*pause.*\"})[3m:15s])")
   # DOĞRUDAN SİNYAL: sampling oranının KONTROL ETTİĞİ şey span sayısıdır, Alloy'un CPU'su değil.
   # Alloy aynı anda LOG da topluyor; trace yükü onun toplam maliyetinin küçük bir parçası ve
-  # koşudan koşuya oynuyor. İlk hâl yalnızca CPU'ya bakıyordu ve %100 koşusu %5'ten DAHA UCUZ
-  # ölçülebiliyordu — yani karar gürültüye kalmıştı. Önce kontrol ettiğin değişkeni ölç,
+  # koşudan koşuya oynuyor. Yalnızca CPU'ya bakan bir karar %100 koşusunu %5'ten DAHA UCUZ
+  # ölçebilir — yani karar gürültüye kalır. Önce kontrol ettiğin değişkeni ölç,
   # sonra onun maliyetini.
   # EN: sampling controls the SPAN COUNT, not Alloy's CPU. Alloy also ships logs, so trace load is
-  # a small and noisy fraction of its cost; judging by CPU alone let a 100% run measure cheaper
-  # than a 5% run. Measure the variable you control first, then its cost.
+  # a small and noisy fraction of its cost; judging by CPU alone can make a 100% run measure
+  # cheaper than a 5% run. Measure the variable you control first, then its cost.
   spans=$(promq "sum(increase(otelcol_receiver_accepted_spans_total{namespace=\"monitoring\"}[3m]))")
   echo "$cpu $mem $spans"
 }
@@ -33,7 +33,7 @@ step "(2) %100 sampling"
 setenv "$(wl redirect)" TRACE_SAMPLE_PCT=100 >/dev/null
 read -r c100 m100 s100 <<< "$(measure)"
 note "%100: kabul edilen span=${s100%%.*} · Alloy CPU tepe=$(awk -v v="$c100" 'BEGIN{printf "%.2f", v}') çekirdek · bellek tepe=$(( ${m100%%.*} / 1024 / 1024 )) MB"
-grafana_hint "01 · Pods & Resources (namespace=monitoring) → Alloy CPU/bellek"
+grafana_hint "15 · k6 → 'Gönderilen istek / sn' (iki eşit faz) · Explore → otelcol_receiver_accepted_spans_total (Alloy 'monitoring' namespace'inde; 01 · Pods & Resources onu gösteremez)"
 note "Maliyet 20 katına çıktı; peki fayda? Teşhis için gereken şey 'tüm trace'ler' değil,"
 note "'DOĞRU trace'. Exemplar zaten yavaş bir isteği işaret ediyor (P11-01) — yani %5 ile de"
 note "yavaş isteğe ulaşabiliyorsun."

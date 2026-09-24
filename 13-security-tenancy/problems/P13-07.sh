@@ -7,24 +7,25 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 ensure_healthy
 step "Tanımlı politikalar"
 kubectl get clusterpolicy --no-headers 2>/dev/null | awk '{print "    " $1 " → " $2}' || note "    (Kyverno kurulu değil)"
-# KANITI KIRPMA — bu scriptin kendi tarihi.
-# EN: the three `kubectl run --dry-run=server` calls used to end with `| tail -2`. A Kyverno denial
-#     is multi-line and the word "denied" is on the FIRST line; `tail -2` kept the last two lines
-#     (the policy name and the rule message) and threw away the only thing the verdict greps for.
-#     So every denial was counted as "not blocked" and the script reported NOT-REPRODUCED while
-#     the policy was doing exactly its job. Same lesson as truncating an EXPLAIN plan with
-#     `head -3`: crop for DISPLAY, never before you match.
-# TR: üç `kubectl run --dry-run=server` çağrısı `| tail -2` ile bitiyordu. Kyverno'nun reddi çok
-#     satırlı ve "denied" kelimesi İLK satırda; `tail -2` son iki satırı (politika adı ve kural
-#     mesajı) tutup kararın aradığı tek şeyi atıyordu. Yani her reddediliş "engellenmedi" diye
-#     sayıldı ve script, politika tam da işini yaparken NOT-REPRODUCED dedi.
-#     `EXPLAIN` planını `head -3` ile kesmekle aynı ders: GÖSTERİRKEN kırp, EŞLEŞTİRMEDEN ÖNCE asla.
+# KANITI KIRPMA.
+# EN: the full output of each `kubectl run --dry-run=server` is kept; only the `note` line crops
+#     it. A Kyverno denial is multi-line and the word "denied" is on the FIRST line; a `| tail -2`
+#     would keep the policy name and the rule message and throw away the only thing the verdict
+#     greps for — every denial would count as "not blocked" and the script would report
+#     NOT-REPRODUCED while the policy does exactly its job. Same lesson as truncating an EXPLAIN
+#     plan with `head -3`: crop for DISPLAY, never before you match.
+# TR: her `kubectl run --dry-run=server` çağrısının çıktısı TAMAMEN tutulur; yalnızca `note`
+#     satırı kırpar. Kyverno'nun reddi çok satırlı ve "denied" kelimesi İLK satırda; bir
+#     `| tail -2` politika adını ve kural mesajını tutup kararın aradığı tek şeyi atardı — her
+#     reddediliş "engellenmedi" sayılır ve script, politika tam da işini yaparken NOT-REPRODUCED
+#     derdi. `EXPLAIN` planını `head -3` ile kesmekle aynı ders: GÖSTERİRKEN kırp, EŞLEŞTİRMEDEN
+#     ÖNCE asla.
 # REDDEDİLMEK BEKLENEN SONUÇTUR — ama kubectl bunu sıfırdan farklı bir çıkış koduyla söyler.
 # EN: `|| true` is not sloppiness here: a denied admission is exactly what this experiment wants
-#     to observe, and `set -e` was killing the script at the first success. An experiment must not
-#     treat its own expected outcome as a fatal error.
+#     to observe, and without it `set -e` would kill the script at the first success. An
+#     experiment must not treat its own expected outcome as a fatal error.
 # TR: buradaki `|| true` özensizlik değil: reddedilme, bu deneyin GÖRMEK İSTEDİĞİ şeydir ve
-#     `set -e` scripti ilk başarıda öldürüyordu. Bir deney, beklediği sonucu ölümcül hata
+#     o olmadan `set -e` scripti ilk başarıda öldürürdü. Bir deney, beklediği sonucu ölümcül hata
 #     olarak görmemeli.
 step "(1) :latest etiketli bir pod dağıtmayı dene"
 out1=$(kubectl -n "$NS" run policy-test-latest --image=busybox:latest --restart=Never \
@@ -43,7 +44,7 @@ out3=$(kubectl -n "$NS" run policy-test-noprobe --image=busybox:1.36 --restart=N
 note "sonuç: $(printf '%s' "$out3" | tr '\n' ' ' | head -c 220)"
 blocked=0
 for o in "$out1" "$out2" "$out3"; do echo "$o" | grep -qiE 'denied|blocked|violation|not allowed' && blocked=$((blocked+1)); done
-grafana_hint "14 · Security → 'Kyverno policy sonuçları'"
+grafana_hint "14 · Security → 'Politika ihlalleri (Kyverno)'"
 note "engellenen deneme: $blocked / 3"
 note "Politikaların kaynağı bu merdivenin kendi geçmişi: P12-04 (:latest), P00-08 (bellek limiti),"
 note "P00-04 + P07-08 (probe). Yani her kural, bir kez ÖLÇÜLMÜŞ bir arızanın kalıcı karşılığı."

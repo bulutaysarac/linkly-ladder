@@ -143,7 +143,7 @@ func shortCodeOf(r *http.Request) string {
 	// Yalnızca TRAP_METRIC_LABEL_CODE açıkken kullanılır.
 	p := strings.TrimPrefix(r.URL.Path, "/")
 	if strings.HasPrefix(p, "api/links/") {
-		return strings.TrimPrefix(p, "api/links/")
+		return strings.TrimSuffix(strings.TrimPrefix(p, "api/links/"), "/stats")
 	}
 	return p
 }

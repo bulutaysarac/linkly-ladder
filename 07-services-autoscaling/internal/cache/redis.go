@@ -36,18 +36,16 @@ type Redis[V any] struct {
 	// Bu seviyede HER ZAMAN true — ama 04'te bunun bedeli ölçülüyor (P04-01): DB o yükü kaldırabilmeli.
 	failOpen bool
 	rnd      func() float64
-	// POD İÇİ SINGLEFLIGHT — 04'te YANLIŞLIKLA DÜŞMÜŞTÜ.
-	// EN: the comment on GetOrLoad said "per-pod singleflight (kept below)" and there was no
-	//     singleflight below. L1 (the in-process LRU of level 03) had it; when the cache moved to
-	//     Redis the guard was not carried over, and TRAP_NO_SINGLEFLIGHT — which P03-05 toggles to
-	//     prove the guard exists — was left unread in config. So from level 04 on, the stampede
-	//     protection was absent AND unmeasurable, while a comment asserted it was there.
+	// POD İÇİ SINGLEFLIGHT — L1'den (03) L2'ye bilerek taşınan koruma.
+	// EN: L1 (the in-process LRU of level 03) collapses concurrent misses with a per-pod
+	//     singleflight. Moving the cache to Redis does not carry that guard over by itself: without
+	//     it, N concurrent misses on one pod become N database loads, and TRAP_NO_SINGLEFLIGHT —
+	//     which P03-05 toggles to prove the guard exists — has nothing to switch off.
 	//     A comment is not an implementation, and a trap nobody reads cannot contradict it.
-	// TR: GetOrLoad'ın yorumu "pod içi singleflight (aşağıda korunuyor)" diyordu ve aşağıda
-	//     singleflight YOKTU. L1'de (03'ün süreç içi LRU'su) vardı; önbellek Redis'e taşınınca
-	//     koruma taşınmadı ve P03-05'in korumanın varlığını kanıtlamak için açtığı
-	//     TRAP_NO_SINGLEFLIGHT config'de okunmadan kaldı. Yani 04'ten itibaren izdiham koruması
-	//     hem YOKTU hem de ÖLÇÜLEMEZDİ, üstelik bir yorum var olduğunu iddia ediyordu.
+	// TR: L1 (03'ün süreç içi LRU'su) eşzamanlı ıskaları pod içi bir singleflight ile birleştirir.
+	//     Önbelleği Redis'e taşımak bu korumayı kendiliğinden taşımaz: o olmadan tek pod'daki N
+	//     eşzamanlı ıska N veritabanı yüklemesine dönüşür ve P03-05'in korumanın varlığını
+	//     kanıtlamak için açtığı TRAP_NO_SINGLEFLIGHT'ın kapatacağı bir şey kalmaz.
 	//     Yorum bir gerçekleştirim değildir ve kimsenin okumadığı bir tuzak onu yalanlayamaz.
 	mu      sync.Mutex
 	flights map[string]*flight[V]

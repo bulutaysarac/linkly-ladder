@@ -62,9 +62,10 @@ func New(trapByCode bool) *Metrics {
 	m.Unsafe = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "create_rejected_unsafe_total", Help: "Güvenlik nedeniyle reddedilen hedef"}, []string{"reason"})
 	m.RateLimit = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "ratelimit_decisions_total", Help: "Hız sınırı kararı"}, []string{"decision", "key_type"})
 	// NOT: `ratelimit_decisions_total` AYNI ZAMANDA internal/ratelimit paketinin: 08'de limiter Redis'e
-	// taşındı ve kendi Metrics'ini kuruyor. İkisi birden kaydedilince Prometheus
-	// "duplicate metrics collector registration attempted" ile PANİKLİYOR ve api-svc hiç
-	// açılmıyordu. Bir metriğin SAHİBİ tek bir paket olmalı; taşıdığın şeyin eski kaydını da taşı.
+	// taşındı ve kendi Metrics'ini kuruyor. İkisi birden MustRegister ile kaydedilse Prometheus
+	// "duplicate metrics collector registration attempted" ile PANİKLER ve api-svc hiç açılmaz;
+	// bu yüzden ratelimit paketi AlreadyRegisteredError'da VAR OLAN collector'ı kullanır.
+	// Bir metriğin adı bir SÖZLEŞMEDİR: iki sahibi varsa ikisi de TEK seriye yazar.
 
 	reg.MustRegister(m.Requests, m.Duration, m.InFlight, m.Panics, m.Redirect, m.Create, m.Unsafe, m.RateLimit)
 	m.preRegisterZero()
@@ -137,8 +138,8 @@ func (m *Metrics) Handler() http.Handler {
 	//     With this flag false — the default — promhttp serves the classic text format, which has
 	//     no place to put an exemplar, so every one of them is silently dropped at the door.
 	//     Prometheus then stores no exemplars, /api/v1/query_exemplars returns nothing, and
-	//     P11-01's "jump from the metric to the trace" step reported "no exemplar found" while
-	//     both sides of the bridge were fully implemented. A feature that is built, wired and
+	//     P11-01's "jump from the metric to the trace" step reports "no exemplar found" even though
+	//     both sides of the bridge are fully implemented. A feature that is built, wired and
 	//     then dropped by a serialization default is indistinguishable from a feature nobody wrote.
 	// TR: Yukarıdaki kod her histogram gözlemine özenle bir trace_id exemplar'ı iliştiriyor.
 	//     Bu bayrak false iken — ki VARSAYILAN budur — promhttp klasik metin formatını servis
