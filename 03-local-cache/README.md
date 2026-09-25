@@ -39,9 +39,9 @@ Okuma yolu çoğunlukla DB'ye gitmez; tıklama sayacı ise hâlâ her istekte DB
 
 | ID | Sorun | Nasıl çözüldü |
 |---|---|---|
-| P02-01 | Her redirect = DB sorgusu | Cache-aside önbellek: `internal/store/cached.go` + `internal/cache` (LRU + TTL + singleflight + negatif önbellek) |
+| P02-01 | Her kısa link açılışı veritabanına bir sorgu; trafik arttıkça veritabanı ve bağlantı havuzu darboğaz olur | Her pod'un belleğinde bir önbellek var: link önce önbellekte aranır, yoksa veritabanından okunup önbelleğe yazılır (cache-aside: `internal/store/cached.go`). Önbellek dolunca en az kullanılan atılır (LRU), kayıtlar belli süre sonra düşer (TTL), aynı link için aynı anda gelen istekler tek sorguda birleşir (singleflight), "yok" cevapları da kısa süre saklanır (negatif önbellek) — hepsi `internal/cache` |
 
-Önbellek yalnızca tekrar tekrar okumayı çözer; havuz (P02-02), tek DB (P02-03), satır kilidi (P02-08) ve sırlar (P02-09) duruyor.
+Önbellek yalnızca aynı veriyi tekrar tekrar okumayı çözer; bağlantı havuzu (P02-02), tek veritabanı (P02-03), satır kilidi (P02-08) ve düz metin sırlar (P02-09) duruyor.
 
 ## 4. Ayağa kaldırma
 
@@ -109,27 +109,34 @@ Davranış aynı, garanti değişti: `GET /{code}` TTL kadar bayat bir kopyadan 
 
 ## 6. Reproduce edilebilir sorunlar
 
-Her sorun aynı düzende: **Ne deniyoruz** (deneyin sorusu) → **Neden** → adımlar (her adım ne yaptığını söyler)
-→ **Terminalde ne görmelisin** → **Grafana'da gör** (giriş: admin / ladder) → **Nerede çözülüyor**.
-`make repro` hükmü: `REPRODUCED` = sorun var · `NOT-REPRODUCED` = yok · `SKIPPED` = ölçülemedi.
+Bu seviyede yaşayacağın 7 sorun. Her birini iki yoldan görebilirsin: **Otomatik** — `make repro P=<ID>` deneyi
+kendisi yapar, ölçer ve hükmünü basar (`REPRODUCED` = sorun var · `NOT-REPRODUCED` = yok · `SKIPPED` =
+ölçülemedi); **Elle** — adımları sırayla yapıştırıp sonucu kendi gözünle görürsün. Her sorunun bölümü aynı
+düzende: **Ne oluyor** → **Neden oluyor** → **Bu deney** → adımlar → **Terminalde ne görmelisin** →
+**Grafana'da gör** (giriş: admin / ladder) → **Nasıl çözülüyor**.
 
-| ID | Sorun | Reproduce | Grafana'da | Çözüm |
-|---|---|---|---|---|
-| P03-01 | Silinen link diğer pod'larda yaşıyor | `make repro P=P03-01` | [03 · App Business](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl03&from=now-15m&to=now&refresh=10s) · [04 · Cache](http://grafana.localtest.me/d/ladder-cache?var-level=lvl03&from=now-15m&to=now&refresh=10s) → "404 (pod'a göre)" | 04 |
-| P03-02 | Rollout = soğuk önbellek = DB testere dişi | `make repro P=P03-02` | [05 · Postgres](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl03&from=now-15m&to=now&refresh=10s) · [04 · Cache](http://grafana.localtest.me/d/ladder-cache?var-level=lvl03&from=now-15m&to=now&refresh=10s) → "Veritabanı sorguları (türe göre)" | 04 |
-| P03-03 | Aynı veri N pod'da N kopya | `make repro P=P03-03` | [04 · Cache](http://grafana.localtest.me/d/ladder-cache?var-level=lvl03&from=now-15m&to=now&refresh=10s) · [01 · Pods & Resources](http://grafana.localtest.me/d/ladder-pods?var-level=lvl03&from=now-15m&to=now&refresh=10s) → "Önbellekteki kayıt (pod'a göre)" | 04 |
-| P03-04 | Hit oranı replika sayısıyla düşer | `CONFIRM=1 make repro P=P03-04` | [04 · Cache](http://grafana.localtest.me/d/ladder-cache?var-level=lvl03&from=now-30m&to=now&refresh=10s) · [01 · Pods & Resources](http://grafana.localtest.me/d/ladder-pods?var-level=lvl03&from=now-30m&to=now&refresh=10s) → "Hazır pod adresi (endpoint) sayısı" | 04 |
-| P03-05 | **TRAP** singleflight yok → stampede | `make repro P=P03-05` | [04 · Cache](http://grafana.localtest.me/d/ladder-cache?var-level=lvl03&from=now-15m&to=now&refresh=10s) · [05 · Postgres](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl03&from=now-15m&to=now&refresh=10s) → "Bekletilen eşzamanlı ıska / sn" | seviye içi |
-| P03-06 | **TRAP** negatif önbellek yok → tarama DB'ye | `make repro P=P03-06` | [04 · Cache](http://grafana.localtest.me/d/ladder-cache?var-level=lvl03&from=now-15m&to=now&refresh=10s) · [05 · Postgres](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl03&from=now-15m&to=now&refresh=10s) → "Önbellek işlemleri (katman ve sonuca göre)" | seviye içi |
-| P03-07 | **TRAP** jitter yok → periyodik DB tepesi | `make repro P=P03-07` | görünmez — kanıt terminalde ↓ | seviye içi |
+| ID | Ne olur? | Neden olur? | Nasıl çözülür? |
+|---|---|---|---|
+| P03-01 | Silinen bir link bazı isteklerde hâlâ açılır; önbellek süresi (60 sn) dolana kadar çalışmaya devam eder | Silme isteği tek bir pod'a düşer; o pod kendi önbelleğini temizler, diğer pod'ların önbelleğindeki kopyadan haberi olmaz | **04:** tek paylaşılan önbellek (Redis); silme herkes için geçerli olur |
+| P03-02 | Her yeni sürüm dağıtımından sonra veritabanına giden okumalar birden sıçrar, sonra normale döner (grafikte testere dişi) | Önbellek pod'un belleğinde; yeni pod boş önbellekle başlar ve ilk istekleri veritabanına sorar | **04:** önbellek pod'ların dışında durur, dağıtımda boşalmaz |
+| P03-03 | Aynı linkler her pod'da ayrı ayrı saklanır; 3 pod'da aynı veri için 3 kat bellek harcanır | Her pod'un önbelleği yalnızca kendisine ait; pod'lar birbirinin önbelleğini göremez | **04:** tek önbellek, veri bir kez saklanır |
+| P03-04 | Pod sayısı arttıkça önbellekte bulunamayan istek (ıska) ve veritabanına giden okuma artar | Her pod aynı linkleri kendi önbelleği için ayrı ayrı veritabanından çeker; önbelleğin dolması (ısınma) pod sayısı kadar tekrarlanır | **04:** tek önbellek; pod sayısı ıskayı artırmaz |
+| P03-05 | Popüler bir linkin önbellek süresi dolduğu anda o linki isteyen herkes aynı anda veritabanına koşar (izdiham) | `TRAP_NO_SINGLEFLIGHT` açıkken aynı link için gelen istekler tek sorguda birleştirilmez | **Seviye içi:** bayrak kapalıyken (varsayılan) istekler tek sorguyu bekler |
+| P03-06 | Var olmayan kodlara gelen istekler (tarama, yazım hatası, silinmiş link) hep veritabanına gider | `TRAP_NO_NEGATIVE_CACHE` açıkken "böyle link yok" cevabı önbellekte saklanmaz | **Seviye içi:** bayrak kapalıyken "yok" cevabı 10 sn saklanır |
+| P03-07 | Dağıtımdan sonra veritabanı düzenli aralıklarla ani yük dalgası alır | `TRAP_NO_TTL_JITTER` açıkken aynı anda önbelleğe giren kayıtların süresi de aynı saniyede dolar | **Seviye içi:** bayrak kapalıyken sürelere ±%20 rastgelelik eklenir, dolmalar zamana yayılır |
 
 ---
 
 ### P03-01 · Silinen link diğer pod'larda TTL boyunca yaşıyor
 
-**Ne deniyoruz:** Silinen bir link bütün pod'larda hemen ölüyor mu?
-**Neden:** `DELETE` tek bir pod'a düşer; o pod yalnızca kendi kopyasını temizler, diğer pod'lar hiçbir şey duymaz ve
-kopyayı TTL (60 sn) dolana kadar sunar.
+**Ne oluyor:** Kullanıcı linki siler, sunucu `204` döner ve veritabanında kayıt kalmaz — ama link bir süre daha
+açılmaya devam eder. Hangi isteğin çalışacağı, isteğin hangi pod'a düştüğüne bağlıdır. Kullanıcı açısından bu, "silme
+çalışmıyor" demek: yanlışlıkla paylaşılmış bir adres dakikalarca yaşar.
+**Neden oluyor:** Her pod'un kendi belleğinde ayrı bir önbelleği var. Silme isteği yalnızca bir pod'a düşer; o pod
+kendi kopyasını temizler, diğer pod'lar bundan haberdar olmaz ve kopyalarını önbellek süresi (TTL, 60 sn) dolana kadar
+sunmaya devam eder.
+**Bu deney:** Linki bütün pod'ların önbelleğine sokar, siler, sonra aynı linki defalarca isteyip kaç isteğin hâlâ
+yönlendirildiğini sayar; süre dolunca hepsinin `404` olduğunu gösterir.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P03-01` (linki bütün pod'ların önbelleğine sokar, siler, 60 kez
 okur ve kaçının hâlâ yönlendirdiğini sayar). Elle:
@@ -169,16 +176,19 @@ TTL dolunca düştü; o ana kadar "silinen" link çalışmaya devam etti.
 - "Yönlendirme sonuçları" → silmeden sonra `ok` serisi sürer, yanında küçük bir `not_found` belirir: aynı kod aynı anda hem "var" hem "yok".
 - "İsabet oranı (pod'a göre)" → yüksek kalır: bayat kopyayı sunmak önbellek için bir isabettir; hit oranı bu sorunu göstermez.
 
-**Nerede çözülüyor:** 04 (tek paylaşılan önbellek: geçersiz kılma tek yerde). Kural: her kopya bir geçersiz kılma
-kanalı ister; kanal yoksa bedeli kullanıcı bayat veriyle öder.
+**Nasıl çözülüyor:** 04'te önbellek tek bir yerde (Redis) durur ve bütün pod'lar onu paylaşır; silme o tek kopyayı temizlediği için herkes için anında geçerli olur. Genel kural: bir verinin birden fazla kopyası varsa, silme/güncelleme haberini hepsine ulaştıracak bir kanal gerekir; kanal yoksa bedeli kullanıcı bayat veriyle öder.
 
 ---
 
 ### P03-02 · Rollout = soğuk önbellek = DB'de testere dişi
 
-**Ne deniyoruz:** Bir dağıtımdan sonra DB'ye inen okuma sayısı ne kadar sıçrıyor?
-**Neden:** Önbellek pod'un belleğinde; pod ölünce önbellek de ölür. Her yeni pod boş doğar ve ilk istekleri DB'ye
-iner.
+**Ne oluyor:** Her yeni sürüm dağıtımından sonra veritabanına giden okuma sayısı birden sıçrar ve birkaç dakika sonra
+normale döner; grafik testere dişine benzer. Veritabanı bu anlık yükü kaldıramazsa her dağıtım anı bir kesintiye
+dönüşür.
+**Neden oluyor:** Önbellek pod'un belleğinde yaşar; dağıtımda eski pod silinince önbelleği de gider. Yeni pod boş
+önbellekle doğar ve önbellek dolana kadar ("ısınana" kadar) gelen her istek veritabanına iner.
+**Bu deney:** Sürekli yük altında önce önbelleğin sıcak olduğu bir dönemde, sonra yeni sürüm dağıtımı sırasında
+saniyede kaç okumanın veritabanına indiğini ölçer ve iki sayıyı karşılaştırır.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P03-02` (TTL'i 10 dk yapar, 2000 kodluk sürekli yük altında önce
 kararlı hâli, sonra rollout penceresini ayrı ölçüp kıyaslar; ~5 dk). Elle:
@@ -228,15 +238,19 @@ DB'den yeniden çekti. Testere dişinin bir dişi bu.
 - "Önbellekteki kayıt (pod'a göre)" → rollout anında eski pod'ların çizgileri kesilir, yenileri **0**'dan tırmanır: her yeni pod boş doğar.
 - "Önbellek ıskası ve veritabanı sorguları" → `önbellek ıskası` rollout anında sıçrar; `veritabanı sorgusu (hepsi)` az oynar çünkü tıklama UPDATE'leri ona yüksek bir taban ekler — soğuk başlangıcı `get` serisinde oku.
 
-**Nerede çözülüyor:** 04 (önbellek pod'un dışında, pod ölse de yaşar). Veritabanı soğuk anı kaldırabilmeli: kapasite
-ortalamaya değil en kötü ana göre planlanır.
+**Nasıl çözülüyor:** 04'te önbellek pod'ların dışında (Redis'te) durur; pod'lar değişse de dolu kalır. Ayrıca veritabanı bu soğuk anları kaldırabilecek şekilde planlanır: kapasite ortalama yüke değil en kötü ana göre seçilir.
 
 ---
 
 ### P03-03 · Aynı veri N pod'da N kopya
 
-**Ne deniyoruz:** Aynı linkler için önbellek kaç kez bellek harcıyor?
-**Neden:** Süreç içi önbellek pod başınadır; aynı link her pod'da ayrı ayrı tutulur, bellek replika sayısıyla çarpılır.
+**Ne oluyor:** 3000 farklı link üç pod'a da sorulunca her pod aynı 3000 kaydı ayrı ayrı saklar: önbellekte toplam
+~9000 kayıt olur. Önbelleğin bellek maliyeti pod sayısıyla çarpılır; pod sayısı arttıkça aynı veri için daha çok
+bellek ödenir.
+**Neden oluyor:** Önbellek her pod'un kendi belleğinde (süreç içi önbellek). Pod'lar birbirinin önbelleğini göremez;
+bu yüzden her biri aynı linki kendisi için ayrıca tutar.
+**Bu deney:** 3000 link oluşturur, aynı 3000 kodu her pod'a doğrudan sorar ve her pod'un önbelleğindeki kayıt sayısını
+okur.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P03-03` (3000 link oluşturur, aynı 3000 kodu her pod'a doğrudan
 okutur, her pod'un `cache_entries`'ini önce ve sonra okur; ölçü: eklenen kayıt toplamı ÷ farklı kod sayısı). Elle:
@@ -274,16 +288,18 @@ veri için üç kez bellek ödüyorsun.
 - "Önbellekteki kayıt" → toplam ~9000 artar: farklı link sayısının (3000) replika sayısı katı.
 - "Heap bellek (Go)" → belirgin sıçrama bekleme: pod başına ~yarım MB, GC dalgalanmasında kaybolur. Çarpanı kayıt sayısında gör.
 
-**Nerede çözülüyor:** 04. Hesap: 1M sıcak link × ~200 byte × 10 pod = 2 GB, aynı veri için on kez; paylaşılan
-önbellekte bir kez ödenir, karşılığında her okumaya bir ağ gidiş-gelişi eklenir (P04-02).
+**Nasıl çözülüyor:** 04'te tek paylaşılan önbellek var; veri bir kez saklanır. Hesap: 1 milyon sıcak link × ~200 bayt × 10 pod = 2 GB, aynı veri için on kez. Bedeli: her okumaya bir ağ gidiş-gelişi eklenir (P04-02).
 
 ---
 
 ### P03-04 · Hit oranı replika sayısıyla düşer
 
-**Ne deniyoruz:** Replika sayısı artınca önbellek ıskası (DB'ye inen okuma) da artıyor mu?
-**Neden:** Ingress istekleri pod'lara dağıtır; her pod aynı çalışma kümesini kendisi için ayrı ayrı ısıtır. Isınma
-maliyeti pod sayısıyla çarpılır.
+**Ne oluyor:** Aynı yük ve aynı linkler varken pod sayısını artırınca önbellekte bulunamayan istek (ıska) sayısı da
+artar. Yani uygulamayı büyüttükçe veritabanı yükü beklendiği kadar azalmaz.
+**Neden oluyor:** Ingress istekleri pod'lara dağıtır ve her pod'un önbelleği ayrıdır. Her pod aynı linkleri kendisi
+için bir kez veritabanından çekmek (önbelleği ısıtmak) zorundadır; 6 pod'da bu ısınma 6 kez yapılır.
+**Bu deney:** Aynı yükü önce 1, sonra 6 pod'la verir ve iki durumda kaç okumanın önbellekte bulunamayıp veritabanına
+indiğini karşılaştırır.
 
 **Reproduce (adım adım):** Otomatik: `CONFIRM=1 make repro P=P03-04` (1 ve 6 replikayla aynı yükü koşup ıska
 sayısını kıyaslar — 4000 kod, 20 kullanıcı × 60 sn; sonunda replika sayısını geri alır). Elle:
@@ -339,16 +355,20 @@ aynı yükle ıska bunun belirgin katı (script en az 1.8 katını arar; üst s�
 - "Önbellek ıskası ve veritabanı sorguları" → her fazın başında bir `önbellek ıskası` tümseği (ısınma maliyeti); 6 pod'lu fazda belirgin biçimde daha yüksek ve uzun.
 - "İsabet oranı (pod'a göre)" → 1 pod'da tek çizgi hızla yükselir; 6 pod'da her çizgi daha yavaş ve aşağıda kalır. Oranı yalnızca şekil için oku: payı ve paydası birlikte oynar, asıl ölçü ıska sayısı.
 
-**Nerede çözülüyor:** 04 (sorun tamamen kalkar). Ara çözüm consistent hashing (aynı anahtar hep aynı pod'a), ama
-sıcak anahtarı tek pod'a bağlar ve ölçeklemede anahtarları taşır.
+**Nasıl çözülüyor:** 04'te tek paylaşılan önbellek var: bir link bir kez ısınır, pod sayısı ıskayı artırmaz. Ara çözüm "aynı link hep aynı pod'a" (consistent hashing) olabilir, ama popüler linki tek pod'a bağlar ve pod sayısı değişince anahtarları taşır.
 
 ---
 
 ### P03-05 · TRAP · Singleflight olmadan izdiham (cache stampede)
 
-**Ne deniyoruz:** Sıcak bir anahtarın TTL'i dolduğu anda kaç istek birden DB'ye koşuyor?
-**Neden:** TTL dolunca o anahtarı isteyen **bütün** istekler aynı satır için DB'ye gider (izdiham). Singleflight bunları
-tek sorguda birleştirir; tuzak onu kapatır.
+**Ne oluyor:** Önbellek isabet oranı yüksektir ve her şey iyi görünür, ama veritabanı grafiğinde düzenli ani
+sıçramalar vardır. Sıçrama trafik arttıkça büyür — koruma tam en gerektiği anda yoktur.
+**Neden oluyor:** Popüler bir linkin önbellek süresi (TTL) dolduğunda, o anda o linki isteyen bütün istekler aynı
+kaydı almak için aynı anda veritabanına gider (izdiham, cache stampede). Normalde "singleflight" bu istekleri tek
+sorguda birleştirir: biri veritabanına gider, diğerleri onun cevabını bekler. `TRAP_NO_SINGLEFLIGHT` bu korumayı
+kapatır.
+**Bu deney:** Veritabanını yapay olarak 200 ms yavaşlatır, önbellek süresini 5 sn'ye indirir ve popüler bir linke yük
+verir; korumalı ve korumasız turda veritabanına kaç sorgu gittiğini karşılaştırır.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P03-05` (Postgres'e Chaos Mesh ile 200 ms gecikme ekler, TTL'i 5
 sn'ye çeker, `hot-key` yüküyle önce korumalı sonra korumasız ölçer, sonunda geri alır). Chaos Mesh kurulu değilse bir kez: `cd "$LADDER/platform" && make chaos`. Elle:
@@ -402,15 +422,19 @@ sorgu gösterir. Singleflight'ın değeri doldurma pahalıyken ortaya çıkar.
 - "Veritabanı sorguları (türe göre)" → `get` korumasız fazda belirgin yükselir; `increment_clicks` iki fazda aynı.
 - "Sorgu süresi p99 (türe göre)" → iki fazda da eklenen ~200 ms gecikme (kova yüzünden ~250 ms çizilir): önbelleği doldurmanın maliyeti.
 
-**Nerede çözülüyor:** Seviye içi — `TRAP_NO_SINGLEFLIGHT` kapalıyken (varsayılan) koruma açık.
+**Nasıl çözülüyor:** Bu seviyenin kendi ayarı: `TRAP_NO_SINGLEFLIGHT` kapalıyken (varsayılan) aynı link için gelen istekler tek veritabanı sorgusunu bekler. Korumanın değeri veritabanı yavaşladıkça artar: önbelleği doldurmak pahalıysa hayat kurtarır.
 
 ---
 
 ### P03-06 · TRAP · Negatif önbellek yoksa "yok" cevabı hep DB'ye iner
 
-**Ne deniyoruz:** Var olmayan kodlara gelen istekler (tarama, ölü link, yazım hatası) önbellekten mi dönüyor, DB'ye mi
-iniyor?
-**Neden:** Önbellek yalnızca var olanı tutar; "yok" cevabı da kısa süre (10 sn) önbelleklenmezse her biri DB'ye sorulur.
+**Ne oluyor:** Var olmayan kodlara gelen istekler (tarama yapan botlar, silinmiş linkler, yazım hataları) önbelleği
+tamamen atlar ve her biri veritabanına gider. Birisi rastgele kodları taradığında bütün yük veritabanına biner.
+**Neden oluyor:** Önbellek normalde yalnızca var olan linkleri saklar. "Böyle bir link yok" cevabı saklanmazsa aynı
+olmayan kod her istendiğinde veritabanına yeniden sorulur. Bu seviyede "yok" cevabı da 10 sn saklanır (negatif
+önbellek); `TRAP_NO_NEGATIVE_CACHE` bunu kapatır.
+**Bu deney:** Var olmayan 60 koddan oluşan bir havuza tarama yükü verir; negatif önbellek açıkken ve kapalıyken
+saniyede kaç sorgunun veritabanına indiğini karşılaştırır.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P03-06` (`scan` senaryosuyla 60 kodluk "yok" havuzuna yük verir,
 negatif önbellek açık/kapalı kıyaslar; negatif isabet hiç olmazsa ölçmeden çıkar). Elle:
@@ -449,16 +473,21 @@ arar): her "yok" yeniden DB'ye soruluyor.
 - "İsabet oranı (pod'a göre)" → açık fazda yüksek (negatif isabet de isabet), kapalı fazda sıfıra yakın.
 - "Veritabanı sorguları (türe göre)" → `get` kapalı fazda belirgin yükselir.
 
-**Nerede çözülüyor:** Seviye içi — `TRAP_NO_NEGATIVE_CACHE` kapalıyken koruma açık. Negatif TTL kısa tutulur (10 sn) ki
-yeni oluşturulan link eski "yok"un arkasında kalmasın; taramanın kendisi 08'de hız sınırıyla karşılanır.
+**Nasıl çözülüyor:** Bu seviyenin kendi ayarı: `TRAP_NO_NEGATIVE_CACHE` kapalıyken (varsayılan) "yok" cevabı 10 sn önbellekte durur. Süre kısa tutulur ki yeni oluşturulan bir link eski "yok" cevabının arkasında kalmasın; taramanın kendisi 08'de hız sınırıyla karşılanır.
 
 ---
 
 ### P03-07 · TRAP · TTL jitter yoksa periyodik DB tepesi
 
-**Ne deniyoruz:** Aynı anda ısınan anahtarların TTL'i aynı saniyede dolup düzenli bir yük dalgası üretiyor mu?
-**Neden:** Dağıtımdan sonra binlerce anahtar aynı saniyede yazılır; TTL'e rastgelelik (jitter) eklenmezse hepsi aynı
-saniyede dolar. Jitter ±%20 bu dolmaları zamana yayar.
+**Ne oluyor:** Dağıtımdan sonra veritabanı saat gibi düzenli aralıklarla ani yük dalgaları alır; sistem kendi
+kendine tepe yük üretir.
+**Neden oluyor:** Dağıtımdan sonra önbellek tek seferde dolar: binlerce kayıt aynı saniyede yazılır ve hepsine aynı
+süre (TTL) verildiği için süreleri de aynı saniyede dolar; o saniyede hepsi birden veritabanından yeniden okunur.
+Normalde her kaydın süresine ±%20 rastgelelik (jitter) eklenir ve dolmalar zamana yayılır; `TRAP_NO_TTL_JITTER` bunu
+kapatır.
+**Bu deney:** Önbellek süresini 30 sn'ye çeker, 300 kodu tek seferde önbelleğe alır ve pod'un metriklerini saniyede
+bir okuyarak her saniye kaç kaydın süresinin dolduğunu jitter'lı ve jitter'sız turda karşılaştırır (Prometheus'un
+10 sn'lik toplama aralığı 1-2 sn'lik bu tepeyi göremez).
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P03-07` (TTL'i 30 sn'ye çeker, 300 kodu tek seferde ısıtır,
 jitter açık/kapalı 150'şer sn yük verip **tepe/ortalama** oranını kıyaslar; ~8 dk; saniyelik seriler
@@ -519,8 +548,7 @@ anahtar doluyor, fark zamana yayılıp yayılmamasında. Kapasite ortalamaya de�
 - `make repro P=P03-07` → `jitter'lı: tepe=… ortalama=… → tepe/ortalama=…` ve `jitter'sız: …`; jitter'sız oran belirgin büyük
 - `paste /tmp/p0307-jitter.txt /tmp/p0307-nojitter.txt | head -90` → sol sütun dağınık küçük sayılar, sağ sütun ~30 satırda bir büyük sayı
 
-**Nerede çözülüyor:** Seviye içi — `TRAP_NO_TTL_JITTER` kapalıyken koruma açık. Aynı fikir retry'da (10) da karşına
-çıkar.
+**Nasıl çözülüyor:** Bu seviyenin kendi ayarı: `TRAP_NO_TTL_JITTER` kapalıyken (varsayılan) sürelere ±%20 rastgelelik eklenir ve dolmalar zamana yayılır. Aynı fikir (rastgelelikle eşzamanlılığı kırmak) 10'da yeniden deneme aralıklarında da karşına çıkar.
 
 ## 7. Seviye içi alıştırmalar (TRAP_ bayrakları)
 

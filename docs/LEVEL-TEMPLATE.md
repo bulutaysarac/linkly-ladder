@@ -24,7 +24,7 @@ flowchart LR
 
 ## 3. Önceki seviyeden çözülenler
 
-| ID | Sorun | Nasıl çözüldü |
+| ID | Sorun (sade dille) | Nasıl çözüldü (sade dille; teknik ad parantez içinde) |
 |---|---|---|
 | Pxx-yy | … | … |
 
@@ -94,13 +94,16 @@ Her seviyede aynı: [docs/API.md](../docs/API.md).
 
 ## 6. Reproduce edilebilir sorunlar
 
-Her sorun aynı düzende: **Ne deniyoruz** (deneyin sorusu) → **Neden** → adımlar (her adım ne yaptığını söyler)
-→ **Terminalde ne görmelisin** → **Grafana'da gör** (giriş: admin / ladder) → **Nerede çözülüyor**.
-`make repro` hükmü: `REPRODUCED` = sorun var · `NOT-REPRODUCED` = yok · `SKIPPED` = ölçülemedi.
+Bu seviyede yaşayacağın N sorun. Her birini iki yoldan görebilirsin: **Otomatik** — `make repro P=<ID>` deneyi
+kendisi yapar, ölçer ve hükmünü basar (`REPRODUCED` = sorun var · `NOT-REPRODUCED` = yok · `SKIPPED` =
+ölçülemedi); **Elle** — adımları sırayla yapıştırıp sonucu kendi gözünle görürsün. Her sorunun bölümü aynı
+düzende: **Ne oluyor** → **Neden oluyor** → **Bu deney** → adımlar → **Terminalde ne görmelisin** →
+**Grafana'da gör** (giriş: admin / ladder) → **Nasıl çözülüyor**.
 
-| ID | Sorun | Reproduce | Grafana'da | Çözüm |
-|---|---|---|---|---|
-| PNN-01 | … | `make repro P=PNN-01` | dashboard → panel | seviye |
+<!-- Tablo, konuyu hiç bilmeyen birinin okuyup anlayacağı özet: terim kullanırsan parantez içinde açıkla. -->
+| ID | Ne olur? | Neden olur? | Nasıl çözülür? |
+|---|---|---|---|
+| PNN-01 | <kullanıcının/operatörün gördüğü, sade dille> | <kök neden, sade dille> | **NN+k:** <ne ile, sade dille> |
 
 Her sorun için alt bölüm: [docs/PROBLEM-TEMPLATE.md](PROBLEM-TEMPLATE.md) kalıbı.
 

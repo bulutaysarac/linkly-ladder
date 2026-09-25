@@ -1,7 +1,8 @@
 ### PNN-XX · <başlık>
 
-**Ne deniyoruz:** Deneyin sorusu, tek cümle ("Pod yenilenince linkler yaşıyor mu?").
-**Neden:** Kök neden, bir-iki kısa cümle; teknik terimi ilk geçtiği yerde açıkla.
+**Ne oluyor:** Kullanıcının/operatörün gördüğü şey ve neden önemli olduğu, sade dille (2-3 cümle).
+**Neden oluyor:** Kök neden, konuyu bilmeyen birinin anlayacağı şekilde; teknik terimi ilk geçtiği yerde açıkla (2-3 cümle).
+**Bu deney:** Deneyin ne yapıp neye baktığı (1-2 cümle).
 
 **Reproduce (adım adım):** Otomatik: `make repro P=PNN-XX` (yıkıcı adım varsa `CONFIRM=1` ile; scriptin ne yaptığı, tek cümle). Elle:
 
@@ -23,7 +24,7 @@ cd "$LADDER/NN-<ad>"
 - "<panelin TAM başlığı>" → <ne görülecek (yön/şekil/değer) ve ne anlama geldiği, tek cümle>
 - Explore'da: `<promql>` → <ne göreceksin>   (yalnızca hiçbir panel göstermiyorsa)
 
-**Nerede çözülüyor:** Seviye NN+k (ne ile).
+**Nasıl çözülüyor:** Hangi seviyede, ne ile ve bu neden sorunu ortadan kaldırıyor — sade dille (1-2 cümle).
 
 <!-- Kurallar:
   • Bloklarda yorum YOK (varsayılan zsh `#`'i komutun argümanı yapar); açıklama adım metninde. Etkileşimli komut
@@ -33,7 +34,7 @@ cd "$LADDER/NN-<ad>"
   • tools/lint-grafana.py: dashboard ve panel adları GERÇEKTEN var olmalı. Grafana'da görülemiyorsa:
     `**Grafana'da gör:** Grafana'da görünmez — <neden>. Kanıt terminalde:` + `- \`<komut>\` → <beklenen çıktı>`.
   • tools/full-run-report.py dashboard linklerini "**Grafana'da gör:**" satırının KENDİSİNDEN okur.
-  • Kısa yaz: bağlam paragrafı, uzun "Ölçüm notu" yok. Bir adımın neden öyle yapıldığı (tek kullanıcı, bekleme,
+  • Adımlarda kısa yaz: bağlam paragrafı, uzun "Ölçüm notu" yok; ayrıntılı açıklama Ne oluyor/Neden oluyor/Nasıl çözülüyor'da. Bir adımın neden öyle yapıldığı (tek kullanıcı, bekleme,
     port-forward) o adımın cümlesine yarım cümleyle girer. -->
 
 ---

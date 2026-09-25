@@ -43,10 +43,10 @@ yönlendirme çalışır, yalnızca analitik durur.
 
 | ID | Sorun | Nasıl çözüldü |
 |---|---|---|
-| P05-01 | At-most-once: sert ölümde tampon kaybolur | Olay `acks=all` ile dayanıklı loga yazılıyor; tüketici ölse de kayıt topic'te durur ve yeniden teslim edilir |
-| P05-03 | Yazıcı okumayla aynı süreç/havuzu paylaşıyor | `cmd/analytics-consumer`: ayrı binary, Deployment, CPU sınırı ve `pgxpool` (10 bağlantı) |
+| P05-01 | Pod aniden öldürülünce bellekteki kuyrukta bekleyen tıklamalar kayboluyordu ("en fazla bir kez") | Tıklama olayı kalıcı bir olay loguna (Redpanda) yazılıyor ve broker'ın "aldım" demesi bekleniyor (`acks=all`); tüketici ölse de olay logda durur ve yeniden okunur |
+| P05-03 | Tıklama yazıcısı yönlendirme yapan programın içindeydi; aynı CPU'yu ve veritabanı bağlantı havuzunu paylaşıyordu | Yazıcı ayrı bir program ve ayrı bir Kubernetes servisi (`analytics-consumer`): kendi CPU sınırı, kendi bağlantı havuzu (`pgxpool`, 10 bağlantı) |
 
-P05-02 (kuyruk düşürme) bir kat aşağı taşındı: üretici tamponunu uygulama sınırlıyor, aşanı düşürüyor (P06-05).
+P05-02 (kuyruk dolunca tıklama atma) listede yok, çünkü sorun bir kat aşağı taşındı: artık olayları loga gönderen tarafın (üretici) tamponu dolabilir; uygulama bu tampona sınır koyar ve aşanı atar (P06-05).
 
 ## 4. Ayağa kaldırma
 
@@ -122,27 +122,35 @@ Her seviyede aynı: [docs/API.md](../docs/API.md). Dışarıdan davranış deği
 
 ## 6. Reproduce edilebilir sorunlar
 
-Her sorun aynı düzende: **Ne deniyoruz** (deneyin sorusu) → **Neden** → adımlar (her adım ne yaptığını söyler)
-→ **Terminalde ne görmelisin** → **Grafana'da gör** (giriş: admin / ladder) → **Nerede çözülüyor**.
-`make repro` hükmü: `REPRODUCED` = sorun var · `NOT-REPRODUCED` = yok · `SKIPPED` = ölçülemedi.
+Bu seviyede yaşayacağın 7 sorun. Her birini iki yoldan görebilirsin: **Otomatik** — `make repro P=<ID>` deneyi
+kendisi yapar, ölçer ve hükmünü basar (`REPRODUCED` = sorun var · `NOT-REPRODUCED` = yok · `SKIPPED` =
+ölçülemedi); **Elle** — adımları sırayla yapıştırıp sonucu kendi gözünle görürsün. Her sorunun bölümü aynı
+düzende: **Ne oluyor** → **Neden oluyor** → **Bu deney** → adımlar → **Terminalde ne görmelisin** →
+**Grafana'da gör** (giriş: admin / ladder) → **Nasıl çözülüyor**.
 
-| ID | Sorun | Reproduce | Grafana'da | Çözüm |
-|---|---|---|---|---|
-| P06-01 | En az bir kez → tekrar teslim (çift sayma riski) | `CONFIRM=1 make repro P=P06-01` | [08 · Stream (Redpanda)](http://grafana.localtest.me/d/ladder-stream?var-level=lvl06&from=now-15m&to=now&refresh=10s) → "Tüketici gecikmesi (bölüme göre)" | seviye içi (idempotency) |
-| P06-02 | Tüketici gecikmesi: analitik bayatlıyor | `make repro P=P06-02` | [08 · Stream (Redpanda)](http://grafana.localtest.me/d/ladder-stream?var-level=lvl06&from=now-15m&to=now&refresh=10s) → "Tüketici gecikmesi (bölüme göre)" | 07 (KEDA) |
-| P06-03 | Tek partition = tek tüketici tavanı | `CONFIRM=1 make repro P=P06-03` | [08 · Stream (Redpanda)](http://grafana.localtest.me/d/ladder-stream?var-level=lvl06&from=now-15m&to=now&refresh=10s) → "Onaylama / sn ve tüketici pod sayısı" | seviye içi (repartition) |
-| P06-04 | **TRAP** Poison message boru hattını rehin alır | `make repro P=P06-04` | [08 · Stream (Redpanda)](http://grafana.localtest.me/d/ladder-stream?var-level=lvl06&from=now-15m&to=now&refresh=10s) → "Tüketilen kayıtlar (sonuca göre)" | seviye içi (DLQ) |
-| P06-05 | Broker düşünce tampon dolar | `CONFIRM=1 make repro P=P06-05` | [08 · Stream (Redpanda)](http://grafana.localtest.me/d/ladder-stream?var-level=lvl06&from=now-15m&to=now&refresh=10s) · [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl06&from=now-15m&to=now&refresh=10s) → "Üretici tamponu ve atılanlar" | seviye içi · 14 |
-| P06-06 | **TRAP** commit noktası = teslimat garantisi | `CONFIRM=1 make repro P=P06-06` | [08 · Stream (Redpanda)](http://grafana.localtest.me/d/ladder-stream?var-level=lvl06&from=now-30m&to=now&refresh=10s) → "Tüketici gecikmesi (bölüme göre)" | seçim meselesi |
-| P06-07 | Şema evrimi: bilinmeyen sürüm | `make repro P=P06-07` | [08 · Stream (Redpanda)](http://grafana.localtest.me/d/ladder-stream?var-level=lvl06&from=now-15m&to=now&refresh=10s) · [01 · Pods & Resources](http://grafana.localtest.me/d/ladder-pods?var-level=lvl06&from=now-15m&to=now&refresh=10s) → "Tüketilen kayıtlar (sonuca göre)" | seviye içi (şema kaydı kapsam dışı) |
+| ID | Ne olur? | Neden olur? | Nasıl çözülür? |
+|---|---|---|---|
+| P06-01 | Tüketici bir grup tıklamayı yazıp "buraya kadar okudum" diyemeden ölürse aynı tıklamalar tekrar gelir; önlem olmasa iki kez sayılırdı | Tüketici önce yazar, sonra nerede kaldığını (offset) kaydeder; aradaki her ölüm tekrar teslim demek ("en az bir kez") | **Bu seviyede:** tekrar gelen olay tanınıp atlanır (idempotent yazma) |
+| P06-02 | Tüketici durunca istatistikler güncellenmez (bayatlar); tüketici dönünce sayı yakalar, veri kaybolmaz | Olaylar logda güvende bekler; tüketici yalnızca nerede kaldığını izler. Bekleyen olay sayısına "lag" denir ve kendiliğinden erimez | **07:** KEDA bekleyen olay sayısına göre tüketiciyi açar/büyütür |
+| P06-03 | Tüketiciyi 3 kopyaya çıkarmak işleme hızını artırmaz; iki kopya boşta oturur | Olay logunun tek bölümü (partition) var ve bir bölümü aynı anda yalnızca bir tüketici okuyabilir | **Bu seviyede:** bölüm sayısını artırmak (`rpk topic add-partitions`) |
+| P06-04 | Okunamayan tek bir bozuk mesaj, arkasındaki bütün tıklamaların işlenmesini durdurur | Tuzak açıkken tüketici bozuk mesajı ayıramaz, sonsuza kadar yeniden dener | **Bu seviyenin tuzağı:** kapatınca bozuk mesaj ayrı bir kutuya (DLQ) taşınır, akış sürer |
+| P06-05 | Olay sunucusu (broker) tamamen durunca tıklamalar atılır ama yönlendirmeler hatasız çalışmaya devam eder | Uygulama broker'ı beklemez; gönderilmeyi bekleyen tıklamaların tamponu sınırlı, dolunca atılır | **Bu seviyede:** sınır + atma · **14:** 3 broker ve kopyalama |
+| P06-06 | "Nerede kaldım" kaydını tıklamaları yazmadan önce yapan bir tüketici ölürse o tıklamalar kalıcı olarak kaybolur | Kayıt yazmadan önce yapılınca yazılamayan olaylar bir daha gelmez ("en fazla bir kez"); sonra yapılınca yalnızca tekrar gelir ("en az bir kez") | **Seçim:** önce yaz, sonra kaydet + tekrarları yut (varsayılan) |
+| P06-07 | Tüketicinin tanımadığı yeni sürüm bir olay gelir; tüketici çökseydi bütün analitik dururdu | Üretici ve tüketici ayrı dağıtılır; bir süre farklı sürümlerde çalışırlar | **Bu seviyede:** bilinmeyen sürüm sayılıp atlanır; şema kayıt defteri kapsam dışı |
 
 ---
 
 ### P06-01 · En az bir kez teslimat → tekrar teslim → idempotency
 
-**Ne deniyoruz:** Tüketici bir partiyi yazıp commit edemeden ölürse aynı olaylar tekrar gelir mi — ve çift sayılır mı?
-**Neden:** Commit (nerede kaldığını broker'a bildirmek) yazmadan sonra; aradaki her ölüm yeniden teslim demek. Çift
-saymayı `processed_events` tablosu engeller (`INSERT … ON CONFLICT DO NOTHING RETURNING`).
+**Ne oluyor:** Tüketici bir grup tıklamayı veritabanına yazar ama "buraya kadar okudum" kaydını broker'a
+bildiremeden ölürse, yerine gelen tüketici aynı tıklamaları tekrar alır. Önlem olmasa aynı tıklama iki kez sayılır ve
+istatistik şişer.
+**Neden oluyor:** Tüketici önce yazar, sonra nerede kaldığını (offset) broker'a kaydeder (commit). Bu iki adım
+arasındaki her ölüm tekrar teslim demek — bu bir hata değil, seçilen garantinin kendisi ("en az bir kez" teslimat).
+Çift saymayı `processed_events` tablosu engeller: her olayın kimliği bir kez kaydedilir, tekrar gelen olay atlanır
+(`INSERT … ON CONFLICT DO NOTHING RETURNING`).
+**Bu deney:** Yazma ile kayıt arasına 30 sn koyar, 2000 tıklamalık birikim kurar ve tüketici ilk grubu yazdığı an onu
+sert öldürür; yeni tüketicinin tekrar gelen olayları saydığını ve toplamın yine tam 2000 kaldığını gösterir.
 
 **Reproduce (adım adım):** Otomatik: `CONFIRM=1 make repro P=P06-01` (yazma ile commit arasına 30 sn koyar, 2000
 tıklamalık birikim kurar, ilk parti yazılır yazılmaz tüketiciyi öldürür; yeni pod'da `duplicate > 0` ve sayım tam N
@@ -204,15 +212,20 @@ idempotency tekrarı yuttu. 5. adımda `consumer_commits_total` sıfırdan büy�
 - "Tüketilen kayıtlar (sonuca göre)" → yeni pod devralınca bir `duplicate` tepesi: tekrar gelen olaylar sayılmadı.
 - "Üretilen ve tüketilen olaylar (toplam)" → `tüketilen` (yalnızca `ok`) `üretilen`in üstüne çıkmaz: çift sayma yok. Kesin sayım DB'deki sayı.
 
-**Nerede çözülüyor:** Seviye içi — en az bir kez teslim + idempotent yazma; iddia ve sayım aynı transaction'da.
-Bedeli: saklama süresi boyunca tıklama başına bir satır.
+**Nasıl çözülüyor:** **Bu seviyede:** "en az bir kez" teslimat + tekrarı yutan (idempotent) yazma. Olayın kimliğini kaydetmek ve sayacı artırmak aynı veritabanı işleminde (transaction) yapılır; aralarında bir çökme çift saymayı geri getirirdi. Bedeli: saklama süresi boyunca tıklama başına bir satır.
 
 ---
 
 ### P06-02 · Tüketici gecikmesi: veri kaybolmuyor, bayatlıyor
 
-**Ne deniyoruz:** Tüketici durunca tıklamalar kaybolur mu, yoksa yalnızca geç mi işlenir?
-**Neden:** Log dayanıklı; tüketici yalnızca nerede kaldığını (offset) izler. İşlenmemiş olay sayısına lag denir.
+**Ne oluyor:** Tüketici durunca (arıza, dağıtım, sıfır kopya) istatistikler güncellenmez; `/stats` eski değeri
+gösterir. Tüketici dönünce birikmiş tıklamalar işlenir ve sayı yakalar — 05'te aynı durum kalıcı kayıptı, burada
+yalnızca gecikme.
+**Neden oluyor:** Olaylar kalıcı logda güvende bekler; tüketici yalnızca nerede kaldığını (offset) izler. İşlenmeyi
+bekleyen olay sayısına "lag" (gecikme) denir. Ama durmuş bir tüketiciyi kimse otomatik geri getirmez; lag kendiliğinden
+erimez.
+**Bu deney:** Tüketiciyi kapatıp 2000 tıklama üretir, 120 sn kimse müdahale etmeden bekler (sistem toparlanmıyor),
+sonra tüketiciyi açıp sayının yakaladığını gösterir.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P06-02` (tüketiciyi kapatır, 2000 tıklama üretir, 120 sn kendiliğinden
 toparlanıp toparlanmadığına bakar, sonra tüketiciyi açıp verinin kaybolmadığını gösterir; bayat kaldı ve kendiliğinden
@@ -257,15 +270,18 @@ olaylar broker'da güvende ama işlenmedi. 2. adımda sayaç hâlâ `0`, `READY 
 - "Onaylama / sn ve tüketici pod sayısı" → `tüketici pod` 0, `onaylama / sn` yok: lag büyürken tüketiciyi geri getiren bir şey yok.
 - "Üretilen ve tüketilen olaylar (toplam)" → `üretilen` yükselir, `tüketilen` yatay; aradaki açıklık lag'in kendisi. Tüketici açılınca `tüketilen` yetişir.
 
-**Nerede çözülüyor:** 07 — KEDA lag'i ölçekleme sinyali yapar (tek partition'da işe yaramaz, bkz. P06-03).
+**Nasıl çözülüyor:** **07:** KEDA bekleyen olay sayısını (lag) izler ve tüketiciyi otomatik açar/büyütür. Tek bölümlü (partition) bir logda kopya eklemek hızlandırmaz (P06-03); lag bir hata değil bir ölçüdür, eşiği ürün kararıdır.
 
 ---
 
 ### P06-03 · Tek partition = tek tüketici tavanı
 
-**Ne deniyoruz:** Tüketiciyi 3 replikaya çıkarmak işleme hızını artırıyor mu?
-**Neden:** Kafka'da paralelliğin üst sınırı partition sayısı: bir partition'ı aynı grupta yalnızca bir tüketici okur.
-Topic'in tek partition'ı var.
+**Ne oluyor:** Tıklamalar birikince tüketiciyi 3 kopyaya çıkarıyorsun ama işleme hızı değişmiyor; kopyalardan
+ikisi boşta oturuyor.
+**Neden oluyor:** Kafka'da (ve Redpanda'da) bir konu (topic) bölümlere (partition) ayrılır ve bir bölümü aynı tüketici
+grubunda yalnızca bir tüketici okuyabilir. Bu konunun tek bölümü var; paralelliğin tavanı bölüm sayısıdır.
+**Bu deney:** Bölüm sayısını gösterir; aynı yükü 1 ve 3 tüketiciyle verip saniyedeki işleme hızını ve gerçekten iş
+yapan pod sayısını karşılaştırır.
 
 **Reproduce (adım adım):** Otomatik: `CONFIRM=1 make repro P=P06-03` (1 ve 3 tüketiciyle aynı yükü verip tepe işleme
 hızını ve iş yapan pod sayısını karşılaştırır, sonra 1'e döner; 3 replika 1'in 1,5 katına ulaşmazsa `REPRODUCED`). Elle:
@@ -310,15 +326,20 @@ partition alamadığı için boşta.
 - "Tüketici gecikmesi (bölüme göre)" → tek çizgi (`bölüm 0`); iki fazda da benzer sürede erir.
 - Explore'da: `sum by (pod) (rate(consumer_records_total{namespace="lvl06",result="ok"}[1m]))` → 3 replikalı fazda yalnızca biri sıfırdan büyük.
 
-**Nerede çözülüyor:** Seviye içi: `rpk topic add-partitions clicks -n 6`. Bedeli: sıra yalnızca partition içinde
-korunur; anahtar kısa kod olduğu için aynı linkin olayları sıralı kalır, ama sıcak bir link tek partition'a yüklenir.
+**Nasıl çözülüyor:** **Bu seviyede:** bölüm sayısını artırmak (`rpk topic add-partitions clicks -n 6`). Bedeli: sıra yalnızca bölüm içinde korunur; anahtar kısa kod olduğu için aynı linkin olayları sıralı kalır, ama çok popüler bir link tek bölüme yüklenir.
 
 ---
 
 ### P06-04 · TRAP · Poison message boru hattını rehin alır
 
-**Ne deniyoruz:** Ayrıştırılamayan tek bir mesaj, DLQ (ölü mektup kutusu) olmadan arkasındaki tıklamaları durdurur mu?
-**Neden:** Tüketici işleyemediği mesajda yalnızca hata verirse aynı mesaj sonsuza kadar yeniden denenir; offset ilerlemez.
+**Ne oluyor:** Tuzak açıkken okunamayan (bozuk) tek bir mesaj, arkasındaki bütün tıklamaların işlenmesini
+durdurur; bekleyen olay sayısı sınırsız büyür. Pod ise ayakta ve "sağlıklıyım" der; sorunu yalnızca biriken lag
+gösterir.
+**Neden oluyor:** Tüketici işleyemediği mesaj için bir çıkış yolu tanımlamazsa aynı mesajı sonsuza kadar yeniden dener
+ve nerede kaldığını (offset) ilerletemez. Tuzak (`TRAP_NO_DLQ`), bozuk mesajları ayıran ölü mektup kutusunu (DLQ —
+dead letter queue) kapatır.
+**Bu deney:** Tuzağı açar, konuya 3 bozuk kayıt ve arkasından 200 tıklama gönderir; tıklamaların işlenmediğini ve aynı
+kaydın yeniden denendiğini gösterir, tuzağı kapatınca 200 tıklamanın serbest kaldığını ölçer.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P06-04` (DLQ kapalıyken 3 bozuk kaydın arkasındaki 200 tıklamanın
 işlenip işlenmediğine, sonra DLQ açılınca serbest kalıp kalmadığına bakar; 1. fazda 0/200, 2. fazda 200/200 ise
@@ -375,16 +396,20 @@ birincisinden büyük: aynı bozuk kayıt her saniye yeniden deneniyor — pod i
 - "Onaylama / sn ve tüketici pod sayısı" → tuzak fazında `tüketici pod` 1, `onaylama / sn` 0: süreç ayakta ama iş ilerlemiyor.
 - "Ölü mektup kutusuna giden / sn" → yalnızca ikinci fazda küçük bir tepe.
 
-**Nerede çözülüyor:** Seviye içi (DLQ). Tüketici işleyemediği mesaj için bir çıkış yolu tanımlamalı; ilerlemenin
-ölçüsü sağlık ucu değil, lag.
+**Nasıl çözülüyor:** Bu seviyenin tuzağı: kapatınca (varsayılan) bozuk mesaj `clicks-dlq` kutusuna taşınır ve akış sürer. Kural: her tüketici işleyemediği mesaj için bir çıkış yolu tanımlamalı (atla ve say, DLQ'ya taşı ya da bilerek dur); ilerlemenin ölçüsü sağlık ucu değil, lag'dir.
 
 ---
 
 ### P06-05 · Broker düşünce: bloklamak mı düşürmek mi?
 
-**Ne deniyoruz:** Redpanda tamamen durunca redirect'ler çalışmaya devam ediyor mu?
-**Neden:** `Record()` beklemez ve üretici tamponu sınırlı (`PRODUCER_MAX_BUFFERED`); dolunca kayıt düşürülür. Beklemek
-broker kesintisini site kesintisine, sınırsız tampon OOM'a çevirirdi.
+**Ne oluyor:** Olay sunucusu (Redpanda broker) tamamen durunca yönlendirmeler hatasız çalışmaya devam eder;
+yalnızca tıklamalar gönderilemez, tampon dolar ve sınırı aşanlar atılır. Analitik durur, kullanıcı bir şey fark etmez.
+**Neden oluyor:** Uygulama tıklamayı gönderirken broker'ı beklemez ve gönderilmeyi bekleyen tıklamaların tamponu sınırlı
+(`PRODUCER_MAX_BUFFERED`); dolunca yeni tıklama atılır. Beklemek broker kesintisini site kesintisine, sınırsız tampon ise
+belleği doldurup pod'u öldürmeye (OOM) çevirirdi. Kafka istemcisinin varsayılanı (10.000 kayıtta çağıranı beklet) bu
+yüzden kullanılmıyor.
+**Bu deney:** Tampon sınırını 500'e indirir, broker ayaktayken ve kapalıyken aynı yükü verir; iki durumda hata oranını,
+yanıt süresini, tampon doluluğunu ve atılan tıklamaları karşılaştırır.
 
 **Reproduce (adım adım):** Otomatik: `CONFIRM=1 make repro P=P06-05` (tampon sınırını 500'e indirir — varsayılan 50.000
 kısa kesintide dolmaz —, broker ayaktayken ve kapalıyken aynı yükü verir; hata %1'in altında ve düşürülen > 0 ise
@@ -428,19 +453,25 @@ kullanıcı etkilenmedi.
 - "Gecikme (p50 / p95 / p99)" → iki fazda benzer; sıçrama `Record()`'un istek yolunu bloklaması demek olurdu.
 - "Bellek: sınırın yüzde kaçı" → `linkly-…` belleği biraz artar, %80'in altında kalır.
 
-**Nerede çözülüyor:** Kısmen seviye içi (sınır + düşürme), tam çözüm 14 (3 broker + replikasyon).
+**Nasıl çözülüyor:** **Bu seviyede** kısmen: sınır + atma kullanıcıyı korur ama tıklama kaybettirir. **14:** 3 broker ve kopyalamayla tek broker'ın düşmesi kesinti olmaktan çıkar. Bir broker kesintisi analitiği bozabilir, yönlendirmeyi asla.
 
 ---
 
 ### P06-06 · TRAP · Commit noktası teslimat garantisidir
 
-**Ne deniyoruz:** Offset'i yazmadan önce commit eden bir tüketici ölürse tıklamalar kaybolur mu?
-**Neden:** İki sıra var, üçüncüsü yok:
+**Ne oluyor:** Tuzak açıkken tüketici "nerede kaldım" kaydını tıklamaları yazmadan önce yapar; tam bu arada
+ölürse o tıklamalar hiç yazılmaz ve bir daha gelmez — kalıcı kayıp. Varsayılan sırada aynı ölüm yalnızca tekrar teslime
+yol açar ve sayı eksilmez.
+**Neden oluyor:** Tüketicinin iki adımı var: tıklamaları veritabanına yazmak ve nerede kaldığını (offset) broker'a
+kaydetmek (commit). Bu iki adımın sırası teslimat garantisini belirler; üçüncü bir yol yok:
 
 | Sıra | Sonuç | Riski |
 |---|---|---|
 | yaz → commit *(varsayılan)* | en az bir kez | tekrar teslim (idempotency emer) |
 | commit → yaz *(TRAP)* | en fazla bir kez | yazma olmazsa veri kaybı |
+
+**Bu deney:** Adımlar arasına 30 sn koyar ve iki sırayı da dener: her birinde 2000 tıklamalık birikim kurup tüketiciyi
+iki adımın arasında öldürür, sonra kaç tıklamanın kaydedildiğini sayar.
 
 **Reproduce (adım adım):** Otomatik: `CONFIRM=1 make repro P=P06-06` (her iki sırada 2000 tıklamalık birikim kurup
 tüketiciyi iki adımın arasında öldürür; varsayılan tam N, TRAP N'in altındaysa `REPRODUCED`; öldürme araya denk
@@ -517,16 +548,18 @@ edilip yazılamayan kayıtlar bir daha gelmez.
 - "Tüketilen kayıtlar (sonuca göre)" → varsayılanda bir `duplicate` tepesi; TRAP'te `duplicate` yok (tekrar teslim yok).
 - "Üretilen ve tüketilen olaylar (toplam)" → TRAP fazında `tüketilen`, `üretilen`in altında kalır. Kesin karşılaştırma DB'deki sayım.
 
-**Nerede çözülüyor:** Seçim meselesi: "tam bir kez" gerçekte en az bir kez + idempotent yazmadır. Otomatik commit
-kapalı, çünkü zamanlayıcıyla commit garantiyi sessizce ikinci satıra çevirir.
+**Nasıl çözülüyor:** Bir seçim meselesi: varsayılan sıra (önce yaz, sonra kaydet) + tekrarları yutan yazma, "tam bir kez" denen şeyin gerçekte nasıl elde edildiğidir. Otomatik (zamanlayıcıyla) kayıt bu yüzden kapalı: garantiyi sessizce kayıplı sıraya çevirirdi.
 
 ---
 
 ### P06-07 · Şema evrimi: bilinmeyen sürüm geldiğinde
 
-**Ne deniyoruz:** Tüketicinin bilmediği bir olay sürümü (`v:99`) gelince tüketici çöküyor mu, akış duruyor mu?
-**Neden:** Üretici ve tüketici ayrı dağıtılır; bir an farklı sürümde olurlar. Tüketici bilinmeyen sürümde patlarsa
-üreticinin tek satırlık değişikliği bütün analitiği durdurur.
+**Ne oluyor:** Tüketicinin tanımadığı yeni sürüm bir olay (`v:99`) gelince tüketici çökmez; olayı atlar, sayar ve
+arkasındaki tıklamaları işlemeye devam eder. Bu bölüm, bu davranışın gerçekten çalıştığını sınar.
+**Neden oluyor:** Üretici (uygulama) ve tüketici ayrı dağıtılır; bir süre farklı sürümlerde çalışırlar. Tüketici
+bilmediği sürümde çökseydi, üreticideki tek satırlık bir değişiklik bütün analitiği durdururdu.
+**Bu deney:** Konuya `v:99` bir olay ve arkasından 150 normal tıklama gönderir; tıklamaların işlendiğini, bilinmeyen
+sürümün sayıldığını ve tüketicinin yeniden başlamadığını gösterir.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P06-07` (topic'e `v:99` bir olay basar, ardından 150 normal tıklama;
 bilinmeyen sürüm sayıldı ve normal tıklamalar işlendiyse `REPRODUCED`). Elle:
@@ -560,8 +593,7 @@ kubectl -n lvl06 get pod -l app.kubernetes.io/name=analytics
 - "Ölü mektup kutusuna giden / sn" → 0 kalır: bu bir poison message (P06-04) değil.
 - "Yeniden başlatma sayısı" → `analytics-…` çizgisi yatay: tüketici çökmedi.
 
-**Nerede çözülüyor:** Seviye içi: tüketici bilinmeyen alanları yok sayar, bilinmeyen sürümü görünür biçimde atlar; alan
-eklemek uyumlu, silmek değil; önce tüketiciler hazırlanır. Şema kayıt defteri kapsam dışı (14'te opsiyonel).
+**Nasıl çözülüyor:** **Bu seviyede:** tüketici bilmediği alanları yok sayar, bilmediği sürümü görünür biçimde atlar. Alan eklemek uyumludur, silmek ya da anlamını değiştirmek değildir; yeni sürüm üretilmeden önce tüketiciler hazırlanır. Daha güçlü çözüm olan şema kayıt defteri kapsam dışı (14'te opsiyonel).
 
 ## 7. Seviye içi alıştırmalar (TRAP_ bayrakları)
 

@@ -41,12 +41,12 @@ Uygulama yedekli, veritabanı değil: üç pod da aynı tek Postgres'e bağlı (
 
 | ID | Sorun | Nasıl çözüldü |
 |---|---|---|
-| P00-02 / P01-01 | Restart = tüm linkler gider | Veri Postgres'te, kalıcı diskte |
-| P00-03 / P01-02 | `replicas>1` → rastgele 404 | Üç replika aynı veriyi görüyor |
-| P01-03 | Tek replika + PDB = yanılsama | 3 replika, düğümlere yayılmış, `minAvailable: 2` |
-| P01-04 | Bellek sınırsız büyür | Uygulama veri tutmuyor |
+| P00-02 / P01-01 | Uygulama yeniden başlayınca bütün linkler kaybolur | Linkler Postgres veritabanında, kalıcı bir diskte tutulur; pod'lar gelip gider, veri kalır |
+| P00-03 / P01-02 | Uygulama birden çok kopyaya çıkınca linkler rastgele 404 verir | Üç kopya da aynı veritabanını okur; hepsi aynı linkleri görür |
+| P01-03 | Tek kopyalı servisi koruyan kural (PDB) düğüm bakımını kilitler | 3 kopya farklı düğümlere yayılır; kural "en az 2 kopya ayakta" der (`minAvailable: 2`), bakımda bir kopya kapatılabilir |
+| P01-04 | Bellek link sayısıyla sınırsız büyür | Uygulama veriyi kendi belleğinde tutmaz, veritabanından okur |
 
-Kısmen: P01-08 (tıklama sayacı) hâlâ istek yolunda ama artık kalıcı; tam çözümü 05'te.
+Kısmen: tıklama sayacı (P01-08) hâlâ yönlendirme isteğinin içinde ama artık kalıcı (veritabanında); istek yolundan tamamen çıkması 05'te.
 
 ## 4. Ayağa kaldırma
 
@@ -120,30 +120,37 @@ kimlik doğrulama değil — başlığı herkes gönderebilir (13).
 
 ## 6. Reproduce edilebilir sorunlar
 
-Her sorun aynı düzende: **Ne deniyoruz** (deneyin sorusu) → **Neden** → adımlar (her adım ne yaptığını söyler)
-→ **Terminalde ne görmelisin** → **Grafana'da gör** (giriş: admin / ladder) → **Nerede çözülüyor**.
-`make repro` hükmü: `REPRODUCED` = sorun var · `NOT-REPRODUCED` = yok · `SKIPPED` = ölçülemedi.
+Bu seviyede yaşayacağın 10 sorun. Her birini iki yoldan görebilirsin: **Otomatik** — `make repro P=<ID>` deneyi
+kendisi yapar, ölçer ve hükmünü basar (`REPRODUCED` = sorun var · `NOT-REPRODUCED` = yok · `SKIPPED` =
+ölçülemedi); **Elle** — adımları sırayla yapıştırıp sonucu kendi gözünle görürsün. Her sorunun bölümü aynı
+düzende: **Ne oluyor** → **Neden oluyor** → **Bu deney** → adımlar → **Terminalde ne görmelisin** →
+**Grafana'da gör** (giriş: admin / ladder) → **Nasıl çözülüyor**.
 
-| ID | Sorun | Reproduce | Grafana'da | Çözüm |
-|---|---|---|---|---|
-| P02-01 | Her redirect = DB sorgusu | `make repro P=P02-01` | [05 · Postgres](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl02&from=now-15m&to=now&refresh=10s) · [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl02&from=now-15m&to=now&refresh=10s) → "Veritabanı sorguları (türe göre)" | 03 · 04 |
-| P02-02 | Havuz taşması: replika × pool > max_connections | `CONFIRM=1 make repro P=P02-02` | [05 · Postgres](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl02&from=now-15m&to=now&refresh=10s) · [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl02&from=now-15m&to=now&refresh=10s) → "Bağlantılar ve üst sınır" | 09 |
-| P02-03 | DB tek nokta; failover yok | `CONFIRM=1 make repro P=P02-03` | [01 · Pods & Resources](http://grafana.localtest.me/d/ladder-pods?var-level=lvl02&from=now-15m&to=now&refresh=10s) · [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl02&from=now-15m&to=now&refresh=10s) → "Hazır pod adresi (endpoint) sayısı" | 09 |
-| P02-04 | Süreç içi limit 3 replikada 3 katı | `CONFIRM=1 make repro P=P02-04` | [10 · Rate limit](http://grafana.localtest.me/d/ladder-ratelimit?var-level=lvl02&from=now-15m&to=now&refresh=10s) → "İzin verilen (pod'a göre)" | 08 |
-| P02-05 | Index yok → seq scan | `make repro P=P02-05` | [05 · Postgres](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl02&from=now-15m&to=now&refresh=10s) → "Tablo tarama: tam tarama / indeksli" | seviye içi (002) |
-| P02-06 | Yavaş DB + timeout yok → havuz tıkanır | `make repro P=P02-06` | [05 · Postgres](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl02&from=now-15m&to=now&refresh=10s) · [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl02&from=now-15m&to=now&refresh=10s) → "Sorgu süresi p99 (türe göre)" | seviye içi · 10 |
-| P02-07 | **TRAP** migration her pod'da → yarış | `make repro P=P02-07` | [01 · Pods & Resources](http://grafana.localtest.me/d/ladder-pods?var-level=lvl02&from=now-15m&to=now&refresh=10s) · [05 · Postgres](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl02&from=now-15m&to=now&refresh=10s) → "Yeniden başlatma sayısı" | seviye içi (Job) |
-| P02-08 | Sıcak link → satır kilidi kuyruğu | `make repro P=P02-08` | [05 · Postgres](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl02&from=now-15m&to=now&refresh=10s) · [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl02&from=now-15m&to=now&refresh=10s) → "Sorgu süresi p99 (türe göre)" | 05 · 06 |
-| P02-09 | Sır düz metin (git + Secret + env) | `make repro P=P02-09` | görünmez — kanıt terminalde ↓ | 13 |
-| P02-10 | **TRAP** readiness DB'ye bakar → tam kesinti | `CONFIRM=1 make repro P=P02-10` | [01 · Pods & Resources](http://grafana.localtest.me/d/ladder-pods?var-level=lvl02&from=now-15m&to=now&refresh=10s) · [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl02&from=now-15m&to=now&refresh=10s) → "Hazır pod adresi (endpoint) sayısı" | seviye içi · 10 |
+| ID | Ne olur? | Neden olur? | Nasıl çözülür? |
+|---|---|---|---|
+| P02-01 | Her yönlendirme veritabanına iki sorgu attırır; trafik arttıkça bütün yük tek bir yerde, Postgres'te toplanır | Link her seferinde veritabanından okunur (`SELECT`), tıklama her seferinde veritabanına yazılır (`UPDATE`) | **03/04:** okumalar önbellekten · **05:** tıklama yazması istek yolundan çıkar |
+| P02-02 | Uygulama 10 kopyaya çıkınca veritabanı yeni bağlantıları reddeder, istekler 503 alır | Her kopya 25 bağlantılık kendi havuzunu açar: 10 × 25 = 250, Postgres'in sınırı 100 | **09:** bağlantı havuzlayıcı (PgBouncer) çok bağlantıyı az sayıda gerçek bağlantıya indirir |
+| P02-03 | Tek veritabanı ölünce 3 kopyalı uygulama da hata verir | Uygulama 3 kopya ama veritabanı tek; yedeklilik en zayıf halka kadardır | **09:** yedekli veritabanı (ana + yedek + otomatik devralma) |
+| P02-04 | "Saniyede 40 istek" sınırı pratikte saniyede ~120 | Her kopya sınırı kendi belleğinde sayar ve artık varsayılan 3 kopya var | **08:** ortak sınır sayacı Redis'te |
+| P02-05 | Kiracıya göre link listesi, tablo büyüdükçe belirgin yavaşlar | Aranan sütunda indeks yok; veritabanı her seferinde bütün tabloyu okur (seq scan) | **Bu seviyede:** indeks eklenir (`migrations/002`) |
+| P02-06 | Veritabanı ölmeden yalnızca yavaşlayınca uygulama da tıkanır ve 503 verir | Uygulama beklemeyi bırakır ama veritabanı sorguyu sürdürür; bağlantılar meşgul kalır, havuz dolar | **Bu seviyede:** veritabanı tarafı zaman aşımı (`STATEMENT_TIMEOUT`) · **10:** devre kesici |
+| P02-07 | **Tuzak:** şema değişikliğini her pod kendisi uygularsa pod'lar çöker, şema bozuk kalabilir | Aynı anda açılan pod'lar aynı işe girişip birbirini kilitler | **Bu seviyenin ayarı:** şema değişikliği tek seferlik ayrı bir iş (Job) |
+| P02-08 | En popüler link en yavaş link olur | Her tıklama aynı veritabanı satırını günceller; güncellemeler o satırın kilidini sırayla bekler | **05:** tıklamalar kuyrukta toplanıp toplu yazılır · **06:** olay akışı |
+| P02-09 | Veritabanı parolası repoyu ya da kümeyi okuyabilen herkese açık | Parola repoda düz metin; Kubernetes Secret'ı şifrelemez, yalnızca kodlar (base64) | **13** (kısmen): ağ kuralları; sırlar hâlâ düz metin (P13-04) |
+| P02-10 | **Tuzak:** veritabanı kısa süre gidince uygulamanın bütün kopyaları trafikten çıkar, servis tamamen kesilir | Kopyalar "hazır mısın?" sorusuna "veritabanına ulaşabiliyor muyum?" diye cevap verir; hepsi aynı anda "hayır" der | **Bu seviyenin ayarı:** hazır olma kontrolü yalnızca pod'un kendisine bakar · **10:** devre kesici |
 
 ---
 
 ### P02-01 · Her redirect bir DB sorgusu
 
-**Ne deniyoruz:** Bir yönlendirme veritabanına kaç sorgu attırıyor ve yük nerede toplanıyor?
-**Neden:** Her yönlendirme iki sorgu: `SELECT` (linki bul) + `UPDATE` (tıklamayı say). Okuma ağırlıklı bir sistemde
-bütün yük tek bir paylaşılan kaynağa, Postgres'e gider.
+**Ne oluyor:** Her kısa link açıldığında uygulama veritabanına iki sorgu gönderir: linki bulmak için bir okuma,
+tıklamayı saymak için bir yazma. Trafik arttıkça bütün yük tek bir paylaşılan kaynakta, Postgres'te toplanır;
+yönlendirme süresinin çoğu veritabanında geçer.
+**Neden oluyor:** 02'de veri artık uygulamanın belleğinde değil, veritabanında; uygulama hiçbir şeyi hatırlamaz ve
+her istekte sorar. Okuma ağırlıklı bir sistemde (bir link bir kez oluşturulur, binlerce kez açılır) bu, en sık
+yapılan işin en pahalı yoldan yapılması demek.
+**Bu deney:** 30 kullanıcıyla 60 sn yönlendirme yükü verir; saniyedeki yönlendirme ve sorgu sayısını, Postgres'in
+CPU kullanımını ve yönlendirme süresini (p99) Prometheus'tan okur.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P02-01` (60 sn yönlendirme yükü verir; yönlendirme başına sorguyu,
 Postgres CPU'sunu ve p99'u hesaplar). Elle:
@@ -175,15 +182,19 @@ CPU ~31 (çekirdeğin %31'i), p99 ~0.097 (96.7 ms).
 - "Sorgu süresi p99 (türe göre)" → `get` p99'u (~50 ms) yönlendirme p99'unun yarısı: sürenin çoğu DB'de.
 - "p99 süre (uç noktaya göre)" → `/{code}` yük altında ~97 ms'ye çıkar; 01'de bu bir bellek aramasıydı.
 
-**Nerede çözülüyor:** `SELECT`'i 03/04 (önbellek), `UPDATE`'i 05 (asenkron analitik) kaldırır.
+**Nasıl çözülüyor:** Okuma (`SELECT`) 03'te süreç içi, 04'te paylaşılan önbellekle veritabanına gitmez; tıklama yazması (`UPDATE`) 05'te istek yolundan çıkıp kuyrukla toplu yazılır.
 
 ---
 
 ### P02-02 · Bağlantı havuzu taşması
 
-**Ne deniyoruz:** Replika sayısını artırınca Postgres'in bağlantı sınırı aşılıyor mu?
-**Neden:** Her pod kendi havuzunu tek başınaymış gibi 25 bağlantıyla boyutlar; 3 × 25 = 75 < 100 sığar,
-10 × 25 = 250 > 100 sığmaz. Havuz boyutu yerel bir karar gibi görünür ama ortak bir sınırı tüketir.
+**Ne oluyor:** Trafik için uygulamayı 10 kopyaya çıkarınca veritabanı yeni bağlantıları "too many clients" diyerek
+reddeder ve kullanıcılar 503 alır. Daha fazla kopya, daha fazla kapasite yerine hata getirir.
+**Neden oluyor:** Her kopya veritabanına kendi bağlantı havuzunu (hazırda tutulan bağlantılar) açar ve boyutunu tek
+başınaymış gibi seçer: 25 bağlantı. 3 × 25 = 75 Postgres'in 100'lük sınırına sığar, 10 × 25 = 250 sığmaz. Havuz
+boyutu yerel bir karar gibi görünür ama ortak bir sınırı tüketir.
+**Bu deney:** Bağlantı sınırını ve havuz boyutunu gösterir, 10 kopyaya çıkıp 80 kullanıcıyla 60 sn yük verir; açık
+bağlantıları, hatalı sorguları ve Postgres'in reddini sayar, sonunda geri alır.
 
 **Reproduce (adım adım):** Otomatik: `CONFIRM=1 make repro P=P02-02` (10 replikaya çıkar, 80 kullanıcıyla 60 sn yük
 verir; bağlantıları, DB hatalarını ve 5xx'i sayar, geri alır). Elle:
@@ -228,16 +239,18 @@ uygulama `503 store_error` dönüyor.
 - "Uygulama havuzu: boş bağlantı bulunamadı / sn" → sıfırda kalır: hiçbir pod'un kendi havuzu dolmadı. Yerel havuz iyi görünürken sistem hata veriyorsa sebep ortak sınırdır.
 - Explore'da: `sum by (op) (rate(db_queries_total{namespace="lvl02",result="error"}[1m]))` → bağlantılar tavana çarptığında hatalı sorgu çizgileri sıfırdan kalkar.
 
-**Nerede çözülüyor:** 09 (PgBouncer): çok sayıda uygulama bağlantısını az sayıda gerçek DB bağlantısına eşler. Havuzu
-küçültmek çözüm değil; kuyruğu uygulamaya taşır (P02-06).
+**Nasıl çözülüyor:** 09'da uygulama ile Postgres arasına bir bağlantı havuzlayıcı (PgBouncer) girer: çok sayıda uygulama bağlantısını az sayıda gerçek veritabanı bağlantısına eşler. Havuzu küçültmek çözüm değildir; kuyruğu uygulamaya taşır (P02-06).
 
 ---
 
 ### P02-03 · Veritabanı tek nokta
 
-**Ne deniyoruz:** Tek Postgres ölünce 3 replikalı uygulama çalışmaya devam ediyor mu?
-**Neden:** Yedeklilik zincirin en zayıf halkası kadardır: "3 replika" uygulamanın yedekli olduğunu söyler, sistemin
-değil.
+**Ne oluyor:** Tek Postgres pod'u ölünce uygulamanın 3 kopyası ayakta ve "hazır" olsa da her istek 503 döner;
+veritabanı dönene kadar servis kullanılamaz.
+**Neden oluyor:** Uygulama 3 kopya ama veritabanı tek: yedeklilik zincirin en zayıf halkası kadardır. "3 replika"
+uygulamanın yedekli olduğunu söyler, sistemin değil.
+**Bu deney:** Yük altında tek veritabanı pod'unu siler, 60 sn boyunca 2 sn'de bir link oluşturmayı dener; kesinti
+süresini ve 5xx hatalarını ölçer.
 
 **Reproduce (adım adım):** Otomatik: `CONFIRM=1 make repro P=P02-03` (yük altında Postgres pod'unu siler, kesinti
 penceresini ve 5xx'i ölçer). Elle:
@@ -277,15 +290,19 @@ kurtarmadı.
 - "Bağlantılar ve üst sınır" → çizgiler kesilir (exporter DB ile aynı pod'da), DB dönünce yeniden kurulur.
 - Explore'da: `pg_up{namespace="lvl02"}` → 1'den düşer, DB dönünce 1.
 
-**Nerede çözülüyor:** 09 (CNPG: primary + replika + otomatik failover).
+**Nasıl çözülüyor:** 09'da Postgres bir operatörle (CloudNativePG) yönetilir: bir ana (primary) ve bir yedek (replika) sunucu; ana ölünce yedek onun yerini alır (otomatik failover).
 
 ---
 
 ### P02-04 · Süreç içi hız sınırı 3 replikada 3 katı
 
-**Ne deniyoruz:** Artık 3 replika varsayılan olduğuna göre, sınır gerçekte ne kadar?
-**Neden:** Sınır sayacı her pod'un belleğinde (P01-05'in aynısı); 02'de 3 replika zaten varsayılan, yani sınır bugün
-3 katı.
+**Ne oluyor:** Uygulamada "istemci başına saniyede 40 istek" sınırı var; ama 02'de uygulama varsayılan olarak 3 kopya
+çalıştığı için aynı istemci pratikte saniyede ~120 istek geçirir. Sınırın amacı veritabanını korumaksa, koruma
+yazılanın üç katı gevşek.
+**Neden oluyor:** Sınır sayacı her kopyanın kendi belleğinde (P01-05'in aynısı): her kopya yalnızca kendisine
+gelenleri sayar. Korunan kaynak (veritabanı) tek, koruma kopya başına.
+**Bu deney:** Sınırı kopya başına saniyede 40 yapar, aynı yükü önce 1 sonra 3 kopyaya verir ve kabul edilen istekleri
+karşılaştırır; sonunda ayarları geri alır.
 
 **Reproduce (adım adım):** Otomatik: `CONFIRM=1 make repro P=P02-04` (sınırı pod başına 40/s yapar, aynı yükü önce 1
 sonra 3 pod'a verir, kabul edilenleri karşılaştırır, geri alır). Elle:
@@ -325,15 +342,19 @@ make reset
 - "İzin verilen (pod'a göre)" → ilk fazda tek çizgi (~40/s), ikinci fazda üç çizgi, her biri ~40/s: toplam ~3 katı.
 - "Kararlar (anahtar türüne göre)" → `ip allow` ikinci fazda ~3 katına çıkar.
 
-**Nerede çözülüyor:** 08 (Redis'te paylaşılan sınır). Sınırın amacı DB'yi korumak; korunan kaynak tek, koruma pod başına.
+**Nasıl çözülüyor:** 08'de sınır sayacı bütün kopyaların ortak kullandığı Redis'te tutulur; sınır kopya sayısından bağımsız olur.
 
 ---
 
 ### P02-05 · Index yok → seq scan
 
-**Ne deniyoruz:** İndeks olmayan bir sütunda arama, tablo büyüyünce ne kadar yavaşlar?
-**Neden:** Kiracı (`tenant`) sütununda indeks yok (bilerek); listeleme sorgusu bütün tabloyu okuyup sıralar (seq scan).
-Küçük veride fark edilmez, büyük veride olay olur.
+**Ne oluyor:** Bir kiracının linklerini listelemek (`GET /api/links`) küçük tabloda anında biter; tablo büyüdükçe
+aynı istek belirgin yavaşlar. Küçük veride fark edilmeyen sorun, büyük veride olaya dönüşür.
+**Neden oluyor:** Listeleme sorgusu kiracı (`tenant`) sütununa göre arar ama bu sütunda indeks (kitabın sonundaki
+dizin gibi hızlı arama yapısı) yok — bilerek. Veritabanı her seferinde bütün tabloyu baştan sona okuyup süzer
+(seq scan).
+**Bu deney:** Tabloya 300 bin satır ekler, sorgunun planına (`EXPLAIN ANALYZE`) ve listeleme süresine bakar; sonra
+indeksi kurup aynı ölçümü tekrarlar ve indeksi yeniden kaldırır.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P02-05` (300 bin satır ekler, sorgu planını (`EXPLAIN ANALYZE`) ve
 listeleme süresini basar). Elle:
@@ -379,16 +400,19 @@ tablo okundu. 5. adımda plan `Index Scan using links_tenant_created_idx` olur, 
 - "Tablo tarama: tam tarama / indeksli" → listeleme anlarında `tam tarama: links` tepe yapar; indeks kurulunca aynı çağrı `indeksli: links`'e geçer.
 - "Sorgu süresi p99 (türe göre)" → `list` çizgisi diğer sorguların çok üstünde; indeksten sonra iner.
 
-**Nerede çözülüyor:** Seviye içi (`migrations/002_tenant_index.sql`). `CONCURRENTLY` şart: düz `CREATE INDEX` süre
-boyunca tabloya her yazmayı bloklar.
+**Nasıl çözülüyor:** Bu seviyede `migrations/002_tenant_index.sql` ile indeks eklenir. `CONCURRENTLY` şarttır: düz `CREATE INDEX` kurulum boyunca tabloya her yazmayı durdurur.
 
 ---
 
 ### P02-06 · Yavaş DB + sunucu tarafı timeout yok → havuz tıkanır
 
-**Ne deniyoruz:** Veritabanı ölmeden yalnızca yavaşlarsa uygulamaya ne olur?
-**Neden:** Uygulama 3 sn sonra beklemeyi bırakır ama sunucu tarafı sınır (`STATEMENT_TIMEOUT`) boş: Postgres sorguyu
-çalıştırmaya devam eder, bağlantı meşgul kalır, havuz dolar. Vazgeçmek işi durdurmaz, yalnızca beklemeyi bırakır.
+**Ne oluyor:** Veritabanı ölmez, yalnızca yavaşlar (her sorgu 2 sn gecikir); ama uygulama da tıkanır: istekler
+saniyelerce bekler ve 503 alır. Yavaş bir bağımlılık, ölü bir bağımlılık kadar zarar verebilir.
+**Neden oluyor:** Uygulama bir sorguyu 3 sn bekleyip vazgeçer (`DB_QUERY_TIMEOUT`), ama veritabanı tarafında süre
+sınırı yok (`STATEMENT_TIMEOUT` boş): Postgres sorguyu çalıştırmaya devam eder, bağlantı meşgul kalır ve havuz dolar.
+Vazgeçmek işi durdurmaz, yalnızca beklemeyi bırakır.
+**Bu deney:** Chaos Mesh ile Postgres'in ağına 2 sn gecikme ekler, 40 kullanıcıyla 60 sn yük verir; havuzdan bağlantı
+bekleme süresini ve 5xx'i ölçer, karşılaştırma için veritabanı tarafı zaman aşımını açıp tekrarlar.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P02-06` (Postgres'e Chaos Mesh ile 2 sn gecikme ekler, 40 kullanıcıyla
 60 sn yük altında havuz beklemesini ve 5xx'i ölçer, gecikmeyi kaldırır). Chaos Mesh kurulu değilse bir kez: `cd "$LADDER/platform" && make chaos`. Elle:
@@ -439,16 +463,21 @@ onlarca. Boş havuz sayısı sıfır da olabilir: yeni bağlantı kurmak da geci
 - "İstek / saniye (durum koduna göre)" → `503` belirir; "Gecikme (p50 / p95 / p99)" aynı anda saniyelere fırlar.
 - "Şu an işlenen istek (pod'a göre)" → her pod'da bekleyen istek birikir (bu dashboard'un diğer panelleri 10'da dolar).
 
-**Nerede çözülüyor:** Seviye içi (`STATEMENT_TIMEOUT`: işi durdurur) + 10 (devre kesici: işi göndermeyi bırakır).
+**Nasıl çözülüyor:** Bu seviyede veritabanı tarafı zaman aşımı (`STATEMENT_TIMEOUT`) işi gerçekten durdurur; 10'da devre kesici (circuit breaker) yavaş bağımlılığa iş göndermeyi bir süre bırakır.
 
 ---
 
 ### P02-07 · TRAP · Migration'ı her pod kendi açılışında koşarsa
 
-**Ne deniyoruz:** Şema değişikliğini (migration) her pod açılışta kendisi uygularsa ne olur?
-**Neden:** Migration tek seferlik bir iştir; bu seviyedeki goose kilit almaz, aynı anda açılan her pod aynı işe girişir.
-Çakışanlar `deadlock detected` ile düşer; kötü turlarda sürüm tablosu aynı migration'ı iki kez kaydeder ya da geçersiz
-(INVALID) bir indeks "uygulandı" diye kalır.
+**Ne oluyor:** Şema değişikliğini (migration — tabloya indeks eklemek gibi) her pod açılışta kendisi uygularsa,
+aynı anda açılan pod'lar aynı işe girişir. Bazıları `deadlock detected` ile çöküp yeniden başlar; kötü turlarda aynı
+değişiklik iki kez kaydedilir ya da yarım kalmış (geçersiz) bir indeks "uygulandı" diye kalır.
+**Neden oluyor:** Migration tek seferlik bir iştir, ama bu kurulumda onu yapan araç (goose) kilit almaz; her pod işi
+kendisinin yapması gerektiğini sanır. Aynı tabloda aynı değişikliği aynı anda yapmaya çalışan pod'lar birbirini
+kilitler.
+**Bu deney:** Tuzak ayarını (`TRAP_MIGRATE_IN_MAIN`) açar, tabloyu ~2 milyon satıra büyütür (iş uzun sürsün diye),
+üç pod'u aynı anda açar; restart'ları, şema kaydını, indeksin geçerliliğini ve pod loglarını okur, sonunda her şeyi
+geri alır.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P02-07` (tabloyu ~2 M satıra büyütür, uygulamayı 0'a indirip
 `TRAP_MIGRATE_IN_MAIN=true` + `MIGRATE_TARGET=2` ile üç pod'u aynı anda açar; hükmü DB kaydından ve pod loglarından
@@ -516,16 +545,19 @@ adımla geri al, 2. adımdaki `2000000`'u büyütüp tekrar dene.
 - "Hazır pod adresi (endpoint) sayısı" → `linkly` 0'a iner, pod'lar migration'ı bitirdikçe tek tek döner; düşüp yeniden başlayan en son.
 - "Kilitler (türe göre)" → indeks kurulurken `shareupdateexclusivelock` belirebilir (iş kısa sürerse ölçüme denk gelmez; kanıt terminalde).
 
-**Nerede çözülüyor:** seviye içi tuzak — varsayılanda migration tek seferlik bir Job (`deploy/migrate-job.yaml`);
-uygulama yalnızca şemanın hazır olmasını bekler. Geri almada şemanın geri gelmemesi 12'de (expand/contract).
+**Nasıl çözülüyor:** Bu seviyenin kendi tuzağı: varsayılan kurulumda migration tek seferlik ayrı bir iş (Kubernetes Job, `deploy/migrate-job.yaml`) olarak koşar, uygulama yalnızca şemanın hazır olmasını bekler. Geri almada şemanın geri gelmemesi sorunu 12'de (expand/contract).
 
 ---
 
 ### P02-08 · Sıcak link → satır kilidi kuyruğu
 
-**Ne deniyoruz:** Trafiğin çoğu tek bir linke gidince o link yavaşlıyor mu?
-**Neden:** Her yönlendirme aynı satırı günceller (`clicks = clicks + 1`); Postgres aynı satırın güncellemelerini sıraya
-koyar (satır kilidi). Her güncelleme ayrıca yeni bir satır sürümü yazar, ölü satır birikir.
+**Ne oluyor:** Trafiğin büyük kısmı tek bir linke gittiğinde (viral bir link) o link en yavaş link olur.
+Popülerlik, performans cezasına dönüşür.
+**Neden oluyor:** Her yönlendirme aynı veritabanı satırındaki tıklama sayısını artırır (`clicks = clicks + 1`).
+Postgres aynı satıra yapılan güncellemeleri sıraya koyar (satır kilidi): her yönlendirme öncekinin bitmesini
+bekler. Her güncelleme ayrıca yeni bir satır sürümü yazar, ölü satırlar birikir.
+**Bu deney:** Önce trafiği linklere dağıtarak 60 kullanıcıyla 40 sn yük verir, sonra trafiğin %90'ını tek linke
+yöneltip aynı yükü verir; iki fazın yönlendirme süresini, sorgu türlerinin süresini ve ölü satırları karşılaştırır.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P02-08` (önce dağıtık yük, sonra %90'ı tek linke giden yük;
 `increment_clicks` ile `get` p99'unu karşılaştırır, ölü satırları okur). Elle:
@@ -557,15 +589,18 @@ kubectl -n lvl02 exec postgres-0 -c postgres -- psql -U linkly -d linkly -tAc "S
 - "Ölü satırlar (vacuum bekleyen)" → `links` tırmanır, autovacuum geçtikçe testere dişi gibi düşer.
 - "p99 süre (uç noktaya göre)" → `/{code}` sıcak link fazında yükselir.
 
-**Nerede çözülüyor:** 05 (tıklama istek yolundan çıkar: kuyruk + toplu yazıcı) · 06 (dayanıklı olay akışı).
+**Nasıl çözülüyor:** 05'te tıklama istek yolundan çıkar: bir kuyruğa atılır ve arka planda toplu yazılır, aynı satıra her tıklamada gidilmez; 06'da dayanıklı bir olay akışına yazılır.
 
 ---
 
 ### P02-09 · Sır düz metin: git'te, Secret'ta, env'de
 
-**Ne deniyoruz:** Veritabanı parolasını kimler, ne kadar kolay okuyabiliyor?
-**Neden:** Parola repoda düz metin; Kubernetes Secret'ı şifrelemez, yalnızca base64 ile kodlar; pod'un ortam
-değişkenlerinde açık durur.
+**Ne oluyor:** Veritabanı parolası, repoyu klonlayan ya da kümede Secret okuyabilen herkes tarafından tek komutla
+okunabilir.
+**Neden oluyor:** Parola repodaki manifest'te düz metin. Kubernetes Secret'ı şifrelemez, yalnızca base64 ile kodlar
+(herkes çözebilir). Parola ayrıca pod'un ortam değişkenlerinde açıkça durur.
+**Bu deney:** Salt okuma: repoda parolayı arar, kümedeki Secret'ı okuyup base64'ü çözer, parolanın uygulamaya nasıl
+girdiğine ve varsayılan servis hesabının Secret okuyup okuyamadığına bakar.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P02-09` (dört yerden okumayı dener: git, Secret, deployment env,
 RBAC; ölçülen: `git: evet · kubectl get secret → base64 → 'linkly'`). Elle (salt okuma):
@@ -599,15 +634,20 @@ olan herkes parolaya tek komutla ulaşır.
 - `kubectl -n lvl02 get secret postgres -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d` → `linkly`
 - `make repro P=P02-09` → dört yeri tek seferde dener ve `parola düz metin olarak erişilebilir` der.
 
-**Nerede çözülüyor:** 13 (sealed-secrets, NetworkPolicy, kısa ömürlü kimlik bilgisi).
+**Nasıl çözülüyor:** 13'te kısmen: ağ kuralları (NetworkPolicy) veritabanına yalnızca izin verilen pod'ların bağlanmasını sağlar ve şifreli sır aracı (sealed-secrets) kurulu olur; sırlar yine de git'te düz metin kalır (P13-04).
 
 ---
 
 ### P02-10 · TRAP · Readiness'ın bağımlılığı kontrol etmesi
 
-**Ne deniyoruz:** Readiness "DB'ye ulaşabiliyor muyum?" diye sorarsa kısa bir DB kesintisinde ne olur?
-**Neden:** Bütün pod'lar aynı anda "hazır değilim" der ve trafikten çıkar: kısmi bir arıza (DB) tam kesintiye döner.
-DB dönünce hepsi birlikte geri gelip onu ikinci kez zorlar.
+**Ne oluyor:** Veritabanı kısa bir süre gidince uygulamanın bütün kopyaları aynı anda trafikten çıkar ve servis
+tamamen kesilir; kullanıcılar ingress'ten 503 alır. Kısmi bir arıza (yalnızca veritabanı) tam kesintiye döner;
+veritabanı dönünce bütün kopyalar birlikte geri gelip onu ikinci kez zorlar.
+**Neden oluyor:** Kubernetes her pod'a "trafik almaya hazır mısın?" diye sorar (readiness probe). Tuzakta pod bu
+soruyu "veritabanına ulaşabiliyor muyum?" diye cevaplar; veritabanı gidince bütün kopyalar aynı anda "hayır" der ve
+Kubernetes hepsini trafikten çıkarır.
+**Bu deney:** Tuzağı (`TRAP_READYZ_CHECKS_DB`) açar, yük altında veritabanı pod'unu siler ve hazır pod sayısını 2
+sn'de bir basar; aynı arızanın tuzak kapalıyken nasıl göründüğünü P02-03 gösterir.
 
 **Reproduce (adım adım):** Otomatik: `CONFIRM=1 make repro P=P02-10` (`TRAP_READYZ_CHECKS_DB=true` açar, yük altında
 Postgres'i siler, hazır pod sayısını 2 sn'de bir izler, tuzağı kapatır; P02-03 ile karşılaştır). Elle:
@@ -648,8 +688,7 @@ hazır pod yok. P02-03'te aynı arızada sayı 3'te kalmıştı.
 - "İstek / saniye (durum koduna göre)" → kısa bir `503` tepesinden sonra uygulamanın gördüğü istek neredeyse sıfıra iner: 503'leri artık ingress veriyor.
 - "Dönen durum kodları" → kesinti boyunca `503` `302`'nin yerini alır: istemci kesintiyi eksiksiz görüyor.
 
-**Nerede çözülüyor:** seviye içi tuzak — varsayılanda readiness yalnızca "ben hazır mıyım?" sorar; bağımlılığın durumu
-bir metriktir, tepkisi devre kesici ya da degrade moddur (10).
+**Nasıl çözülüyor:** Bu seviyenin kendi tuzağı: varsayılan kurulumda hazır olma kontrolü yalnızca pod'un kendisine bakar ("ben hazır mıyım?"). Bağımlılığın durumu bir metriktir; ona tepkiyi devre kesici ya da kısıtlı çalışma (degrade mod) verir (10).
 
 ## 7. Seviye içi alıştırmalar (TRAP_ bayrakları)
 

@@ -91,30 +91,37 @@ Bu seviyenin farkları: `GET /{code}` **301** döner (01'den itibaren 302); `/he
 
 ## 6. Reproduce edilebilir sorunlar
 
-Her sorun aynı düzende: **Ne deniyoruz** (deneyin sorusu) → **Neden** → adımlar (her adım ne yaptığını söyler)
-→ **Terminalde ne görmelisin** → **Grafana'da gör** (giriş: admin / ladder) → **Nerede çözülüyor**.
-`make repro` hükmü: `REPRODUCED` = sorun var · `NOT-REPRODUCED` = yok · `SKIPPED` = ölçülemedi.
+Bu seviyede yaşayacağın 10 sorun. Her birini iki yoldan görebilirsin: **Otomatik** — `make repro P=<ID>` deneyi
+kendisi yapar, ölçer ve hükmünü basar (`REPRODUCED` = sorun var · `NOT-REPRODUCED` = yok · `SKIPPED` =
+ölçülemedi); **Elle** — adımları sırayla yapıştırıp sonucu kendi gözünle görürsün. Her sorunun bölümü aynı
+düzende: **Ne oluyor** → **Neden oluyor** → **Bu deney** → adımlar → **Terminalde ne görmelisin** →
+**Grafana'da gör** (giriş: admin / ladder) → **Nasıl çözülüyor**.
 
-| ID | Sorun | Reproduce | Grafana'da | Çözüm |
-|---|---|---|---|---|
-| P00-01 | Eşzamanlı map yazımı → süreç çöker | `make repro P=P00-01` | [01 · Pods & Resources](http://grafana.localtest.me/d/ladder-pods?var-level=lvl00&from=now-15m&to=now&refresh=10s) · [15 · k6](http://grafana.localtest.me/d/ladder-k6?var-level=lvl00&from=now-15m&to=now&refresh=10s) → "Yeniden başlatma sayısı" | 01 |
-| P00-02 | Restart = tüm linkler kaybolur | `CONFIRM=1 make repro P=P00-02` | [01 · Pods & Resources](http://grafana.localtest.me/d/ladder-pods?var-level=lvl00&from=now-15m&to=now&refresh=10s) · [03 · App Business](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl00&from=now-15m&to=now&refresh=10s) → "Bellek kullanımı" | 02 |
-| P00-03 | `replicas>1` → rastgele 404 | `CONFIRM=1 make repro P=P00-03` | [01 · Pods & Resources](http://grafana.localtest.me/d/ladder-pods?var-level=lvl00&from=now-15m&to=now&refresh=10s) · [03 · App Business](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl00&from=now-15m&to=now&refresh=10s) → "Hazır pod adresi (endpoint) sayısı" | 02 |
-| P00-04 | Rollout sırasında hata dalgası | `make repro P=P00-04` | [15 · k6](http://grafana.localtest.me/d/ladder-k6?var-level=lvl00&from=now-15m&to=now&refresh=10s) · [01 · Pods & Resources](http://grafana.localtest.me/d/ladder-pods?var-level=lvl00&from=now-15m&to=now&refresh=10s) → "Dönen durum kodları" | 01 |
-| P00-05 | 4 karakter kod, çakışma kontrolü yok | `make repro P=P00-05` | görünmez — kanıt terminalde ↓ | 01 |
-| P00-06 | Giriş doğrulaması yok | `make repro P=P00-06` | [14 · Security](http://grafana.localtest.me/d/ladder-security?var-level=lvl00&from=now-15m&to=now&refresh=10s) · [01 · Pods & Resources](http://grafana.localtest.me/d/ladder-pods?var-level=lvl00&from=now-15m&to=now&refresh=10s) → "Tehlikeli URL reddi (sebebe göre)" | 01 |
-| P00-07 | Sunucu timeout'u yok (slowloris) | `make repro P=P00-07` | görünmez — kanıt terminalde ↓ | 01 |
-| P00-08 | Bellek sınırsız → OOMKilled | `make repro P=P00-08` | [01 · Pods & Resources](http://grafana.localtest.me/d/ladder-pods?var-level=lvl00&from=now-15m&to=now&refresh=10s) → "Son sonlanma nedeni" | 01 (ölçüm) · 02 (asıl) |
-| P00-09 | Gözlemlenebilirlik sıfır | `make repro P=P00-09` | [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl00&from=now-15m&to=now&refresh=10s) · [03 · App Business](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl00&from=now-15m&to=now&refresh=10s) → "Saniyedeki istek" | 01 |
-| P00-10 | 301 + Cache-Control yok | `make repro P=P00-10` | görünmez — kanıt terminalde ↓ | 01 |
+| ID | Ne olur? | Neden olur? | Nasıl çözülür? |
+|---|---|---|---|
+| P00-01 | 50 kişi aynı anda link oluşturunca uygulama çöker ve yeniden başlar; çöktüğü anlarda herkes hata alır | Linkler korumasız bir bellek tablosunda (Go `map`); iki istek aynı anda yazınca Go programı kendisi durdurur | **01:** yazmalar bir kilitle sıraya girer |
+| P00-02 | Uygulama yeniden başlayınca o ana kadar oluşturulan bütün linkler kaybolur (404) | Linkler yalnızca programın belleğinde; program kapanınca bellek de gider | **02:** linkler veritabanında tutulur |
+| P00-03 | Uygulama 3 kopyaya çıkınca aynı link bazen çalışır, bazen 404 verir | Her kopyanın kendi belleği var; istek linki bilmeyen kopyaya düşerse link bulunamaz | **02:** bütün kopyalar aynı veritabanını okur |
+| P00-04 | Yeni sürüm dağıtılırken bazı istekler 502/503 hatası alır | Kubernetes yeni kopyanın hazır olduğunu bilmez; eski kopya elindeki işi bitirmeden kapanır | **01:** hazır olma kontrolü + düzgün kapanma |
+| P00-05 | İki kullanıcı aynı kısa kodu alabilir; ilkinin linki sessizce ikincisininkiyle değişir | Kod yalnızca 4 karakter ve aynı kodun var olup olmadığına bakılmıyor | **01:** 7 karakterlik güvenli kod + çakışmada yeniden dene |
+| P00-06 | `javascript:` linkleri, iç ağ adresleri ve 5 MB'lık istekler kabul edilir | Gelen URL ve istek boyutu hiç denetlenmiyor | **01:** şema, adres, boyut kontrolü · **13:** DNS ile iç adres kontrolü |
+| P00-07 | İsteğini hiç bitirmeyen istemciler bağlantıyı sonsuza kadar açık tutar (slowloris) | Sunucuda hiçbir zaman aşımı (timeout) yok | **01:** sunucu zaman aşımları |
+| P00-08 | Link eklendikçe bellek dolar; sınır aşılınca Kubernetes uygulamayı öldürür (OOMKilled) | Bellekteki link sayısının üst sınırı yok | **01** ölçer · **02** veriyi veritabanına taşır |
+| P00-09 | "Kaç istek hata verdi?" sorusuna cevap veremezsin | Uygulama hiçbir metrik yayınlamıyor; yalnızca CPU/bellek görünür | **01:** uygulama metrikleri + JSON log |
+| P00-10 | Silinen bir link tarayıcıda çalışmaya devam eder, tıklamalar sayılmaz | Yönlendirme "kalıcı" (301) işaretli; tarayıcı cevabı saklar, bir daha sunucuya sormaz | **01:** geçici yönlendirme (302) + "saklama" başlığı |
 
 ---
 
 ### P00-01 · Eşzamanlı map yazımı → süreç çöker
 
-**Ne deniyoruz:** Aynı anda gelen yazma istekleri süreci öldürür mü?
-**Neden:** Linkler kilitsiz Go map'lerinde; Go, iki isteğin aynı map'e aynı anda yazdığını görünce süreci kendisi
-durdurur (`fatal error: concurrent map writes`, yakalanamaz).
+**Ne oluyor:** Aynı anda çok kişi link oluşturunca uygulama birden çöker ve Kubernetes onu yeniden başlatır.
+Çöktüğü her seferde birkaç saniye boyunca bütün istekler hata alır. Gerçek hayatta bu, trafik arttığı anda servisin
+düşmesi demek.
+**Neden oluyor:** Linkler programın belleğindeki bir tabloda (Go `map`) tutuluyor ve bu tabloya aynı anda yazmayı
+engelleyen bir kilit yok. Go, iki isteğin aynı tabloya aynı anda yazdığını fark edince veriyi bozmamak için programı
+bilerek durdurur (`fatal error: concurrent map writes`); bu hata yakalanıp atlatılamaz.
+**Bu deney:** 50 sanal kullanıcıyla 30 sn link oluşturur, pod'un kaç kez yeniden başladığına ve neden öldüğüne
+bakar; karşılaştırma için aynı pod'a tek kullanıcıyla yük verir (eşzamanlılık yokken çökme de yok).
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P00-01` (taze pod, 50 kullanıcıyla 15 sn yazma, pod'un önceki
 logunda Go'nun ölüm mesajını arar). Elle:
@@ -167,14 +174,18 @@ kubectl -n lvl00 get pods
 - "Hazır pod adresi (endpoint) sayısı" → çöküş anlarında 0'a iner (trafiği alacak pod yok); metrikler 30 sn'de bir toplandığı için her çöküş görünmez.
 - "Dönen durum kodları" → `503` ve `502` çizgileri `201`'i (başarılı oluşturma) ezer.
 
-**Nerede çözülüyor:** 01 (`sync.RWMutex`); kalıcı çözüm veriyi süreçten çıkarmak (02).
+**Nasıl çözülüyor:** 01'de tabloya yazmadan önce bir kilit (`sync.RWMutex`) alınır; yazmalar sıraya girer, çökme biter. Kalıcı çözüm 02'de: veri programın belleğinden çıkıp veritabanına taşınır, böylece bir çökme veri de kaybettirmez.
 
 ---
 
 ### P00-02 · Restart = tüm linkler kaybolur
 
-**Ne deniyoruz:** Pod yenilenince önceden oluşturulan linkler yaşıyor mu?
-**Neden:** Tek veri kaynağı süreç belleği; konteyner giderse (dağıtım, OOM, çöküş, düğüm boşaltma) veri de gider.
+**Ne oluyor:** Uygulama herhangi bir sebeple yeniden başlarsa (yeni sürüm, çökme, bellek dolması) o ana kadar
+oluşturulan bütün kısa linkler kaybolur ve 404 döner. Kullanıcının paylaştığı linkler bir anda ölür.
+**Neden oluyor:** Linklerin tek kopyası programın belleğinde. Program yeniden başladığında — aynı pod'da ya da
+Kubernetes'in yerine açtığı yeni pod'da — bellek boş başlar; eski belleğin içindeki her şey gider.
+**Bu deney:** Bir link oluşturur, çalıştığını görür, pod'u siler (Kubernetes yerine yenisini açar) ve yeni pod
+hazır olunca aynı linki tekrar ister.
 
 **Reproduce (adım adım):** Otomatik: `CONFIRM=1 make repro P=P00-02` (link oluşturur, pod'u siler, aynı kodu
 tekrar ister; `CONFIRM=1` pod silme onayıdır). Elle:
@@ -204,15 +215,18 @@ ve `RESTARTS 0` gösterir: pod yeniden başlamadı, yenisiyle değişti — link
 - "Yeniden başlatma sayısı" → değişmez: pod yeniden başlamadı, değiştirildi. Veri kaybı bu sayaçta görünmez.
 - "Kayıtlı link sayısı" → **No data**: 00 bu metriği üretmiyor (P00-09); kaybı ölçemezsin bile. 01'de sıfıra düşüşü görürsün.
 
-**Nerede çözülüyor:** 02 (Postgres).
+**Nasıl çözülüyor:** 02'de linkler Postgres veritabanında tutulur; pod'lar gelip gider, veri kalır.
 
 ---
 
 ### P00-03 · `replicas>1` → rastgele 404
 
-**Ne deniyoruz:** 3 replikada aynı kısa link her istekte bulunuyor mu?
-**Neden:** Her pod'un kendi map'i var ve Service istekleri pod'lara dağıtır; link yalnızca onu oluşturan pod'da.
-N replikada bulma olasılığı 1/N.
+**Ne oluyor:** Trafiği karşılamak için uygulamayı 3 kopyaya (replika) çıkarınca aynı kısa link bazen açılır, bazen
+404 verir. Kopya sayısı arttıkça 404 oranı da artar; yani uygulama büyütülemez.
+**Neden oluyor:** Her kopyanın kendi belleği, dolayısıyla kendi link tablosu var. Link yalnızca onu oluşturan kopyada;
+Kubernetes gelen istekleri kopyalara sırayla dağıttığı için istek çoğu zaman linki bilmeyen bir kopyaya düşer.
+**Bu deney:** 3 kopyaya çıkar, bir link oluşturur, aynı linki 60 kez ister ve kaçının 404 döndüğünü sayar; sonunda
+tek kopyaya döner.
 
 **Reproduce (adım adım):** Otomatik: `CONFIRM=1 make repro P=P00-03` (3 replikaya çıkar, bir linki 60 kez okur,
 eski replika sayısına döner). Elle:
@@ -247,15 +261,19 @@ kubectl -n lvl00 rollout status deploy/linkly
 - "Hazır pod adresi (endpoint) sayısı" → 1'den **3**'e çıkar: istekler artık üç ayrı belleğe dağılıyor; geri alınca 1'e döner.
 - "404 (pod'a göre)" → **No data**: 00'da redirect metriği yok (P00-09); 01'de (P01-02) pod başına ayrı çizgi çizer.
 
-**Nerede çözülüyor:** 02 — ölçeklenebilirlik, durumu pod'da tutmayan (stateless) servisle başlar.
+**Nasıl çözülüyor:** 02'de bütün kopyalar aynı veritabanını okur; kopya sayısı artık doğruluğu etkilemez. Durumu kendi içinde tutmayan (stateless) servis, büyütülebilir servisin ön şartıdır.
 
 ---
 
 ### P00-04 · Rollout sırasında hata dalgası
 
-**Ne deniyoruz:** Yeni sürüm dağıtılırken (rollout) istekler düşüyor mu?
-**Neden:** readinessProbe yok (yeni pod hazır olmadan trafik alır); graceful shutdown ve preStop yok (eski pod
-elindeki istekleri bırakıp ölür, ingress listesinden düşmeden kapanır).
+**Ne oluyor:** Yeni sürüm dağıtılırken (rollout) kullanıcıların bir kısmı 502/503 hatası alır. Her dağıtım küçük bir
+kesinti demek; sık dağıtım yapan bir ekip için bu sürekli hata demek.
+**Neden oluyor:** İki eksik var. Uygulama "trafik almaya hazırım" diye bir sinyal vermiyor (readiness probe yok), bu
+yüzden Kubernetes yeni pod'a hazır olmadan istek gönderir. Ve eski pod kapatılırken elindeki istekleri bitirmeden
+ölür (düzgün kapanma — graceful shutdown — yok).
+**Bu deney:** Tek kullanıcıyla sürekli istek gönderirken 3 kez art arda yeni sürüm dağıtımı başlatır ve dağıtım
+anlarında dönen 5xx hatalarını sayar.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P00-04` (tek kullanıcılı yük altında 3 kez rollout, 5xx ve 404'ü
 ayrı sayar; yarışı kaçırırsa `ROLLOUTS=6 make repro P=P00-04`). Elle:
@@ -286,15 +304,19 @@ büyük: yeni pod'un belleği boş (P00-02, ayrı sorun). `5xx=0` ise yarışı 
 - "Başarısız oran (zaman içinde)" → ilk rollout'ta yükselir ve inmez: k6 404'ü de hata sayar; bu panel iki sorunu karıştırır.
 - "Bellek kullanımı" → her rollout'ta eski pod'un çizgisi biter, yenisi başlar; bu anlar 5xx anlarıyla çakışır.
 
-**Nerede çözülüyor:** 01 (probe'lar + `preStop` + düzgün kapanma sırası).
+**Nasıl çözülüyor:** 01'de uygulama hazır olunca sinyal verir (readiness probe), kapanırken önce trafikten çıkar, bekler ve elindeki istekleri bitirip kapanır (`preStop` + düzgün kapanma sırası).
 
 ---
 
 ### P00-05 · 4 karakterlik kod, çakışma kontrolü yok
 
-**Ne deniyoruz:** İki link aynı kısa kodu alırsa ne olur?
-**Neden:** Kod 4 karakter (62⁴ ≈ 14.8 M ihtimal) ve yeni kayıt eskisinin üzerine kontrolsüz yazılıyor. Doğum günü
-paradoksu: ~4.5 bin linkte çakışma ihtimali %50.
+**Ne oluyor:** Yeterince link üretilince iki farklı kullanıcı aynı kısa kodu alır. İkisine de "oluşturuldu" denir
+ama kayıtta yalnızca sonuncusu kalır; ilk kullanıcının linki başka bir adrese gitmeye başlar. Hata yok, log yok.
+**Neden oluyor:** Kod yalnızca 4 karakter (~14.8 milyon ihtimal) ve yeni link, aynı kodla eski bir link var mı diye
+bakılmadan üzerine yazılıyor. "Doğum günü paradoksu" yüzünden çakışma sanıldığından çok erken gelir: ~4.500 linkte
+ihtimal %50.
+**Bu deney:** 10.000 link oluşturur, kaç kodun tekrar ettiğini sayar ve çakışan bir kodun şu an kimin linkine
+gittiğini gösterir.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P00-05` (10.000 link üretir, ~2 dk; çakışmaları sayar ve çakışan
 kodun şu an kime ait olduğunu gösterir). Elle:
@@ -322,15 +344,19 @@ link hatasız yok oldu. `çakışan kod:` boşsa (~%4 ihtimal) 1. adımı `seq 1
 **Grafana'da gör:** Grafana'da görünmez — 00'da çakışmayı sayan metrik yok; bu, sessiz veri kaybı. Kanıt terminalde:
 - `make repro P=P00-05` → `10000 üretim, 9997 benzersiz kod → 3 çakışma` ve çakışan kodun son sahibi.
 
-**Nerede çözülüyor:** 01 (`crypto/rand`, 7 karakter, çakışmada yeniden dene, `collision` sayacı).
+**Nasıl çözülüyor:** 01'de kod 7 karakter ve tahmin edilemez rastgelelikle (`crypto/rand`) üretilir; kod zaten varsa yenisi denenir ve çakışmalar bir sayaçta görünür.
 
 ---
 
 ### P00-06 · Giriş doğrulaması yok
 
-**Ne deniyoruz:** Uygulama tehlikeli ya da anlamsız girdiyi reddediyor mu?
-**Neden:** Tek kontrol JSON'u çözmek; şema, hedef adres ve gövde boyutu denetlenmiyor. Güvenilir görünen bir kısa
-link tarayıcıyı `javascript:`'e ya da iç ağa yollayabilir (open redirect).
+**Ne oluyor:** Uygulama kendisine verilen her URL'yi kısaltır: `javascript:alert(1)`, bulut sunucusunun iç
+metadata adresi, boş metin, 5 MB'lık dev bir istek. Güvenilir görünen bir kısa link, tıklayanı zararlı bir koda ya
+da şirketin iç ağına yönlendirebilir (open redirect).
+**Neden oluyor:** Uygulama gelen JSON'u okumaktan başka hiçbir kontrol yapmıyor: URL'nin türüne (şema), gittiği
+adrese ve isteğin boyutuna bakılmıyor.
+**Bu deney:** Zararlı ve bozuk URL'lerle link oluşturmayı dener; 5 MB'lık isteği önce ingress üzerinden, sonra
+ingress'i atlayıp doğrudan uygulamaya gönderir — korumayı kimin verdiğini ayırmak için.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P00-06` (`javascript:`, metadata adresi, boş/bozuk URL ve 5 MB
 gövdeyi dener; gövdeyi önce ingress'ten, sonra doğrudan pod'a yollar). Elle:
@@ -377,14 +403,18 @@ başka bir katmanın tesadüfen verdiği korumaya güvenemezsin.
 - "Tehlikeli URL reddi (sebebe göre)" → **No data** (sıfır değil): 00 hiçbir şeyi reddetmiyor ve reddi sayacak metrik de yok. 01'de `scheme` ve `private_address` çizgileri belirir.
 - "Bellek kullanımı" → 5 MB gövde pod'a gidince çizgi sıçrar ve inmez: uygulama gövdeyi kabul edip sakladı.
 
-**Nerede çözülüyor:** 01 (şema listesi, adres kontrolü, `MaxBytesReader`) · 13 (DNS çözümüyle özel IP reddi).
+**Nasıl çözülüyor:** 01'de yalnızca `http`/`https` kabul edilir, iç ağ adresleri reddedilir, istek boyutu 8 KB ile sınırlanır. 13'te adres DNS'ten çözülüp kontrol edilir (iç adrese çözülen alan adları da reddedilir).
 
 ---
 
 ### P00-07 · Sunucu timeout'u yok (slowloris)
 
-**Ne deniyoruz:** İsteğini hiç bitirmeyen bir istemciyi sunucu sonunda kapatıyor mu?
-**Neden:** Sunucuda hiçbir timeout yok; yarım kalan her bağlantı bir goroutine ve bir dosya tanımlayıcısı (FD) tutar.
+**Ne oluyor:** İsteğini yavaş yavaş gönderen ve hiç bitirmeyen istemciler bağlantıyı sonsuza kadar açık tutar
+(slowloris saldırısı). Her açık bağlantı sunucuda bellek ve kaynak tüketir; yeterince çoğu sunucuyu tüketir.
+**Neden oluyor:** Sunucuda hiçbir zaman aşımı (timeout) yok: "başlıkları 3 sn'de gönder", "boştaki bağlantıyı 60
+sn'de kapat" gibi bir kural olmadığı için sunucu yarım isteği süresiz bekler.
+**Bu deney:** Yarım bir istek gönderip 20 sn bekler ve sunucunun bağlantıyı kapatıp kapatmadığına bakar; sonra 300
+yarım bağlantı açıp hepsinin açık kaldığını gösterir.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P00-07` (doğrudan pod'a yarım istek gönderir, 20 sn sonra
 bağlantının hâlâ açık olup olmadığını sorar, sonra 300 yarım bağlantı açar). Elle:
@@ -441,14 +471,18 @@ kill $pf
 **Grafana'da gör:** Grafana'da görünmez — birikimi gösterecek "Goroutine" paneli 01'de dolar, 00'da `/metrics` yok. Kanıt terminalde:
 - `make repro P=P00-07` → `sunucu yarım bağlantıyı 20 sn boyunca kapatmadı — hiçbir timeout yok, 300 bağlantı birikti`
 
-**Nerede çözülüyor:** 01 (`ReadHeaderTimeout`, `IdleTimeout`, istek başına timeout).
+**Nasıl çözülüyor:** 01'de sunucuya zaman aşımları eklenir (başlık 3 sn, okuma 10 sn, boşta bağlantı 60 sn, istek başına 5 sn); yarım bağlantılar saniyeler içinde kapatılır.
 
 ---
 
 ### P00-08 · Bellek sınırsız büyür → OOMKilled
 
-**Ne deniyoruz:** Link eklendikçe bellek sınırsız büyüyüp konteyneri öldürüyor mu?
-**Neden:** Depoda üst sınır, süre (TTL) ya da atma yok; konteynerin bellek sınırı 128 Mi.
+**Ne oluyor:** Link eklendikçe uygulamanın belleği büyür; bellek sınırına (128 Mi) gelince Kubernetes uygulamayı
+öldürür (`OOMKilled`) ve yeniden başlatır — P00-02 yüzünden bütün linkler de gider.
+**Neden oluyor:** Bellekte tutulan link sayısının bir üst sınırı, süresi ya da eskileri atma kuralı yok; bellek
+sınırsız büyüyen bir liste gibi.
+**Bu deney:** Tek kullanıcıyla 2 dk boyunca büyük (4 KB) linkler oluşturur, pod'un kaç kez öldüğüne ve ölüm
+sebebinin `OOMKilled` olup olmadığına bakar.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P00-08` (taze pod, tek akışla 2 dk boyunca 4 KB'lık URL'ler,
 sonlanma nedenini okur; OOM gelmezse `DURATION=240s URL_SIZE=8000 make repro P=P00-08`). Elle:
@@ -492,15 +526,18 @@ linkleri de götürür (P00-02). `Error` çıkarsa bu OOM değil P00-01 çökmes
 - "Yeniden başlatma sayısı" → basamak basamak artar; her basamak bir OOM ve bütün linklerin kaybı.
 - "Bellek: sınırın yüzde kaçı" → %100'e değmeyebilir: konteyner iki ölçüm arasında dolup ölüyor. Grafik olayı kaçırabilir; kanıt yukarıdaki iki panel.
 
-**Nerede çözülüyor:** 01 ölçer, 02 çözer (veri DB'de) · 03 (sınırlı önbellek).
+**Nasıl çözülüyor:** 01 belleği ve link sayısını ölçüp görünür kılar; 02 veriyi veritabanına taşıyarak asıl sorunu çözer; 03'teki önbellek sınırlı boyutta tutulur.
 
 ---
 
 ### P00-09 · Gözlemlenebilirlik sıfır
 
-**Ne deniyoruz:** "Son 5 dakikada kaç 404 döndük?" sorusunu cevaplayabiliyor muyuz?
-**Neden:** Uygulamanın `/metrics` ucu yok; Prometheus pod'u yalnızca dışarıdan görür (CPU, bellek, restart) —
-bunlar altyapı metrikleri, uygulama hakkında bir şey söylemez.
+**Ne oluyor:** "Son 5 dakikada kaç istek hata verdi?", "istekler kaç ms sürüyor?" gibi temel sorulara cevap
+veremezsin. Önceki sorunların hepsi yaşanırken uygulama tarafında bunu gösteren tek bir sayı yok.
+**Neden oluyor:** Uygulama hiçbir metrik yayınlamıyor (`/metrics` ucu yok) ve log yazmıyor. Prometheus pod'u yalnızca
+dışarıdan görür: CPU, bellek, yeniden başlama. Bunlar makinenin durumunu söyler, uygulamanın ne yaptığını söylemez.
+**Bu deney:** 30 başarılı ve 10 başarısız (404) istek üretir, sonra hem uygulamaya hem Prometheus'a "kaç 404
+oldu?" diye sorar.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P00-09` (30 başarılı + 10 başarısız istek üretir, sonra
 `/metrics`'e ve Prometheus'a "kaç 404?" diye sorar). Elle:
@@ -530,15 +567,18 @@ sayısı `0`: az önceki 10 tane 404'ü kimse saymadı. Pod bilgisi `1`: altyap�
 - "CPU kullanımı (bir çekirdeğin %'si)" → **dolu**: pod'un çalıştığını söyler ama kaç isteğin 404 olduğunu söylemez.
 - Explore'da: `http_requests_total{namespace="lvl00"}` → boş sonuç: bu seviyenin tek bir uygulama serisi yok.
 
-**Nerede çözülüyor:** 01 (Prometheus metrikleri, JSON log, request-id, ServiceMonitor).
+**Nasıl çözülüyor:** 01'de uygulama Prometheus metrikleri (istek sayısı, süre, hata) ve her istek için bir JSON log satırı üretir; Grafana panelleri dolmaya başlar.
 
 ---
 
 ### P00-10 · 301 + `Cache-Control` yok
 
-**Ne deniyoruz:** Silinen bir link tarayıcıda gerçekten ölüyor mu?
-**Neden:** Yönlendirme `301` (kalıcı) ve önbellek başlığı yok; tarayıcı eşlemeyi saklar, bir daha sunucuya sormaz.
-Kısa link silinebildiği için "kalıcı" yanlış bir söz.
+**Ne oluyor:** Bir kısa linki tarayıcıda açtıktan sonra linki silsen bile tarayıcı eski adrese gitmeye devam
+eder. Link iptal edilemez, üstelik bu tıklamalar hiçbir yerde sayılmaz.
+**Neden oluyor:** Yönlendirme "kalıcı taşındı" (301) koduyla dönüyor ve "bunu saklama" diyen bir başlık yok.
+Tarayıcı 301'i kalıcı sayıp saklar ve bir daha sunucuya sormaz.
+**Bu deney:** Bir link oluşturup cevabın başlıklarına bakar, linki tarayıcıda açar, linki siler ve aynı adresi hem
+curl'le hem tarayıcıda tekrar açar.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P00-10` (durum kodunu ve `Cache-Control`'ü gösterir, linki silip
 önbelleksiz bir istemcinin ne gördüğünü basar; tarayıcı kısmı yalnızca elle). Elle:
@@ -575,7 +615,7 @@ yerde sayılmaz.
 **Grafana'da gör:** Grafana'da görünmez — tarayıcı yönlendirmeyi önbellekten uygular, istek sunucuya hiç gelmez. 05'te analitiğin eksik saymasının kökü olarak geri döner (P05-06). Kanıt terminalde:
 - `make repro P=P00-10` → `GET /<code> → HTTP 301 ; Cache-Control: '<yok>'`
 
-**Nerede çözülüyor:** 01 (`302` + `Cache-Control: no-store`).
+**Nasıl çözülüyor:** 01'de yönlendirme geçici (302) ve `Cache-Control: no-store` başlığıyla döner; tarayıcı her seferinde sunucuya sorar, silinen link gerçekten ölür.
 
 ## 7. Seviye içi alıştırmalar (TRAP_ bayrakları)
 

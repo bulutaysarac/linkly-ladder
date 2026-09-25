@@ -35,10 +35,11 @@ iki instance: failover ve replika çakışması tek replikayla ölçülür.
 
 | ID | Sorun | Nasıl çözüldü |
 |---|---|---|
-| P02-02 | Havuz taşması: replika × pool > max_connections | PgBouncer transaction pooling: uygulama tarafı 500, DB tarafı 20 bağlantı |
-| P02-03 | DB tek nokta, failover yok | CNPG `instances: 2` + otomatik terfi; kesinti sıfırlanmadı, insan müdahalesi kalktı (P09-02) |
+| P02-02 | Uygulama kopyası arttıkça veritabanına açılan bağlantılar veritabanının sınırını aşıyordu (kopya × havuz > `max_connections`) | Araya bir bağlantı havuzlayıcı girdi (PgBouncer, transaction modu): uygulama tarafında 500 bağlantı, veritabanı tarafında yalnızca 20 |
+| P02-03 | Tek veritabanı vardı; çökünce birinin elle ayağa kaldırması gerekiyordu | Veritabanı operatörü (CloudNativePG) iki kopya tutar ve ana kopya çökünce yedeği otomatik terfi ettirir; saniyelik bir kesinti kalır (P09-02) |
 
-P07-02 (ölçeklemenin darboğazı DB'ye taşıması) da büyük ölçüde kapanır: gerçek DB bağlantısı Pooler'da sabit.
+P07-02 (servis büyütülünce darboğazın veritabanına kayması) da büyük ölçüde kapanır: veritabanına açılan gerçek bağlantı
+sayısı havuzlayıcıda sabit.
 
 ## 4. Ayağa kaldırma
 
@@ -114,26 +115,32 @@ Yazmadan sonra `STICKY_WINDOW` (2 sn) boyunca okumalar primary'ye yapışır (i�
 
 ## 6. Reproduce edilebilir sorunlar
 
-Her sorun aynı düzende: **Ne deniyoruz** (deneyin sorusu) → **Neden** → adımlar (her adım ne yaptığını söyler)
-→ **Terminalde ne görmelisin** → **Grafana'da gör** (giriş: admin / ladder) → **Nerede çözülüyor**.
-`make repro` hükmü: `REPRODUCED` = sorun var · `NOT-REPRODUCED` = yok · `SKIPPED` = ölçülemedi.
+Bu seviyede yaşayacağın 6 sorun. Her birini iki yoldan görebilirsin: **Otomatik** — `make repro P=<ID>` deneyi
+kendisi yapar, ölçer ve hükmünü basar (`REPRODUCED` = sorun var · `NOT-REPRODUCED` = yok · `SKIPPED` =
+ölçülemedi); **Elle** — adımları sırayla yapıştırıp sonucu kendi gözünle görürsün. Her sorunun bölümü aynı
+düzende: **Ne oluyor** → **Neden oluyor** → **Bu deney** → adımlar → **Terminalde ne görmelisin** →
+**Grafana'da gör** (giriş: admin / ladder) → **Nasıl çözülüyor**.
 
-| ID | Sorun | Reproduce | Grafana'da | Çözüm |
-|---|---|---|---|---|
-| P09-01 | Read-your-writes ihlali | `make repro P=P09-01` | [03 · App Business](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl09&from=now-15m&to=now&refresh=10s) · [15 · k6](http://grafana.localtest.me/d/ladder-k6?var-level=lvl09&from=now-15m&to=now&refresh=10s) → "Read-your-writes ihlali" | seviye içi (sticky) |
-| P09-02 | Failover penceresi anlık değil | `CONFIRM=1 make repro P=P09-02` | [05 · Postgres](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl09&from=now-15m&to=now&refresh=10s) · [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl09&from=now-15m&to=now&refresh=10s) → "Replikasyon gecikmesi" | 10 (retry+idempotency) |
-| P09-03 | **TRAP** prepared statement + transaction pooling | `make repro P=P09-03` | [03 · App Business](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl09&from=now-15m&to=now&refresh=10s) · [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl09&from=now-15m&to=now&refresh=10s) → "Yönlendirme sonuçları" | seviye içi |
-| P09-04 | Replikada uzun okuma ↔ WAL çakışması | `make repro P=P09-04` | [05 · Postgres](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl09&from=now-15m&to=now&refresh=10s) → Explore ↓ | pazarlık (feedback) |
-| P09-05 | Silme pahalı: partition'sız retention | `make repro P=P09-05` | [05 · Postgres](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl09&from=now-15m&to=now&refresh=10s) → "Veritabanı CPU" | seviye içi (partition) |
-| P09-06 | Replikasyon yedek değildir | `CONFIRM=1 make repro P=P09-06` | [05 · Postgres](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl09&from=now-15m&to=now&refresh=10s) → "Replikasyon gecikmesi" | kapsam dışı (14 §9, yolun devamı) |
+| ID | Ne olur? | Neden olur? | Nasıl çözülür? |
+|---|---|---|---|
+| P09-01 | Kullanıcı link oluşturup hemen açınca kendi linki için 404 alabilir | Okumalar veritabanının kopyasına (replika) gider; kopya ana veritabanının (primary) birkaç an gerisindedir, yeni link henüz orada yoktur | **Seviye içi:** yazmadan sonraki 2 sn okumalar ana veritabanına yönlendirilir |
+| P09-02 | Ana veritabanı çökünce yazmalar 10–30 sn hata verir ya da bekler | Kopyanın ana veritabanını devralması (failover) anlık değildir: arıza fark edilir, kopya terfi eder, bağlantılar yeni adrese geçer | Pencere saniyelere iner ama sıfırlanmaz · **10:** yazmayı yeniden deneme + tekrar edilse de tek kayıt üreten istek (idempotency) |
+| P09-03 | Tuzak açıkken bazı yönlendirmeler aralıklı 503 hatası verir | Havuzlayıcı (PgBouncer) veritabanı bağlantısını her işlemde başkasına verir; bir bağlantıda hazırlanan sorgu (prepared statement) diğerinde yoktur | **Seviye içi:** sorgular hazırlanmadan gönderilir (exec modu); tuzak bunu kapatır |
+| P09-04 | Kopyadaki uzun bir okuma, ana veritabanında silinen satırların temizlenmesini engeller; tablo şişer | Kopya, okuması sürerken ihtiyaç duyduğu eski satırları ana veritabanına "temizleme" diye bildirir (`hot_standby_feedback`) | Çözülmez, seçilir: ya kopyadaki okuma iptal edilir ya ana veritabanı şişer |
+| P09-05 | Eski kayıtları `DELETE` ile silmek saniyeler sürer ve diskte yer açmaz | Postgres'te silinen satır "ölü" olarak kalır; yeri ancak temizlikle (vacuum) yeniden kullanılır | **Seviye içi:** tablo zamana göre bölümlere ayrılır (partition), eski bölüm tek hamlede atılır |
+| P09-06 | Yanlışlıkla silinen bir kayıt kopyadan da geri alınamaz | Kopyalama (replikasyon) hatayı da saniyeler içinde kopyalar; yedek yok | Kapsam dışı: sürekli yedek + belirli bir ana geri dönme (PITR) + geri yükleme tatbikatı (14 §9) |
 
 ---
 
 ### P09-01 · Read-your-writes ihlali
 
-**Ne deniyoruz:** Kullanıcı link oluşturup hemen tıklayınca kendi linkini buluyor mu?
-**Neden:** Replika, primary'nin biraz eski bir kopyasıdır; oraya giden her okuma geçmişten okur. Yazmadan hemen sonraki
-okuma replikaya giderse yeni link henüz orada yoktur (read-your-writes: "yazdığını okuyabilme" garantisi).
+**Ne oluyor:** Kullanıcı bir link oluşturup hemen açtığında bazen 404 alır: az önce kendi yarattığı link "yok"
+görünür. Kullanıcı için bu, linkin bozuk olması demek; üstelik 404 önbelleğe de yazılır ve bir süre devam edebilir.
+**Neden oluyor:** Okumaları hızlandırmak için veritabanının bir kopyası (replika) tutulur ve okumalar oraya gider.
+Kopya, ana veritabanındaki (primary) değişiklikleri birkaç an geriden uygular; yazmadan hemen sonraki okuma kopyaya
+giderse yeni link henüz orada değildir. Kullanıcının "yazdığını hemen okuyabilme" beklentisine read-your-writes denir.
+**Bu deney:** "Oluştur → hemen oku" yükünü iki kez verir: önce koruma açıkken, sonra koruma kapalı ve kopya bilerek
+geride bırakılmışken; iki fazda kaç okumanın 404 döndüğünü karşılaştırır.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P09-01` (`read-your-writes` senaryosunu iki kez koşar: önce
 yapışkan okuma açık ve replika güncel; sonra yapışkan okuma kapalı ve replikada WAL uygulaması duraklatılmış — replika
@@ -196,16 +203,22 @@ negatif kayıt olarak da yazılır; replika yetişse bile o linkler `CACHE_NEGAT
 - "Replikasyon gecikmesi" → replika çizgisi birinci fazda 0; duraklatma boyunca doğrusal tırmanır, devam ettirilince 0'a düşer (30 sn'de bir ölçüldüğü için bir-iki nokta).
 - Explore'da: `sum(rate(db_reads_routed_total{namespace="lvl09"}[1m])) by (target)` → birinci fazda okumaların bir kısmı `primary`'ye yapışır; ikinci fazda hepsi `replica`'ya gider.
 
-**Nerede çözülüyor:** Seviye içinde: yazmadan sonra 2 sn okumaları primary'ye yapıştırmak (uygulanan; Redis yoksa
-korumaz). Diğer yollar: senkron replikasyon (yazma en yavaş replikayı bekler) · LSN takibi (en doğru, en karmaşık).
+**Nasıl çözülüyor:** Bu seviyenin kendi koruması: bir kullanıcı yazdıktan sonraki 2 sn boyunca onun okumaları ana veritabanına
+yönlendirilir ("yapışkan okuma"; bilgi Redis'te tutulur, Redis yoksa korumaz). Diğer yollar: yazmanın kopyaya da
+ulaşmasını beklemek (senkron replikasyon; yazma en yavaş kopyayı bekler) ya da hangi değişikliğin kopyaya ulaştığını
+izlemek (LSN takibi; en doğru ama en karmaşık).
 
 ---
 
 ### P09-02 · Failover penceresi
 
-**Ne deniyoruz:** Primary çökünce yazmalar ne kadar süre durur ve sistem kendiliğinden toparlanır mı?
-**Neden:** Replikanın primary'ye terfisi (failover) anlık değildir: operatör arızayı fark eder, replikayı terfi
-ettirir, istemciler yeni adrese yönlenir.
+**Ne oluyor:** Ana veritabanı (primary) çökünce bir süre yazmalar durur: link oluşturmak ya hata verir (503) ya da
+saniyelerce bekler. Sistem kendiliğinden toparlanır ama o pencere boyunca kullanıcılar etkilenir.
+**Neden oluyor:** Kopyanın ana veritabanını devralması (failover) anlık değildir: veritabanı operatörü (CloudNativePG)
+arızayı fark eder, kopyayı terfi ettirir, sonra bağlantılar yeni ana veritabanına yönlenir. Bu adımların her biri
+zaman alır.
+**Bu deney:** Karışık yük altında ana veritabanını zorla siler; yeni bir ana veritabanının hazır olmasına kadar
+geçen saniyeleri, 5xx hatalarını ve yazma süresini ölçer.
 
 **Reproduce (adım adım):** Otomatik: `CONFIRM=1 make repro P=P09-02` (karışık yük altında primary'yi zorla siler —
 kapanış yok; düzgün silinen primary'yi CNPG kapanırken devreder ve pencere görünmez —, hazır yeni primary'ye kadar
@@ -258,16 +271,21 @@ dakika sürebilir.
 - "p99 süre (uç noktaya göre)" → o zaman pencere burada: `/api/links` p99'u milisaniyelerden saniyelere sıçrar, `/{code}` neredeyse düz kalır. Hata vermeyen bekleme de kesintidir.
 - "Bağlantılar ve üst sınır" → primary silinince bağlantı çizgileri kopar ve terfi eden pod'da yeniden kurulur; üst çizgi (100) sabit.
 
-**Nerede çözülüyor:** Kesinti insan müdahalesinden saniyelere iner ama sıfır olamaz. Uygulama tarafında yazma hatasına
-retry + idempotency gerekir (10); retry idempotent değilse failover çift kayıt üretir.
+**Nasıl çözülüyor:** Bu seviye kesintiyi insan müdahalesinden saniyelere indirir ama sıfırlayamaz. 10'da uygulama başarısız yazmayı
+yeniden dener; tekrarlanan isteğin çift kayıt üretmemesi (idempotency) de bu yüzden şarttır.
 
 ---
 
 ### P09-03 · TRAP · Prepared statement + transaction pooling
 
-**Ne deniyoruz:** Önceden hazırlanmış sorgular (prepared statement) PgBouncer arkasında çalışıyor mu?
-**Neden:** PgBouncer transaction modunda DB bağlantısı sana yalnızca bir işlem boyunca aittir. pgx sorguyu bir arka uç
-bağlantısında hazırlar, başka birinde çalıştırmaya çalışır ve orada bulamaz.
+**Ne oluyor:** Tuzak (`TRAP_PREPARED_STATEMENTS`) açıkken bazı yönlendirmeler aralıklı olarak 503 hatası verir;
+loglarda `prepared statement … does not exist` görünür. Hata rastgele gibidir, çünkü yalnızca veritabanına inen
+isteklerde çıkar (önbellekten dönenler etkilenmez).
+**Neden oluyor:** Veritabanı sürücüsü (pgx) sorguları bir kez "hazırlayıp" (prepared statement) tekrar kullanabilir;
+hazırlık, o veritabanı bağlantısına bağlıdır. Havuzlayıcı PgBouncer ise transaction modunda bir bağlantıyı yalnızca
+tek bir işlem boyunca verir; sonraki işlem başka bir bağlantıya düşer ve hazırlanan sorgu orada yoktur.
+**Bu deney:** Aynı karışık yükü önce varsayılan ayarla (sorgular hazırlanmadan gönderilir), sonra tuzak açıkken
+verir; iki fazda veritabanı hatalarını, 5xx'i ve loglardaki `prepared statement` satırlarını sayar.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P09-03` (varsayılan exec modu ile prepared modunu aynı `mixed`
 yüküyle karşılaştırır: DB hataları, 5xx ve loglardaki `prepared statement` satırları). Elle:
@@ -312,18 +330,23 @@ isabetleri DB'ye gitmez, hata yalnızca DB'ye inen okumalarda çıkar. Log sayı
 - "5xx (uç noktaya göre)" → ikinci fazda `/{code}` için düzensiz 5xx tepeleri: kullanıcı havuzlamanın bir protokol ayrıntısını görüyor.
 - Explore'da: `sum(rate(db_queries_total{namespace="lvl09",result="error"}[1m])) by (op)` → birinci fazda 0, ikinci fazda dalgalanır (`05 · Postgres` sorgu paneli sonuçları ayırmaz).
 
-**Nerede çözülüyor:** Seviye içinde: istemci tarafı exec modu (uygulanan, `QueryExecModeExec`). Diğer yollar:
-PgBouncer'da `max_prepared_statements>0` · session pooling (çoğullamayı kaybettirir). Bağlantı kimliğine dayanan her
-özellik (`SET`, `LISTEN/NOTIFY`, geçici tablo, advisory lock) aynı riski taşır.
+**Nasıl çözülüyor:** Bu seviyenin kendi ayarı: sorgular hazırlanmadan doğrudan gönderilir (`QueryExecModeExec`); tuzak bunu
+kapatınca sorun döner. Diğer yollar: PgBouncer'ın hazırlanmış sorguları taşıması (`max_prepared_statements>0`) ya da
+bağlantıyı oturum boyunca vermesi (session pooling; havuzlamanın faydasını kaybettirir). Bağlantıya bağlı her özellik
+(`SET`, `LISTEN/NOTIFY`, geçici tablo, advisory lock) aynı riski taşır.
 
 ---
 
 ### P09-04 · Replikada uzun okuma ↔ WAL çakışması
 
-**Ne deniyoruz:** Replikadaki uzun bir okuma primary'yi etkiler mi?
-**Neden:** Replika primary'den gelen değişiklikleri (WAL) uygulamak zorundadır; uzun bir okuma silinmesi gereken
-satırları tutar. `hot_standby_feedback=on` iken okuma iptal edilmez, bunun yerine primary o satırları temizleyemez
-(vacuum gecikir, tablo şişer).
+**Ne oluyor:** Veritabanı kopyasında (replika) uzun süren bir okuma, ana veritabanında silinen satırların
+temizlenmesini engeller: silinen satırlar diskte "ölü" olarak birikir ve tablo şişer. Okuma iptal edilmez; bedeli
+ana veritabanı öder.
+**Neden oluyor:** Kopya, ana veritabanından gelen değişiklikleri (WAL) uygulamak zorundadır; uzun bir okuma ise
+okuduğu eski satırlara ihtiyaç duyar. `hot_standby_feedback=on` ayarıyla kopya ana veritabanına "bu satırları henüz
+temizleme" der: okuma iptal edilmez ama ana veritabanındaki temizlik (vacuum) bekler.
+**Bu deney:** Kopyada 45 sn süren bir okuma başlatır; bu sırada ana veritabanında 50 bin satır yazıp siler ve
+temizlik çalıştırır. Ölü satırları okumadan önce, okuma sürerken ve okuma bitince sayar.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P09-04` (replikada 45 sn'lik sorgu başlatır, primary'de 50 bin
 satır yazıp siler ve VACUUM eder; ölü satırları taban → rehinli → serbest diye üç kez sayar, çakışmaları okur). Elle:
@@ -377,16 +400,20 @@ primary'deki şişmede ödendi. Deney kendi çöpünü siler.
 - Explore'da: `sum(cnpg_pg_stat_database_conflicts{namespace="lvl09",datname="linkly"})` → düz kalır: replikada iptal yok.
 - "Ölü satırlar (vacuum bekleyen)" → bu seviyede boş (CNPG bu metriği yayınlamaz); ölü satır sayılarını script terminalde basar.
 
-**Nerede çözülüyor:** Çözülmez, seçilir: `hot_standby_feedback` ya replikada sorgu iptalini ya da primary'de şişmeyi
-seçer. Replika "bedava okuma kapasitesi" değildir.
+**Nasıl çözülüyor:** Çözülmez, seçilir: `hot_standby_feedback` kapalıysa kopyadaki uzun okuma iptal edilir, açıksa ana veritabanı
+şişer. Kopya "bedava okuma kapasitesi" değildir.
 
 ---
 
 ### P09-05 · Silme pahalı: partition'sız retention
 
-**Ne deniyoruz:** Eski kayıtları silmek `DELETE` ile mi, partition düşürerek mi ucuz?
-**Neden:** Postgres'te silinen satır "ölü" olarak kalır; yeri ancak vacuum'la yeniden kullanılır, diske geri vermek
-tam kilit ister. Tabloyu zamana göre bölümlersen (partition) eski bölümü tek hamlede atarsın.
+**Ne oluyor:** Eski kayıtları silmek (saklama süresini uygulamak) yüz binlerce satırda saniyeler sürer, veritabanı
+CPU'sunu yükseltir ve silindikten sonra bile diskte yer açmaz.
+**Neden oluyor:** Postgres'te `DELETE` edilen satır hemen kaybolmaz, "ölü" olarak kalır; yeri ancak temizlikten
+(vacuum) sonra yeniden kullanılır, diske geri vermek ise tabloyu kilitlemeyi gerektirir. Tablo zamana göre bölümlere
+ayrılırsa (partition) eski bölüm tek hamlede, dosyasıyla birlikte atılır.
+**Bu deney:** Düz bir tabloya 500 bin satır ekleyip 1 saatten eskileri `DELETE` ile siler; süreyi, ölü satırları ve
+boyutu ölçer. Sonra bölümlü tabloda en eski bölümü atar (`DROP`) ve iki süreyi karşılaştırır.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P09-05` (düz `processed_events`'e 500 bin satır ekler — `ROWS` ile
 değişir —, 1 saatten eskileri `DELETE` ile siler, ölü satır ve boyutu ölçer; sonra partition'lı `processed_events_p`'nin
@@ -434,16 +461,20 @@ bırakmaz.
 - Explore'da: `sum(increase(cnpg_pg_stat_database_tup_deleted{namespace="lvl09",datname="linkly"}[1m]))` → `DELETE` yüz binlerce satırlık tepe çizer; `DROP` hiç görünmez.
 - "Ölü satırlar (vacuum bekleyen)" → bu seviyede boş (CNPG bu metriği yayınlamaz); ölü satır ve boyutu script basar.
 
-**Nerede çözülüyor:** Seviye içinde: zamana göre partition (migration 005). Saklama süresi bir zamanlanmış iş değil,
-şema kararıdır.
+**Nasıl çözülüyor:** Bu seviyenin kendi çözümü: olay tablosu zamana göre bölümlenir (migration 005) ve eski veri bölüm düşürülerek
+silinir — ölü satır ve temizlik borcu bırakmaz. Saklama süresi zamanlanmış bir silme işi değil, şema kararıdır.
 
 ---
 
 ### P09-06 · Replikasyon yedek değildir
 
-**Ne deniyoruz:** Yanlışlıkla silinen bir satır replikada kurtarılabilir mi?
-**Neden:** Replikasyon hatayı da kopyalar: silme saniyeler içinde replikaya ulaşır. Geri dönüş için yedek ve zamanda
-geri gidebilme (PITR) gerekir; bu seviyede yok.
+**Ne oluyor:** Yanlışlıkla silinen bir kayıt veritabanı kopyasından da geri alınamaz: silme birkaç saniye içinde
+kopyaya da ulaşır. Kopyanın olması, verinin yedeklendiği anlamına gelmez.
+**Neden oluyor:** Kopyalama (replikasyon) ana veritabanında olan her şeyi — hatalı bir `DELETE` dahil — kopyaya
+taşır. Geçmişe dönmek için ayrı bir yedek ve belirli bir ana geri dönebilme (PITR, point-in-time recovery) gerekir;
+bu seviyede yedek yapılandırılmamış.
+**Bu deney:** Yedekleme ayarına bakar, bir test linki oluşturup kopyada görür, ana veritabanında siler ve 3 sn sonra
+kopyada da kaybolduğunu gösterir.
 
 **Reproduce (adım adım):** Otomatik: `CONFIRM=1 make repro P=P09-06` (yedekleme ayarına bakar, bir test linki
 oluşturur, primary'de siler ve replikada da kaybolduğunu gösterir). Elle — silinen tek satır bu deneyin kendi test
@@ -480,8 +511,8 @@ ve `wal_keep_size` basılır. Silmeden önce replikada `1`, 3 sn sonra `0`: repl
 **Grafana'da gör:** [`05 · Postgres`](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl09&from=now-15m&to=now&refresh=10s) — deneyden sonra aç
 - "Replikasyon gecikmesi" → 0 civarında düz: replika primary'yi saniyeler içinde yakalıyor — yanlış `DELETE`'i de. Düşük gecikme burada hatanın yayılma hızıdır.
 
-**Nerede çözülüyor:** Kapsam dışı (14 §9, yolun devamı): sürekli WAL arşivleme + periyodik yedek + düzenli geri
-yükleme tatbikatı. Replika zamanda ileri gider; yedek zamanda geri gitmeyi sağlar.
+**Nasıl çözülüyor:** Bu merdivenin kapsamı dışında (14 §9, yolun devamı): sürekli WAL arşivleme, periyodik yedek ve düzenli geri
+yükleme tatbikatı. Kopya zamanda ileri gider; yedek geriye gitmeyi sağlar.
 
 ## 7. Seviye içi alıştırmalar (TRAP_ bayrakları)
 

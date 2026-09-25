@@ -40,12 +40,12 @@ bu, DB'nin o yükü kaldırabileceğine yapılan bir bahistir.
 
 | ID | Sorun | Nasıl çözüldü |
 |---|---|---|
-| P03-01 | Silinen link diğer pod'larda yaşıyor | Tek paylaşılan önbellek: `DEL` herkesi etkiler |
-| P03-02 | Rollout = soğuk önbellek | Önbellek pod'un dışında; pod ölse de yaşar |
-| P03-03 | Aynı veri N kopya | Bellek bir kez ödenir (pod bellek limiti 384Mi → 256Mi) |
-| P03-04 | Hit oranı replika sayısıyla düşer | Tek önbellek; replika sayısı ıskayı artırmaz |
+| P03-01 | Silinen bir link diğer pod'ların önbelleğinde yaşar | Tek bir paylaşılan önbellek (Redis) var; silme (`DEL`) o tek kopyayı temizler, herkes için geçerli olur |
+| P03-02 | Her dağıtımda önbellek boşalır, veritabanı yükü sıçrar | Önbellek pod'ların dışında (Redis'te); pod'lar değişse de dolu kalır |
+| P03-03 | Aynı veri her pod'da ayrı ayrı saklanır | Veri tek yerde, bir kez saklanır (pod bellek sınırı 384Mi → 256Mi) |
+| P03-04 | Pod sayısı arttıkça önbellekte bulunamayan istek (ıska) artar | Tek önbellek; bir link bir kez ısınır, pod sayısı ıskayı artırmaz |
 
-P03-05 (singleflight) listede yok: pod içi birleştirme sürer, süreçler arası birleştirme dağıtık kilit ister (gerekçe `internal/cache/redis.go`'da).
+P03-05 (izdihamı önleyen singleflight) listede yok: aynı link için gelen istekleri birleştirme her pod'un kendi içinde sürer; pod'lar arasında birleştirmek dağıtık bir kilit ister ve o kilit kendi arıza senaryolarını getirir (gerekçe `internal/cache/redis.go`'da).
 
 ## 4. Ayağa kaldırma
 
@@ -118,27 +118,32 @@ Yalnızca `TRAP_DEBUG_KEYS` açıkken ek bir uç belirir: `GET /debug/keys` (P04
 
 ## 6. Reproduce edilebilir sorunlar
 
-Her sorun aynı düzende: **Ne deniyoruz** (deneyin sorusu) → **Neden** → adımlar (her adım ne yaptığını söyler)
-→ **Terminalde ne görmelisin** → **Grafana'da gör** (giriş: admin / ladder) → **Nerede çözülüyor**.
-`make repro` hükmü: `REPRODUCED` = sorun var · `NOT-REPRODUCED` = yok · `SKIPPED` = ölçülemedi.
+Bu seviyede yaşayacağın 7 sorun. Her birini iki yoldan görebilirsin: **Otomatik** — `make repro P=<ID>` deneyi
+kendisi yapar, ölçer ve hükmünü basar (`REPRODUCED` = sorun var · `NOT-REPRODUCED` = yok · `SKIPPED` =
+ölçülemedi); **Elle** — adımları sırayla yapıştırıp sonucu kendi gözünle görürsün. Her sorunun bölümü aynı
+düzende: **Ne oluyor** → **Neden oluyor** → **Bu deney** → adımlar → **Terminalde ne görmelisin** →
+**Grafana'da gör** (giriş: admin / ladder) → **Nasıl çözülüyor**.
 
-| ID | Sorun | Reproduce | Grafana'da | Çözüm |
-|---|---|---|---|---|
-| P04-01 | Redis düşünce yük DB'ye iner | `CONFIRM=1 make repro P=P04-01` | [05 · Postgres](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl04&from=now-15m&to=now&refresh=10s) · [04 · Cache](http://grafana.localtest.me/d/ladder-cache?var-level=lvl04&from=now-15m&to=now&refresh=10s) → "Veritabanı sorguları (türe göre)" | 10 · 14 |
-| P04-02 | Önbellek isabeti artık ağ üzerinden | `make repro P=P04-02` | [06 · Redis](http://grafana.localtest.me/d/ladder-redis?var-level=lvl04&from=now-15m&to=now&refresh=10s) · [04 · Cache](http://grafana.localtest.me/d/ladder-cache?var-level=lvl04&from=now-15m&to=now&refresh=10s) → "Komut / sn" | 14 (L1+L2) |
-| P04-03 | Sıcak anahtar = tek Redis çekirdeği | `make repro P=P04-03` | [06 · Redis](http://grafana.localtest.me/d/ladder-redis?var-level=lvl04&from=now-15m&to=now&refresh=10s) → "Komutlar (türe göre)" | 14 |
-| P04-04 | **TRAP** jitter yok → dalga birleşiyor | `make repro P=P04-04` | görünmez — kanıt terminalde ↓ | seviye içi |
-| P04-05 | Cache-aside yarışı: bayat kayıt geri yazılıyor | `make repro P=P04-05` | görünmez — kanıt terminalde ↓ | tartışma |
-| P04-06 | maxmemory + noeviction → sessizce durur | `make repro P=P04-06` | [06 · Redis](http://grafana.localtest.me/d/ladder-redis?var-level=lvl04&from=now-15m&to=now&refresh=10s) · [04 · Cache](http://grafana.localtest.me/d/ladder-cache?var-level=lvl04&from=now-15m&to=now&refresh=10s) → "Bellek ve üst sınır" | seviye içi |
-| P04-07 | **TRAP** `KEYS *` Redis'i kilitler | `make repro P=P04-07` | [06 · Redis](http://grafana.localtest.me/d/ladder-redis?var-level=lvl04&from=now-15m&to=now&refresh=10s) · [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl04&from=now-15m&to=now&refresh=10s) → "Komutlar (türe göre)" | seviye içi |
+| ID | Ne olur? | Neden olur? | Nasıl çözülür? |
+|---|---|---|---|
+| P04-01 | Redis (önbellek sunucusu) çökünce servis çalışmaya devam eder ama veritabanına giden okuma yükü birden kat kat artar | Redis'e ulaşılamazsa uygulama veritabanına döner (fail-open); önbelleğin karşıladığı bütün okuma yükü veritabanına biner | **10:** veritabanına giden eşzamanlı istek sınırlanır · **14:** pod içinde ikinci, küçük bir önbellek |
+| P04-02 | Önbellekten okumak mikrosaniye değil yüzlerce mikrosaniye sürer | Önbellek artık ayrı bir sunucuda; her okuma bir ağ gidiş-gelişi | **14:** pod içi küçük önbellek (L1) + Redis (L2) |
+| P04-03 | Trafiğin çoğu tek bir linke giderse Redis'in tek çekirdeği tavana dayanır ve Redis'i büyütmek işe yaramaz | Redis komutları tek iş parçacığında (tek çekirdekte) çalıştırır; tek bir anahtara erişim bölünemez | **14:** en popüler linkler pod'un kendi önbelleğinden döner, Redis'e hiç gitmez |
+| P04-04 | Önbellek süreleri aynı anda dolunca veritabanına keskin, düzenli yük dalgaları gelir — 03'tekinden de keskin | `TRAP_NO_TTL_JITTER` açıkken sürelere rastgelelik eklenmez; tek paylaşılan önbellekte bütün pod'lar aynı anda ıskalar | **Seviye içi:** bayrak kapalıyken sürelere ±%20 rastgelelik |
+| P04-05 | Silinmiş bir link, silmeden sonra bile önbellek süresi boyunca yönlendirmeye devam edebilir | Bir okuma eski değeri veritabanından alırken link silinir; okuma sonra bu eski değeri önbelleğe yazar (cache-aside yarışı) | **Tartışma:** bedava çözümü yok; pencere daraltılabilir, tamamen kapanmaz |
+| P04-06 | Redis ayakta görünür ama önbelleğe yeni hiçbir şey girmez; önbellek sessizce işe yaramaz hale gelir | Bellek dolunca `noeviction` ayarı yeni yazmaları reddeder, eski kayıtları atmaz | **Seviye içi · 14:** dolunca en az kullanılanı atan politika (`allkeys-lru`; 14'te varsayılan) ve yeterli bellek |
+| P04-07 | "Sadece hata ayıklama için" bir uç çağrılınca bütün yönlendirmeler aynı anda yavaşlar | `TRAP_DEBUG_KEYS` açıkken uç `KEYS *` çalıştırır; Redis bu komut bütün anahtarları tarayana kadar başka hiçbir komutu çalıştırmaz | **Seviye içi:** bayrak kapalıyken uç yok; güvenli karşılığı `SCAN` |
 
 ---
 
 ### P04-01 · Redis düşünce bütün yük DB'ye iner
 
-**Ne deniyoruz:** Redis ölünce hizmet sürüyor mu, ve bedelini kim ödüyor?
-**Neden:** Uygulama Redis'e ulaşamazsa DB'ye düşer (fail-open): hizmet kesilmez, ama önbelleğin sakladığı bütün okuma
-yükü birden DB'ye iner (%95 isabette ~20 kat).
+**Ne oluyor:** Redis pod'u ölünce servis çalışmaya devam eder (5xx yok), ama veritabanına giden okuma yükü kat kat
+artar. Veritabanı bu ani yükü kaldıramazsa önbelleğin çökmesi bütün servisin çökmesine dönüşür.
+**Neden oluyor:** Uygulama Redis'e ulaşamazsa veritabanına döner (fail-open): hizmeti kesmemek için doğru karar. Ama
+önbellek yükün çoğunu karşılıyordu; %95 isabet oranında önbelleğin kaybı veritabanı için ~20 kat okuma demek.
+**Bu deney:** Önce önbellek çalışırken yük verip veritabanı okumasını ölçer, sonra Redis pod'unu silip aynı yükü
+verir; iki dönemde veritabanı okumasının tepesini ve önbellek hatalarını karşılaştırır.
 
 **Reproduce (adım adım):** Otomatik: `CONFIRM=1 make repro P=P04-01` (önbellek çalışırken 25 kullanıcıyla 40 sn yük
 verip DB okumasını ölçer, Redis pod'unu siler, aynı yükü tekrarlar; DB tepesini, önbellek hatalarını, 5xx'i ve p99'u
@@ -181,16 +186,19 @@ gelir ama boş doğar; DB yükü önbellek ısınana kadar yüksek kalır.
 - "Önbellek işlemleri (katman ve sonuca göre)" → Redis ölünce `l2 hit` 0'a düşer, yerini `l2 miss` alır; Redis dönünce `l2 hit` yavaşça geri gelir.
 - "Dönen durum kodları" → `302` kesintisiz sürer, `5xx` çıkmaz: bedeli kullanıcı değil DB ödedi.
 
-**Nerede çözülüyor:** 10 (bulkhead: DB'ye giden eşzamanlılığı sınırla, fazlasını hızlıca reddet) · 14 (L1+L2: pod içi
-küçük önbellek, Redis düşse de en sıcak anahtarlar ayakta). Asıl soru: DB o anki yükü kaldırabilir mi?
+**Nasıl çözülüyor:** 10'da veritabanına aynı anda gidebilecek istek sayısı sınırlanır, fazlası hızlıca reddedilir (bulkhead): kısmi hizmet, tam çöküşten iyidir. 14'te pod içinde küçük bir önbellek (L1) daha var; Redis düşse de en popüler linkler oradan döner. Asıl soru: veritabanı o anki yükü kaldırabilir mi?
 
 ---
 
 ### P04-02 · Paylaşılan önbelleğin bedeli: bir ağ gidiş-gelişi
 
-**Ne deniyoruz:** Önbelleğe sormak artık ne kadar sürüyor?
-**Neden:** 03'te bir isabet pod içi bir map aramasıydı (~1 µs); 04'te her isabet bir Redis `GET`, yani bir ağ
-gidiş-gelişi (yüzlerce µs). Hit oranı aynı, bedel farklı.
+**Ne oluyor:** Önbellekte bulunan bir linki okumak mikrosaniyeden yüzlerce mikrosaniyeye çıkar. İsabet oranı aynı
+kalır; değişen, her isabetin bedelidir.
+**Neden oluyor:** 03'te önbellek pod'un belleğindeydi ve bir isabet basit bir tablo aramasıydı (~1 µs). 04'te önbellek
+ayrı bir sunucuda (Redis); her isabet ağ üzerinden bir `GET`, yani bir ağ gidiş-gelişi. Tutarlılık kazanılır, gecikme
+ödenir.
+**Bu deney:** Önbelleği ısıtır, sabit yük altında önbelleğe sormanın kendi süresini (p50, p99, mikrosaniye) ve
+aramaların ne kadarının ağa gittiğini okur.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P04-02` (ısıtır, sabit yük altında önbellek aramasının süresini
 `cache_lookup_duration_seconds{layer="l2"}` histogramından ölçer; hüküm: aramaların ≥%90'ı ağda ve p50 ≥ 50 µs;
@@ -223,16 +231,18 @@ curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=su
 - "Gecikme (p50 / p95 / p99)" → `lvl03` ile `lvl04` arasında zor ayrışır: fark 1 ms'nin altında ve p50'nin çoğu iki seviyede ortak tıklama UPDATE'i. Bu panelden hüküm çıkmaz.
 - "Uygulama → Redis gecikmesi (p99)" → bu seviyede **boş**: bu metrik 10'dan itibaren yayınlanır.
 
-**Nerede çözülüyor:** 14 (L1+L2). L1'i geri getirmek P03-01'i de geri getirir; bu yüzden 14'te pub/sub ile geçersiz
-kılma yayını gelir.
+**Nasıl çözülüyor:** 14'te pod içi küçük önbellek (L1) ile Redis (L2) birlikte kullanılır: en sık okunanlar ağa hiç çıkmaz. L1'i geri getirmek P03-01'i (silinen link diğer pod'larda yaşar) da geri getirir; bu yüzden 14'te silmeler bütün pod'lara bir yayın kanalıyla (pub/sub) duyurulur.
 
 ---
 
 ### P04-03 · Sıcak anahtar: tek link, tek çekirdek
 
-**Ne deniyoruz:** Trafiğin çoğu tek linke giderse Redis'in tavanı nerede?
-**Neden:** Redis tek iş parçacıklıdır; bir anahtara erişim tek bir çekirdeğin sınırına dayanır. Anahtarları başka
-sunuculara dağıtmak (sharding) tek sıcak anahtarı kurtarmaz.
+**Ne oluyor:** Trafiğin çoğu tek bir linke giderse (viral olan bir link) Redis'in o linke cevap verme hızı tek bir
+çekirdeğin sınırına dayanır. Bu kümede henüz tavana çarpılmaz; sorun "şu an yavaşız" değil, "büyüyünce çare yok".
+**Neden oluyor:** Redis komutları tek iş parçacığında (tek çekirdekte) sırayla çalıştırır. Anahtarları birden fazla
+sunucuya dağıtmak (sharding) da tek bir anahtarı kurtarmaz: o anahtar yine tek bir sunucuda, tek bir çekirdektedir.
+**Bu deney:** Redis'in tavanını doğrudan ölçer (100 bin farklı anahtar ile hep aynı anahtar); sonra trafiğin %95'ini
+tek linke gönderip uygulamanın Redis'e yaptırdığı komut hızını ve Redis'in CPU'sunu okur.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P04-03` (Redis'in tavanını `redis-benchmark` ile doğrudan ölçer —
 100k anahtara dağıtılmış GET ve tek anahtara GET —, sonra %95'i tek linke giden yükte uygulamanın o tavanın yüzde
@@ -266,16 +276,19 @@ kümede tavana çarpmıyoruz. Sorun "şu an yavaşız" değil, "büyüyünce ça
 - "Redis CPU" → sıcak yükte bile tek çekirdeğin %100'ünün altında.
 - "Komut / sn" → küçük eğri aynı platoyu çizer; büyük rakam yalnızca son değer.
 
-**Nerede çözülüyor:** 14 (L1: en sıcak anahtar hiç ağa çıkmaz). Redis cluster bunu çözmez (sıcak anahtar tek shard'a
-düşer); diğer seçenekler anahtarı çoğaltmak (`key:1..N`) ya da CDN.
+**Nasıl çözülüyor:** 14'te en popüler linkler pod'un kendi önbelleğinden (L1) döner ve Redis'e hiç gitmez. Redis cluster bunu çözmez (sıcak anahtar yine tek sunucuya düşer); diğer seçenekler anahtarı çoğaltmak (`key:1..N`) ya da CDN.
 
 ---
 
 ### P04-04 · TRAP · Jitter yokluğu paylaşılan önbellekte daha kötü
 
-**Ne deniyoruz:** TTL'ler aynı anda dolunca paylaşılan önbellekte dalga ne kadar keskin?
-**Neden:** 03'te her pod kendi dalgasını üretiyordu; 04'te tek önbellek var ve bütün pod'lar aynı anahtarların aynı
-anda dolduğunu aynı anda görür: dalga bölünmez, birleşir.
+**Ne oluyor:** Önbellek süreleri aynı anda dolunca veritabanına düzenli, keskin yük dalgaları gelir — 03'tekinden
+daha keskin.
+**Neden oluyor:** 03'te her pod kendi önbelleğinde kendi dalgasını üretiyordu ve dalgalar birbirine tam denk
+gelmiyordu. 04'te tek önbellek var: süresi dolan bir anahtarı bütün pod'lar aynı anda ıskalar, dalgalar bölünmez,
+birleşir. Normalde her kaydın süresine ±%20 rastgelelik (jitter) eklenir; `TRAP_NO_TTL_JITTER` bunu kapatır.
+**Bu deney:** Önbellek süresini 30 sn'ye çeker, 300 kodu ısıtır ve saniyede bir ölçerek her saniyedeki ıska sayısını
+jitter açık ve kapalı turda karşılaştırır.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P04-04` (TTL'i 30 sn'ye çeker, 300 kodu ısıtır, jitter açık/kapalı
 150'şer sn yük verip **tepe/ortalama** oranını kıyaslar; ~8 dk; seriler `/tmp/p0404-jitter.txt` ve
@@ -335,16 +348,20 @@ sütun çoğunlukla 0 ve ~30 satırda bir büyük sayı — aynı anda dolan ana
 - `make repro P=P04-04` → `jitter'lı: tepe=… ort=… → tepe/ortalama=…` ve `jitter'sız: …`; jitter'sız oran belirgin büyük
 - `paste /tmp/p0404-jitter.txt /tmp/p0404-nojitter.txt | head -90` → sol sütun dağınık küçük sayılar, sağ sütun ~30 satırda bir büyük sayı
 
-**Nerede çözülüyor:** Seviye içi — `TRAP_NO_TTL_JITTER` kapalıyken koruma açık. Paylaşmak, hizalanmayı da paylaşmaktır.
+**Nasıl çözülüyor:** Bu seviyenin kendi ayarı: `TRAP_NO_TTL_JITTER` kapalıyken (varsayılan) sürelere ±%20 rastgelelik eklenir ve dolmalar zamana yayılır. Önbelleği paylaşmak, sürelerin hizalanmasını da paylaşmak demek.
 
 ---
 
 ### P04-05 · Cache-aside yarışı: bayat kayıt geri yazılıyor
 
-**Ne deniyoruz:** Paylaşılan önbellekte bile, silinmiş bir link önbelleğe geri yazılabilir mi?
-**Neden:** Bir okuma önbelleği ıskalar ve DB'den eski değeri alır; tam o sırada link silinir (önbellekte anahtar henüz
-yok, geçersiz kılma bir şey silmez); okuma sonra önbelleğe yazar ve silinmiş kayıt TTL boyunca yaşar. Pencere normalde
+**Ne oluyor:** Silinmiş bir link, silme başarılı olduktan sonra bile önbellek süresi boyunca yönlendirmeye devam
+edebilir. Tek paylaşılan önbellek de bayat veriyi tamamen önlemez.
+**Neden oluyor:** Bir okuma önbellekte linki bulamaz ve veritabanından (henüz silinmemiş) değeri alır. Tam o sırada
+link silinir; önbellekte anahtar henüz olmadığı için silme önbellekten bir şey temizlemez. Okuma sonra elindeki eski
+değeri önbelleğe yazar ve silinmiş link önbellek süresi boyunca yaşar (cache-aside yarışı). Pencere normalde
 mikrosaniyeler, ama yeterli trafikte yakalanır.
+**Bu deney:** Okuma yolunda "veritabanından al" ile "önbelleğe yaz" arasına 1,5 sn koyarak pencereyi genişletir;
+okuma sürerken linki siler, sonra linkin hâlâ yönlendirip yönlendirmediğine ve önbellekteki kalan süresine bakar.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P04-05` (`TRAP_READ_FILL_DELAY_MS=1500` ile okuma yolundaki "DB'den
 al → önbelleğe yaz" penceresini ölçülebilir yapar, 6 kez tam ortasında siler ve kaçında silinmiş linkin hâlâ
@@ -388,16 +405,18 @@ pencereyi kaçırmıştır (TTL ~10 sn: "yok" negatif önbelleklendi). Arada kab
 - `make repro P=P04-05` → `deneme i: kod=… → 302 (SİLİNMİŞ ama hâlâ yönlendiriyor)` satırları
 - `kubectl -n lvl04 exec redis-0 -c redis -- redis-cli TTL linkly:link:<kod>` (kod script çıktısından, ilk dakika içinde) → pozitif sayı: `DELETE` 204 döndüğü hâlde kayıt Redis'te (`-2` olsaydı anahtar yoktu)
 
-**Nerede çözülüyor:** Tartışma — bedava çözüm yok: yazmadan sonra bir kez daha silmek (pencereyi daraltır), sürümlü
-anahtar (bellek maliyeti), write-through + kısa TTL (yazma yavaşlar). Sırayı ters çevirmek yarışın yerini değiştirir.
+**Nasıl çözülüyor:** Tartışma maddesi — bedava çözüm yok: yazmadan sonra bir kez daha silmek pencereyi daraltır ama kapatmaz; sürümlü anahtar bellek maliyeti getirir; önce veritabanına ve önbelleğe birlikte yazmak (write-through) + kısa süre yazmayı yavaşlatır. Sırayı ters çevirmek (önce önbelleği sil, sonra veritabanını) yarışı yok etmez, yerini değiştirir.
 
 ---
 
 ### P04-06 · maxmemory + noeviction → önbellek sessizce önbelleklemeyi bırakır
 
-**Ne deniyoruz:** Redis'in belleği dolunca ne olur?
-**Neden:** `noeviction` politikası bellek dolunca yazmayı reddeder: Redis ayakta, `PING` cevap veriyor, okumalar
-çalışıyor, ama yeni hiçbir şey önbelleğe girmiyor — görünürde sağlıklı, işlevsiz.
+**Ne oluyor:** Redis ayaktadır, `PING`'e cevap verir, okumalar çalışır — ama önbelleğe yeni hiçbir şey girmez.
+Görünürde sağlıklı, gerçekte işlevsiz bir önbellek; en sinsi arıza türü.
+**Neden oluyor:** Redis'in bellek sınırı (`maxmemory`) var ve politika `noeviction`: bellek dolunca eski kayıtları
+atmak yerine yeni yazmaları reddeder. Uygulama logunda `OOM command not allowed` satırları belirir.
+**Bu deney:** Deney süresince Redis'in bellek sınırını 4 MB'a çeker, önbelleği büyük linklerle doldurur ve Redis'in
+doluluğunu, anahtar sayısını, reddedilen yazmaları ve atılan anahtarları okur.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P04-06` (`maxmemory`'yi deney süresince 4 MB'a çeker, 1200 link ×
 ~6 KB URL üretip okur, `cache_errors_total{op="set"}` ile `redis_evicted_keys_total`'ı karşılaştırır, sonunda ayarı
@@ -448,16 +467,19 @@ büyük, atılan anahtar `0`; logda `OOM command not allowed` satırları. `evic
 - "Önbellek yazma/okuma hatası" → `set` serisi yükselir: her yeni kayıt reddediliyor.
 - "Redis ayakta mı" → deney boyunca **1**: bir sağlık kontrolü bu arızayı yakalamaz.
 
-**Nerede çözülüyor:** Seviye içi — `redis-cli CONFIG SET maxmemory-policy allkeys-lru`. Asıl karar: önbelleğin boyutu
-çalışma kümesini karşılıyor mu? Karşılamıyorsa LRU yalnızca düşüşü kibarlaştırır.
+**Nasıl çözülüyor:** Bu seviyenin kendi ayarı: politika `allkeys-lru` yapılırsa (bellek dolunca en az kullanılan kayıt atılır) yazmalar reddedilmez; 14'te politika zaten `allkeys-lru`. Asıl karar önbelleğin boyutu: çalışma kümesini karşılamıyorsa LRU yalnızca düşüşü yumuşatır.
 
 ---
 
 ### P04-07 · TRAP · `KEYS *` tek komutla tüm Redis'i kilitler
 
-**Ne deniyoruz:** "Sadece debug için" bir `KEYS *` çağrısı bütün redirect'leri yavaşlatır mı?
-**Neden:** Redis tek iş parçacıklıdır: bir komut çalışırken diğerleri sırada bekler. `KEYS` bütün anahtar uzayını tarar
-(O(N)); milyon anahtarda saniyelerce tam durma.
+**Ne oluyor:** "Sadece hata ayıklama için" eklenmiş bir uç çağrıldığında bütün yönlendirmelerin gecikmesi aynı anda
+sıçrar. Tek bir yönetim çağrısı bütün kullanıcıları etkiler.
+**Neden oluyor:** Redis komutları tek iş parçacığında sırayla çalıştırır: bir komut çalışırken diğerleri bekler.
+`KEYS *` bütün anahtarları tek seferde tarar; milyon anahtarda bu saniyelerce tam durma demek. `TRAP_DEBUG_KEYS`,
+`KEYS *` çalıştıran `GET /debug/keys` ucunu açar.
+**Bu deney:** Redis'e 300 bin anahtar yazarak onu üretim boyutuna getirir, önce normal yük altında yönlendirme
+p99'unu ölçer, sonra aynı yük sürerken uca aralıksız çağrı yapıp p99'u tekrar ölçer.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P04-07` (tuzağı açar, Redis'e 300 bin anahtar yazar — `FILL=` ile
 değişir —, aynı yükü iki kez 45'er sn verir, ikincisinin ortasında `/debug/keys`'i 20 sn aralıksız çağırır — `KEYS_SECS=`
@@ -517,8 +539,7 @@ fazlasını arar): Redis, `KEYS` sürerken GET'leri sıraya aldı.
 - "Uygulama → Redis gecikmesi (p99)" → bu seviyede **boş** (10'dan itibaren ölçülür); gecikmeyi yukarıdaki p99'dan oku.
 - Explore'da: `redis_commands_duration_seconds_total{namespace="lvl04",cmd="keys"} / redis_commands_total{namespace="lvl04",cmd="keys"}` → tek bir `KEYS` çağrısının ortalama süresi (sn); `cmd="get"` ile kıyasla: kat kat uzun.
 
-**Nerede çözülüyor:** Seviye içi — `TRAP_DEBUG_KEYS` kapalıyken uç yok. Güvenli karşılığı `SCAN` (imleçli, çağrı başına
-sınırlı iş); akrabaları `FLUSHALL`, büyük `HGETALL`, sınırsız `SMEMBERS`.
+**Nasıl çözülüyor:** Bu seviyenin kendi ayarı: `TRAP_DEBUG_KEYS` kapalıyken (varsayılan) uç yok. Güvenli karşılığı `SCAN`: anahtarları küçük parçalar halinde, çağrı başına sınırlı işle tarar. Aynı aileden tehlikeli komutlar: `FLUSHALL`, büyük `HGETALL`, sınırsız `SMEMBERS`.
 
 ## 7. Seviye içi alıştırmalar (TRAP_ bayrakları)
 

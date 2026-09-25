@@ -62,8 +62,8 @@ linkly-ladder/                       # tek git repo (github.com/bulutaysarac/lin
 │   ├── newlevel.sh                  # NN-name klasörünü bir öncekinden kopyalayıp modül adını değiştirir
 │   ├── lint-skeleton.sh             # seviye iskeleti şablonla aynı mı (CI'da koşar) — lint-grafana.py'yi de çağırır
 │   ├── lint-grafana.py              # her sorun bölümü var olan dashboard/panelleri mi anıyor
+│   ├── lint-guide.py                # rehber blokları yapıştırılabilir mi (cd "$LADDER/…", yorumsuz, make fresh)
 │   ├── verify-level.sh · verify-sweep.sh   # küme üzerinde uçtan uca doğrulama (up → verify-prev → repro → down)
-│   ├── readme-tables.py             # README §6 tablosunun "Grafana'da" sütununu sorun bölümlerinden türetir
 │   └── observe-gameday.sh           # game day sırasında istemci ile uygulamayı yan yana izler
 ├── 00-naive/
 ├── 01-hardened/

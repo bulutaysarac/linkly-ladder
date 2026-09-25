@@ -115,27 +115,34 @@ sınamak için gerçekten bozuk bir sürüm gerekir.
 
 ## 6. Reproduce edilebilir sorunlar
 
-Her sorun aynı düzende: **Ne deniyoruz** (deneyin sorusu) → **Neden** → adımlar (her adım ne yaptığını söyler)
-→ **Terminalde ne görmelisin** → **Grafana'da gör** (giriş: admin / ladder) → **Nerede çözülüyor**.
-`make repro` hükmü: `REPRODUCED` = sorun var · `NOT-REPRODUCED` = yok · `SKIPPED` = ölçülemedi.
+Bu seviyede yaşayacağın 6 sorun. Her birini iki yoldan görebilirsin: **Otomatik** — `make repro P=<ID>` deneyi
+kendisi yapar, ölçer ve hükmünü basar (`REPRODUCED` = sorun var · `NOT-REPRODUCED` = yok · `SKIPPED` =
+ölçülemedi); **Elle** — adımları sırayla yapıştırıp sonucu kendi gözünle görürsün. Her sorunun bölümü aynı
+düzende: **Ne oluyor** → **Neden oluyor** → **Bu deney** → adımlar → **Terminalde ne görmelisin** →
+**Grafana'da gör** (giriş: admin / ladder) → **Nasıl çözülüyor**.
 
-| ID | Sorun | Reproduce | Grafana'da | Çözüm |
-|---|---|---|---|---|
-| P12-01 | Kötü sürüm %100'e gider | `make repro P=P12-01` | [13 · Rollout](http://grafana.localtest.me/d/ladder-rollout?var-level=lvl12&from=now-30m&to=now&refresh=10s) · [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl12&from=now-30m&to=now&refresh=10s) → "İstek / sn (sürüme göre)" | seviye içi (canary+analiz) |
-| P12-02 | Kırıcı migration (yük altında `psql` ile `RENAME COLUMN`) | `CONFIRM=1 make repro P=P12-02` | [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl12&from=now-15m&to=now&refresh=10s) · [03 · App Business](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl12&from=now-15m&to=now&refresh=10s) → "İstek / saniye (durum koduna göre)" | seviye içi (expand/contract) |
-| P12-03 | Drift: elle yapılan değişiklik | `make repro P=P12-03` | görünmez — kanıt terminalde ↓ | Argo CD (kurulu) |
-| P12-04 | `:latest` = belirsiz, geri alınamaz sürüm | `make repro P=P12-04` | [13 · Rollout](http://grafana.localtest.me/d/ladder-rollout?var-level=lvl12&from=now-15m&to=now&refresh=10s) → "İstek / sn (sürüme göre)" | 13 (Kyverno) |
-| P12-05 | Canary + paylaşılan durum uyumsuzluğu | `make repro P=P12-05` | [04 · Cache](http://grafana.localtest.me/d/ladder-cache?var-level=lvl12&from=now-15m&to=now&refresh=10s) → "İsabet oranı (pod'a göre)" | tartışma |
-| P12-06 | Uygulama geri alındı, şema alınmadı | `make repro P=P12-06` | görünmez — kanıt terminalde ↓ | disiplin |
+| ID | Ne olur? | Neden olur? | Nasıl çözülür? |
+|---|---|---|---|
+| P12-01 | Hatalı bir sürüm dağıtılınca kısa sürede bütün kullanıcılara ulaşır | Klasik dağıtım yalnızca "süreç ayakta mı?"ya bakar, "istekler başarılı mı?"ya bakmaz | **12:** yeni sürüm önce trafiğin ~1/4'üne verilir (canary); hata oranı eşiği aşarsa otomatik geri alınır |
+| P12-02 | Yük altında bir sütunun adı değiştirilince çalışan pod'lar link oluşturamaz (503) | Dağıtım sırasında eski kod hâlâ eski sütun adını kullanır; ad değişikliği ona uyumsuz | **12:** genişlet → taşı → daralt (expand/contract): her adım eski kodla da çalışır |
+| P12-03 | Kümede elle yapılan bir değişiklik (`kubectl scale`) kayıtsızdır; sonraki dağıtım onu sessizce geri alır | Kaynaktaki manifest ile küme sürekli karşılaştırılmıyor | Argo CD: sürekli karşılaştırma + otomatik düzeltme (kurulu, bu seviyeye bilerek bağlı değil) |
+| P12-04 | `:latest` gibi değişebilen bir etiketle hangi sürümün çalıştığı bilinmez, geri almak işe yaramaz | Aynı etiket her yeni imajda başka bir içeriği gösterir | Bu merdivende etiket `<git-sha>-<kaynak-hash>` (deney bunu doğrular) · **13:** Kyverno `:latest`'i yasaklar |
+| P12-05 | Yeni sürüm önbellek anahtar biçimini değiştirirse canary ile eski sürüm birbirinin yazdığını bulamaz, sistem önbelleksiz kalır | Canary iki sürümün yan yana çalışabileceğini varsayar; paylaşılan önbellek bu varsayımı kırar | Tartışma: geriye uyumlu biçim, iki biçimi birden okumak ya da canary'ye ayrı önbellek |
+| P12-06 | Uygulamayı geri almak veritabanı şemasını geri almaz; şemayı geri almak ise veri kaybettirebilir | Geri alma iki ayrı iştir ve yalnızca uygulamanınki otomatiktir | Disiplin: yalnızca geriye uyumlu şema değişikliği ("N−1 sürümü N şemasıyla çalışır") |
 
 ---
 
 ### P12-01 · Kötü sürüm canary'de yakalanıyor
 
-**Ne deniyoruz:** Redirect'lerin %25'inde hata veren bir sürüm dağıtılınca analiz onu canary'deyken yakalayıp geri alıyor mu?
-**Neden:** Analiz 30 sn sonra ölçer, eşiği aşarsa dağıtımı durdurur (**abort**). Canary payı pod sayısıdır (1 canary +
-3 stable ≈ 1/4) ve analiz namespace'in bütün `/{code}` trafiğinin 5xx oranını %2 eşiğiyle karşılaştırır — canary'nin
-kendi %25'ini değil, toplamdaki ~%6'yı (%25 × 1/4) görür. Rolling update'te aynı oran %25'e kadar çıkardı.
+**Ne oluyor:** Hatalı bir sürüm klasik dağıtımla (rolling update) çıkınca kısa sürede bütün kullanıcılara ulaşır.
+Burada redirect'lerin %25'inde hata veren bir sürüm dağıtılıyor; soru, bu sürümün herkese ulaşmadan durdurulup
+durdurulmadığı.
+**Neden oluyor:** Klasik dağıtım yeni sürümü sağlık kontrollerinden (probe) geçtiği sürece yayar; probe'lar "süreç
+ayakta mı?" diye sorar, "istekler başarılı mı?" diye sormaz. Bu seviyede yeni sürüm önce küçük bir paya verilir
+(canary: 1 yeni + 3 eski pod ≈ trafiğin 1/4'ü) ve otomatik analiz 30 sn sonra bütün redirect trafiğinin 5xx oranını
+%2 eşiğiyle karşılaştırır — canary'nin kendi %25'ini değil, toplamdaki ~%6'yı (%25 × 1/4) görür.
+**Bu deney:** Yük altındayken `BAD_VERSION_ERROR_PCT=25` ile yeni sürüm dağıtır; dağıtımın aşamasını, canary payını ve
+hata oranlarını izler, analizin metrikle mi yoksa altyapı hatasıyla mı durduğunu ayırır, sonunda kötü sürümü geri alır.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P12-01` (yük altında `BAD_VERSION_ERROR_PCT=25` ile dağıtır; fazı,
 canary payını, canary'nin ve toplamın hata oranını basar; analizin metrikle mi altyapı hatasıyla mı durduğunu ayırır,
@@ -190,15 +197,18 @@ kadar trafikteydi). 5. adımdan sonra `Healthy`.
 - "Hazır pod (sürüme göre)" → yeni hash 1 pod'la belirir, stable 3'te kalır; abort'tan sonra yeni hash kaybolur.
 - "İstek / saniye (durum koduna göre)" → `302`'nin yanında kısa ömürlü bir `500` çizgisi: kötü sürümün hatası.
 
-**Nerede çözülüyor:** seviye içi (canary + analiz) — bedeli dağıtımın birkaç dakika sürmesi. Analizde `initialDelay: 30s`
-olmadan henüz veri yokken karar verilir; `failureLimit` olmadan tek gürültülü ölçüm sağlıklı sürümü geri aldırır.
+**Nasıl çözülüyor:** Bu seviyede Argo Rollouts canary + otomatik analiz yapar: hata oranı eşiği aşınca dağıtım durdurulur (abort) ve eski sürüme dönülür; kötü sürüm trafiğin yalnızca ~1/4'ünü, yalnızca birkaç dakika görür. Bedeli her dağıtımın birkaç dakika sürmesi; analiz ilk 30 sn'yi bekler (henüz veri yokken karar vermesin, `initialDelay`) ve tek bir gürültülü ölçümle sağlıklı sürümü geri almaz (`failureLimit`).
 
 ---
 
 ### P12-02 · Kırıcı migration
 
-**Ne deniyoruz:** Yük altında bir sütunun adı değiştirilince (`RENAME COLUMN`) çalışan kod ne yapar?
-**Neden:** Dağıtım sırasında iki sürüm bir arada yaşar; her şema değişikliği hem eski hem yeni kodla uyumlu olmak zorundadır.
+**Ne oluyor:** Yük altındayken veritabanında bir sütunun adı değiştirilince (`RENAME COLUMN`) çalışan pod'lar link
+oluşturamaz ve kullanıcılar 503 alır. Tek bir şema değişikliği kesinti yaratır.
+**Neden oluyor:** Dağıtım sırasında eski ve yeni kod bir süre birlikte çalışır; eski kod hâlâ eski sütun adını
+kullanır. Bu yüzden her şema değişikliği hem eski hem yeni kodla uyumlu olmak zorundadır — ad değiştirmek uyumlu değildir.
+**Bu deney:** Yük altındayken primary veritabanında sütunun adını `psql` ile değiştirir, oluşturma isteklerinin hata
+verdiği pencereyi ölçer, sonra sütunu eski adına döndürür (`CONFIRM=1`: şemaya dokunan yıkıcı deney onayı).
 
 **Reproduce (adım adım):** Otomatik: `CONFIRM=1 make repro P=P12-02` (yük altında primary'de `psql` ile
 `ALTER TABLE links RENAME COLUMN url TO url_old` koşar, hata penceresini ölçer, sütunu eski adına döndürür; `CONFIRM=1`
@@ -243,17 +253,18 @@ ve `get` için sıfırdan büyük; yük özetinde `5xx` > 0. 4. adımdan sonra y
 - "Oluşturma sonuçları" → pencere boyunca `ok`'un yerini `error` alır.
 - Explore'da: `sum by (op) (rate(db_queries_total{namespace="lvl12",result="error"}[1m]))` → `create` ve `get` için aynı pencerede tepe.
 
-**Nerede çözülüyor:** seviye içi (expand/contract, `migrations/006_expand.sql`) — güvenli biçim üç dağıtım:
-**EXPAND** (yeni sütunu ekle, ikisine de yaz) → **MIGRATE** (geriye doldur, okumayı yeniye çevir) → **CONTRACT** (eskiye
-yazmayı bırak, sonra düşür); her adım ayrı geri alınabilir.
+**Nasıl çözülüyor:** Bu seviyede şema değişikliği üç ayrı dağıtımla yapılır (expand/contract, `migrations/006_expand.sql`): **genişlet** (yeni sütunu ekle, ikisine de yaz) → **taşı** (eski veriyi kopyala, okumayı yeniye çevir) → **daralt** (eskiye yazmayı bırak, sonra sil). Her adımda eski ve yeni kod birlikte çalışabilir ve her adım ayrı geri alınabilir.
 
 ---
 
 ### P12-03 · Drift: elle yapılan değişiklik
 
-**Ne deniyoruz:** Kümede elle yapılan bir değişikliği (`kubectl scale`) biri fark ediyor mu?
-**Neden:** Manifest kaynakta, küme canlı durumda; ikisini sürekli karşılaştıran bir şey yoksa sapma (drift) görünmez ve
-bir sonraki uygulama onu sessizce geri alır.
+**Ne oluyor:** Kümede elle yapılan bir değişiklik (ör. `kubectl scale` ile replika sayısını 5'e çıkarmak) çalışır ama
+hiçbir yerde kaydı yoktur ve bir sonraki dağıtım onu sessizce geri alır. Kimin, neden yaptığı bilinmez.
+**Neden oluyor:** İstenen durum kaynaktaki manifest'lerde, gerçek durum kümede. İkisini sürekli karşılaştıran bir şey
+yoksa aradaki sapma (drift) görünmez.
+**Bu deney:** Argo CD'nin bu seviyeyi yönetip yönetmediğine bakar, Rollout'u elle 5 replikaya çıkarıp ~65 sn tutar,
+sonra manifest'teki sayıyı yeniden uygulayıp değişikliğin iz bırakmadan kaybolduğunu gösterir.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P12-03` (Argo CD bu namespace'i yönetiyor mu bakar, Rollout'u elle 5
 replikaya çıkarıp ~65 sn tutar, sonra manifest'teki replika sayısını yamalayıp drift'in sessizce kaybolduğunu gösterir). Elle:
@@ -294,16 +305,20 @@ yok), sonra `3` ve `3`. 3. adımdan sonra küme `5`, manifest hâlâ `3`; izleme
 - `kubectl -n lvl12 get rollout redirect -w` (ikinci terminalde) → `DESIRED` 3 → 5 → 3; kaydı kalmaz.
 - `kubectl -n argocd get applications` → `No resources found`: sürekli karşılaştıran bir şey yok.
 
-**Nerede çözülüyor:** Argo CD (kurulu, Application bilerek tanımsız) — eklediği üç şey: sürekli karşılaştırma, otomatik
-düzeltme (self-heal) ve hangi kaynağın neden farklı olduğunun görünürlüğü.
+**Nasıl çözülüyor:** Çözüm Argo CD (GitOps): kümeyi kaynakla sürekli karşılaştırır, hangi kaynağın neden farklı olduğunu gösterir ve istenirse farkı otomatik düzeltir (self-heal). Kurulu, ama bu seviyenin uygulaması ona bilerek bağlanmamış — sorunun görülebilmesi için.
 
 ---
 
 ### P12-04 · `:latest` = belirsiz ve geri alınamaz sürüm
 
-**Ne deniyoruz:** Çalışan imajların etiketi değişmez mi, önceki sürüme dönülebiliyor mu?
-**Neden:** `:latest` gibi değişebilen bir etiket "dağıttım ama değişmedi" ve "önceki sürüme dön" sorunlarını üretir; bu
-merdivende her etiket `<git-sha>-<kaynak-hash>`.
+**Ne oluyor:** `:latest` gibi değişebilen bir imaj etiketiyle "hangi sürüm çalışıyor?" sorusunun cevabı yoktur ve
+önceki sürüme dönmek hiçbir şeyi değiştirmez — iki sürüm de aynı etiketi taşır. Bu merdivende böyle bir etiket
+kullanılmıyor; deney bunu doğrular.
+**Neden oluyor:** Değişebilen etiket her yeni imajla başka bir içeriği gösterir; "dağıttım ama değişmedi" ve "geri
+aldım ama değişmedi" sorunları buradan çıkar. Bu merdivende her etiket `<git-sha>-<kaynak-hash>`: kaynak değişmezse
+etiket de değişmez.
+**Bu deney:** Çalışan imaj etiketlerini listeler, `:latest` kullanan imajları sayar ve ReplicaSet geçmişinden önceki
+sürümlere dönülebildiğini gösterir.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P12-04` (çalışan etiketleri listeler, ReplicaSet geçmişinden geri
 dönülebilirliği gösterir; hüküm `:latest` kullanan imaj sayısına bakar — bu merdivende `NOT-REPRODUCED` beklenir). Elle
@@ -337,16 +352,19 @@ aynı etiketi gösterir, geri alma hiçbir şey değiştirmezdi.
 - "İstek / sn (sürüme göre)" → tek hash çizgisi: tek ReplicaSet çalışıyor. `:latest` ile yeni imaj itilseydi pod şablonu değişmez, yeni hash ve rollout olmazdı.
 - Explore'da: `count by (image) (kube_pod_container_info{namespace="lvl12",container="redirect"})` → tek satır, etiket `…/12-redirect-svc:<git-sha>-<kaynak-hash>`; `:latest` yok.
 
-**Nerede çözülüyor:** 13 (Kyverno bunu kural yapar). Zaman damgalı etiket de yanlış olurdu: `make push` ile `make deploy`
-ayrı çağrılınca farklı etiket üretir ve pod `ImagePullBackOff`'a düşer.
+**Nasıl çözülüyor:** Etiketler zaten değişmez (`<git-sha>-<kaynak-hash>`); 13'te Kyverno bunu kural yapar ve `:latest` kullanan manifest kümeye hiç giremez. Zaman damgalı etiket de yanlış olurdu: `make push` ile `make deploy` ayrı çağrılınca farklı etiket üretir ve pod imajı bulamaz (`ImagePullBackOff`).
 
 ---
 
 ### P12-05 · Canary + paylaşılan durum uyumsuzluğu
 
-**Ne deniyoruz:** Yeni sürüm önbellek anahtar formatını değiştirseydi canary ile stable aynı Redis'i paylaşabilir miydi?
-**Neden:** Canary, iki sürümün yan yana çalışabileceğini varsayar; paylaşılan durum (önbellek, kuyruk, şema) bu varsayımı
-kırar — iki taraf birbirinin yazdığını okuyamaz ve sistem önbelleksiz kalır.
+**Ne oluyor:** Yeni sürüm önbellek anahtarlarının biçimini değiştirirse canary ile eski sürüm aynı Redis'e farklı
+biçimde yazar; ikisi de birbirinin yazdığını bulamaz, sistem birden önbelleksiz kalır ve yük veritabanına biner.
+Bu bir senaryo hesabı: biçim değişikliği gerçekten dağıtılmaz.
+**Neden oluyor:** Canary, iki sürümün yan yana çalışabileceğini varsayar. Paylaşılan durum (önbellek, kuyruk, şema) bu
+varsayımı kırar: iki sürüm aynı veriyi farklı biçimde okur ve yazar.
+**Bu deney:** Redis'teki mevcut anahtar biçimini ve önbellek isabet oranını gösterir; biçim değişseydi isabetin ve
+veritabanı yükünün ne kadar değişeceğini hesaplar.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P12-05` (mevcut anahtar formatını ve isabet oranını gösterir, format
 değişiminin etkisini hesaplar; format değişimi gerçekten dağıtılmaz, bu bir senaryo hesabı). Elle:
@@ -376,16 +394,18 @@ oranda artardı.
 - "İsabet oranı (pod'a göre)" → her pod'da yüksek ve birbirine yakın: tek anahtar formatı. Format değişimi dağıtılmadığı için düşüş görmezsin; gerçek bir değişiklikte canary payıyla orantılı düşerdi.
 - "Önbellek ıskası ve veritabanı sorguları" → iki çizgi alçak ve birlikte hareket eder; format değişiminde ikisi birlikte yükselirdi.
 
-**Nerede çözülüyor:** tartışma — üç seçenek: geriye uyumlu format, geçişte iki formatı da okumak, canary'ye ayrı (soğuk)
-önbellek. Canary, paylaşılan her durum için bir uyumluluk sözleşmesi ister (kuyruk formatı P06-07, şema P12-02).
+**Nasıl çözülüyor:** Tartışma — üç seçenek var: geriye uyumlu anahtar biçimi, geçiş süresince iki biçimi de okumak ya da canary'ye ayrı (soğuk) bir önbellek vermek. Canary, paylaşılan her durum için bir uyumluluk sözleşmesi ister (kuyruk biçimi P06-07, şema P12-02).
 
 ---
 
 ### P12-06 · Uygulama geri alındı, şema alınmadı
 
-**Ne deniyoruz:** Uygulamayı geri almak şemayı da geri alıyor mu?
-**Neden:** "Geri alma" iki ayrı iştir ve yalnızca uygulamanınki otomatiktir; şemayı geri almak ileri yönde yeni bir
-migration'dır ve veri kaybettirebilir.
+**Ne oluyor:** Kötü bir sürümü geri almak uygulamayı eski hâline döndürür ama veritabanı şemasını döndürmez. "Geri
+aldık" denir, oysa şema hâlâ yeni sürümündedir; şemayı geri almak ise veri kaybettirebilir.
+**Neden oluyor:** Geri alma iki ayrı iştir ve yalnızca uygulamanınki otomatiktir. Şemayı geri almak aslında ileri
+yönde yeni bir migration'dır; bu seviyede 6 migration'ın 5'inin geri alması sonradan yazılan veriyi siler.
+**Bu deney:** Şema sürümünü ve uygulama imajını yan yana gösterir (ikisi birbirine bağlı değil), her migration'ın
+geri alma (`Down`) bloğunu kontrol eder ve veri kaybettiren geri almaları sayar.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P12-06` (şema sürümü ile uygulama etiketini yan yana gösterir, her
 migration'ın geri alma (`Down`) bloğunu kontrol eder, veri kaybettiren geri almaları sayar). Elle (yük yok; şemaya yalnızca okuma):
@@ -415,8 +435,7 @@ yazılan veriyi siler), yalnızca `002_tenant_index.sql` için `0` (indeks yenid
 - `kubectl -n lvl12 get rollout redirect -o jsonpath='{.spec.template.spec.containers[0].image}'` → uygulama etiketi; şema sürümüyle bağı yok.
 - `grep -A2 '+goose Down' internal/store/migrations/*.sql` → Down bloklarında `DROP TABLE` / `DROP COLUMN`: geri alma veri siler.
 
-**Nerede çözülüyor:** disiplin — bir sürümde yalnızca geriye uyumlu şema değişikliği yap; böylece uygulamayı geri almak
-şemayı geri almayı gerektirmez ("N−1 sürümü N şemasıyla çalışır").
+**Nasıl çözülüyor:** Disiplin: bir sürümde yalnızca geriye uyumlu şema değişikliği yapmak. Böylece uygulamayı geri almak şemayı geri almayı gerektirmez — bir önceki uygulama sürümü yeni şemayla da çalışır ("N−1 sürümü N şemasıyla çalışır").
 
 ## 7. Seviye içi alıştırmalar (TRAP_ bayrakları)
 

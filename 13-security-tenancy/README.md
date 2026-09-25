@@ -35,12 +35,14 @@ Sıra bilinçli: ucuz kontrol (IP limiti) önce, pahalı olan (hash + arama) son
 
 ## 3. Önceki seviyeden çözülenler
 
-**Hiçbiri** — `problems/SOLVES` gerekçesini yazar: P12-04 (`:latest`) bir doğrulama scriptidir ve 12'de de
-`NOT-REPRODUCED` döner; hiç üretilmemiş bir sorunu "çözüldü" diye listelemek bir şey kanıtlamaz.
+**Hiçbiri** — `problems/SOLVES` gerekçesini yazar. 12'nin sorunlarından P12-04 (`:latest` etiketi) bir
+doğrulamadır ve 12'de de "sorun yok" (`NOT-REPRODUCED`) döner; hiç yaşanmamış bir sorunu "çözüldü" diye listelemek
+bir şey kanıtlamaz.
 
-Kapatılan borçlar: `:latest`, eksik bellek limiti ve eksik probe kuralları artık Kyverno ile admission'da zorunlu
-(P13-07) — README bir temenni, admission politikası bir garanti. `X-Tenant-ID` sahteciliği biter, URL güvenliği DNS
-çözümüyle derinleşir (P13-05), düz metin sır kısmen ele alınır (P13-04).
+Bu seviyede kapanan borçlar: `:latest`, eksik bellek sınırı ve eksik sağlık kontrolü (probe) kuralları kümeye giriş
+kapısında zorunlu (Kyverno, P13-07) — README'de yazan bir kural temennidir, giriş kapısındaki kural garantidir. Kiracıyı
+başlıkla taklit etmek biter (kiracı API anahtarından gelir), zararlı URL kontrolü alan adının çözüldüğü adrese de bakar
+(P13-05), düz metin sırlar kısmen ele alınır (P13-04).
 
 ## 4. Ayağa kaldırma
 
@@ -120,28 +122,34 @@ Bu seviyenin değişikliği: **`Authorization: Bearer <anahtar>`**.
 
 ## 6. Reproduce edilebilir sorunlar
 
-Her sorun aynı düzende: **Ne deniyoruz** (deneyin sorusu) → **Neden** → adımlar (her adım ne yaptığını söyler)
-→ **Terminalde ne görmelisin** → **Grafana'da gör** (giriş: admin / ladder) → **Nerede çözülüyor**.
-`make repro` hükmü: `REPRODUCED` = sorun var · `NOT-REPRODUCED` = yok · `SKIPPED` = ölçülemedi.
+Bu seviyede yaşayacağın 8 sorun. Her birini iki yoldan görebilirsin: **Otomatik** — `make repro P=<ID>` deneyi
+kendisi yapar, ölçer ve hükmünü basar (`REPRODUCED` = sorun var · `NOT-REPRODUCED` = yok · `SKIPPED` =
+ölçülemedi); **Elle** — adımları sırayla yapıştırıp sonucu kendi gözünle görürsün. Her sorunun bölümü aynı
+düzende: **Ne oluyor** → **Neden oluyor** → **Bu deney** → adımlar → **Terminalde ne görmelisin** →
+**Grafana'da gör** (giriş: admin / ladder) → **Nasıl çözülüyor**.
 
-| ID | Sorun | Reproduce | Grafana'da | Çözüm |
-|---|---|---|---|---|
-| P13-01 | **TRAP** header ile kiracı taklidi | `make repro P=P13-01` | [14 · Security](http://grafana.localtest.me/d/ladder-security?var-level=lvl13&from=now-15m&to=now&refresh=10s) · [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl13&from=now-15m&to=now&refresh=10s) → "Kimlik reddi / sn (401 / 403)" | seviye içi (kimlik) |
-| P13-02 | Unutulan tenant filtresi = sessiz sızıntı | `make repro P=P13-02` | [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl13&from=now-15m&to=now&refresh=10s) → "5xx (uç noktaya göre)" | seviye içi (RLS) |
-| P13-03 | Her pod veritabanına ulaşabiliyor | `make repro P=P13-03` | görünmez — kanıt terminalde ↓ | seviye içi (NetworkPolicy) |
-| P13-04 | Sırlar git'te düz metin | `make repro P=P13-04` | görünmez — kanıt terminalde ↓ | kısmen (sealed-secrets hazır) |
-| P13-05 | **TRAP** DNS ile gizlenen iç adres | `make repro P=P13-05` | [14 · Security](http://grafana.localtest.me/d/ladder-security?var-level=lvl13&from=now-15m&to=now&refresh=10s) · [03 · App Business](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl13&from=now-15m&to=now&refresh=10s) → "Tehlikeli URL reddi (sebebe göre)" | seviye içi + TOCTOU kalır |
-| P13-06 | Enumeration maliyeti | `make repro P=P13-06` | [14 · Security](http://grafana.localtest.me/d/ladder-security?var-level=lvl13&from=now-15m&to=now&refresh=10s) · [10 · Rate limit](http://grafana.localtest.me/d/ladder-ratelimit?var-level=lvl13&from=now-15m&to=now&refresh=10s) → "Var olmayan kod istekleri / sn (tarama)" | kısmen (404 limiti yok) |
-| P13-07 | README ≠ garanti | `make repro P=P13-07` | [14 · Security](http://grafana.localtest.me/d/ladder-security?var-level=lvl13&from=now-15m&to=now&refresh=10s) → "Politika ihlalleri (Kyverno)" | seviye içi |
-| P13-08 | Konteyner/tedarik zinciri sertleştirme | `make repro P=P13-08` | görünmez — kanıt terminalde ↓ | kısmen |
+| ID | Ne olur? | Neden olur? | Nasıl çözülür? |
+|---|---|---|---|
+| P13-01 | Anahtarı olmayan biri, isteğine `X-Tenant-ID: acme` başlığını yazarak başka bir kiracının (acme) linkini silebilir | Kiracı kimliği herkesin yazabileceği bir başlıktan okunuyor (bu seviyede yalnızca `TRAP_HEADER_TENANT` tuzağı açıkken) | **13:** kiracı yalnızca gizli API anahtarından çıkarılır, başlık yok sayılır |
+| P13-02 | Bir sorguda "yalnızca bu kiracı" filtresi unutulursa sorgu bütün kiracıların verisini döndürür; hata ya da uyarı çıkmaz | Filtreyi her sorguya uygulamanın kendisi eklemek zorunda; unutmak sessizdir | **13 (deneyde):** filtreyi veritabanı kendisi uygular (satır düzeyi güvenlik — RLS) |
+| P13-03 | Ele geçirilen ya da yanlışlıkla kurulan herhangi bir pod veritabanına ve Redis'e doğrudan bağlanabilir | Kubernetes'te varsayılan olarak her pod her pod'la konuşabilir | **13:** varsayılan olarak her bağlantıyı reddeden ağ kuralı + izin listesi (NetworkPolicy) |
+| P13-04 | API anahtarları ve veritabanı şifresi git'te düz metin; repoyu okuyan herkes görür | Kubernetes Secret'ı yalnızca base64 ile kodlar (şifreleme değil); sırları şifreleyen araç kurulu ama kullanılmıyor | **Kısmen:** sealed-secrets (sırrı şifreleyip git'e koyma) hazır; kullanımı 14 §9'da |
+| P13-05 | İç ağ adresine çözülen bir alan adı (ör. `localtest.me` → 127.0.0.1) kısaltılabilir; tıklayan iç ağa yönlendirilir | Kontrol yalnızca yazılan IP'ye bakar, alan adının hangi IP'ye çözüldüğüne bakmaz (bu seviyede yalnızca `TRAP_NO_DNS_CHECK` açıkken) | **13:** alan adı DNS'ten çözülür, iç adrese çıkıyorsa reddedilir |
+| P13-06 | Var olmayan kodları arka arkaya deneyen biri (tarama) sisteme yük bindirir ve normal trafik içinde zor fark edilir | Her deneme bir 404 ve çoğu zaman bir veritabanı okuması; 404 oranına bakan bir kural yok | **Kısmen:** uzun rastgele kod (01), "bu kod yok" önbelleği (03), hız sınırı (08) |
+| P13-07 | `:latest` etiketli, bellek sınırı ya da sağlık kontrolü (probe) olmayan bir pod kümeye kurulabilir | Bu kurallar yalnızca README'de yazıyor; Kubernetes böyle pod'ları kendiliğinden reddetmez | **13:** Kyverno kuralları kümeye giriş kapısında zorunlu kılar |
+| P13-08 | Konteyner ele geçirilirse imajdaki shell, root yetkisi ve yazılabilir dosya sistemi saldırgana alan açar | Kodun güvenliği, çalıştığı imajın güvenliğiyle sınırlı | **Kısmen (13):** shell'siz imaj, root olmayan kullanıcı, yetkiler kapalı; imaj tarama ve imza 14 §9'da |
 
 ---
 
 ### P13-01 · TRAP · Header ile kiracı taklidi
 
-**Ne deniyoruz:** Anahtarı olmayan biri `X-Tenant-ID: acme` yazarak acme'nin linkini silebilir mi?
-**Neden:** Kiracı anahtardan gelince başlık yok sayılır; `TRAP_HEADER_TENANT` kiracıyı yine başlıktan alır. Kimlik
-doğrulama kodu yerinde durur, değişen yalnızca kararın neye dayandığı.
+**Ne oluyor:** Anahtarı olmayan biri, isteğine `X-Tenant-ID: acme` başlığını yazarak kendini acme kiracısı gibi
+gösterir ve acme'nin linkini silebilir. Başlığı herkes yazabildiği için bu, kiracılar arasında hiç sınır olmaması demek.
+**Neden oluyor:** Bu seviyede kiracı kimliği gizli API anahtarından çıkarılır ve başlık yok sayılır. Tuzak
+(`TRAP_HEADER_TENANT`) açıkken kiracı yine başlıktan okunur: kimlik doğrulama kodu yerinde durur, değişen yalnızca
+kararın neye dayandığıdır.
+**Bu deney:** acme'nin anahtarıyla bir link oluşturur; globex'in anahtarı + acme başlığıyla ve hiç kimlik olmadan
+silmeyi dener, sonra tuzağı açıp linki yalnızca başlıkla siler.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P13-01` (acme'nin anahtarıyla link oluşturur; globex anahtarı +
 başlıkla ve kimliksiz silmeyi dener; sonra tuzağı yalnızca api'de açıp yalnızca başlıkla siler ve tuzağı kapatır). Elle:
@@ -185,16 +193,20 @@ link gerçekten gitti.
 - Tuzak açıkken başarılı taklit (`204`) hiçbir hata panelinde görünmez: sınırın delindiği an, metrikte sıradan bir başarılı silmedir.
 - Explore'da: `sum by (result) (increase(auth_attempts_total{namespace="lvl13"}[5m]))` → `ok` (anahtarlı) ve `missing` (anahtarsız, public redirect'ler dahil); tuzaklı istek kimlik doğrulamaya hiç uğramaz.
 
-**Nerede çözülüyor:** bu seviyede — kiracı yalnızca API anahtarından türer. Bir sınır, karşılaştırdığı değeri
-ayarlayabilen en zayıf şey kadar güçlüdür.
+**Nasıl çözülüyor:** Bu seviyede çözülü: kiracı yalnızca API anahtarından türer, `X-Tenant-ID` yok sayılır. Tuzak (`TRAP_HEADER_TENANT`) açıkken sorun döner — bir sınır, karşılaştırdığı değeri kimin ayarlayabildiği kadar güçlüdür.
 
 ---
 
 ### P13-02 · Unutulan tenant filtresi = sessiz sızıntı
 
-**Ne deniyoruz:** `WHERE tenant = …` unutulmuş bir sorgu başka kiracının satırlarını döndürür mü, RLS bunu durdurur mu?
-**Neden:** Uygulama filtresi, biri `WHERE`'i unutana kadar doğrudur ve unutmak hiçbir hata üretmez. RLS (satır düzeyi
-güvenlik) filtreyi veritabanına taşır: `app.tenant_id` ayarlı değilse sorgu hiç satır görmez.
+**Ne oluyor:** Her kiracı yalnızca kendi linklerini görmeli. Bir sorguda "yalnızca bu kiracı" filtresi
+(`WHERE tenant = …`) unutulursa sorgu bütün kiracıların satırlarını döndürür — hata, log ya da alarm olmadan. Bir
+kiracının verisi sessizce başkasına sızar.
+**Neden oluyor:** Filtreyi her sorguya uygulamanın kendisi eklemek zorunda ve eklemeyi unutmak hiçbir hata üretmez.
+Satır düzeyi güvenlik (RLS — Row Level Security) filtreyi veritabanına taşır: sorguda kiracı ayarlı değilse veritabanı
+hiç satır göstermez.
+**Bu deney:** İki kiracıya link yazar, filtresiz sorguyu uygulamanın veritabanı kullanıcısıyla koşar (sızıntı), sonra
+RLS'i açıp aynı sorguyu tekrarlar ve RLS altında yazmanın ne olduğuna bakar; sonunda RLS'i kapatır.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P13-02` (iki kiracıya üçer link yazar, filtresiz sorguyu
 uygulamanın rolüyle koşar, RLS'i açıp tekrarlar, RLS altında yazmanın bedelini ölçer ve RLS'i kapatır; RLS'i
@@ -255,17 +267,19 @@ acme'nin, globex olarak yalnızca globex'in sayısı, süper kullanıcıyla yine
 - "5xx (uç noktaya göre)" → RLS açıkken yapılan 3 yazma `/api/links` rotasında küçük bir tepe (Postgres `42501` → `503`): RLS'in bedeli, sızıntının tersine, gürültülüdür.
 - Explore'da: `sum by (op) (increase(db_queries_total{namespace="lvl13",result="error"}[5m]))` → `create` işleminde aynı yazmalar kadar hata.
 
-**Nerede çözülüyor:** bu seviyede (RLS). İki kritik detay: `FORCE ROW LEVEL SECURITY` olmadan tablo sahibi politikayı
-atlar; transaction havuzlamasında ayar işlem başına (`SET LOCAL`) yapılmalıdır, yoksa sonraki kiracı öncekinin
-ayarını devralır (P09-03).
+**Nasıl çözülüyor:** Bu seviyede RLS (`migrations/007_rls.sql`) sızıntıyı veritabanında durdurur; deney onu açıp kapatır, çünkü uygulama her işlemde kiracıyı (`app.tenant_id`) bildirmiyor ve RLS açıkken yazmalar reddedilir. İki kritik detay: `FORCE ROW LEVEL SECURITY` olmadan tablo sahibi politikayı atlar; bağlantı havuzunda ayar işlem başına (`SET LOCAL`) yapılmalıdır, yoksa sonraki kiracı öncekinin ayarını devralır (P09-03).
 
 ---
 
 ### P13-03 · Varsayılan-reddet ağ
 
-**Ne deniyoruz:** İzin listesinde olmayan bir pod veritabanına ve Redis'e bağlanabiliyor mu?
-**Neden:** Kubernetes'in varsayılanı "herkes herkesle konuşur"; bu seviye varsayılan-reddet NetworkPolicy ve bir izin
-listesi getirir (Calico uygular).
+**Ne oluyor:** Kubernetes'te varsayılan olarak her pod her pod'a bağlanabilir. Ele geçirilen tek bir pod — ya da
+yanlışlıkla kurulan bir test pod'u — veritabanına ve Redis'e doğrudan ulaşabilir.
+**Neden oluyor:** Ağ kuralı yoksa küme içi trafik serbesttir. Bu seviye "varsayılan olarak her bağlantıyı reddet"
+kuralı (default-deny NetworkPolicy) ve kimin kime bağlanabileceğini sayan bir izin listesi getirir; kuralları ağ
+eklentisi Calico uygular.
+**Bu deney:** Tanımlı ağ kurallarını listeler, izin listesinde olmayan bir test pod'undan Postgres havuzuna ve Redis'e
+bağlanmayı dener ve izinli uygulama pod'larının çalışmaya devam ettiğini doğrular.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P13-03` (politikaları listeler, izin listesinde olmayan bir test
 pod'undan Postgres havuzuna ve Redis'e bağlanmayı dener, test pod'unu siler). Elle:
@@ -302,16 +316,19 @@ bağlanıyorlar.
 - `kubectl -n lvl13 get networkpolicy` → `default-deny-ingress` ve izin listesi: kim kiminle konuşuyor, tek bakışta.
 - `make repro P=P13-03` → yetkisiz `netcheck` pod'undan `POSTGRES_ENGELLENDI` ve `REDIS_ENGELLENDI`.
 
-**Nerede çözülüyor:** bu seviyede (NetworkPolicy). Politika yalnızca CNI destekliyorsa çalışır (burada Calico);
-egress kuralları eksik.
+**Nasıl çözülüyor:** Bu seviyede NetworkPolicy ile: izin listesinde olmayan pod'un bağlantısı ağda düşürülür. Politika yalnızca ağ eklentisi destekliyorsa çalışır (burada Calico); dışarı giden trafik (egress) kuralları yok — pod'lar internete serbest çıkar.
 
 ---
 
 ### P13-04 · Sırlar hâlâ git'te düz metin
 
-**Ne deniyoruz:** Sırlar git'te ve kümede ne kadar korunuyor?
-**Neden:** `deploy/api-keys.yaml` ve `cnpg.yaml` düz metin sır taşır. sealed-secrets kurulu ama kullanılmıyor:
-SealedSecret üretmek kümenin anahtarını ister ve depoyu taze bir kümede kullanılamaz kılar.
+**Ne oluyor:** API anahtarları ve veritabanı şifresi git'te düz metin duruyor: repoyu okuyabilen herkes onları
+görür. Kümedeki Secret da yalnızca base64 ile kodlanmış — bu şifreleme değil, herkes geri çevirebilir.
+**Neden oluyor:** `deploy/api-keys.yaml` ve `cnpg.yaml` sırları düz metin taşır. sealed-secrets (sırrı kümenin
+anahtarıyla şifreleyip git'e koymayı sağlayan araç) kurulu ama kullanılmıyor: şifreli sır o kümenin anahtarına
+bağlıdır ve depo taze bir kümede kullanılamaz hâle gelir.
+**Bu deney:** Yalnızca okur: git'teki düz metin sırları bulur, Secret'ın base64 olduğunu gösterir, sealed-secrets'in
+kurulu olduğunu doğrular ve istersen bir sırrı şifreleyip `/tmp`'ye yazar.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P13-04` (git'te düz metin sır arar, sealed-secrets controller'ını,
 CRD'sini ve anahtarını kontrol eder, Secret'ı SealedSecret'a çeviren `kubeseal` komutunu yazar). Elle (kümede hiçbir
@@ -348,16 +365,19 @@ kümenin anahtarı çözer.
 - `grep -n 'API_KEYS:\|POSTGRES_PASSWORD:' deploy/api-keys.yaml deploy/cnpg.yaml` → `API_KEYS: "acme:pro:acme-key-9f2c,…"` ve `POSTGRES_PASSWORD: linkly`: git'e commit edilmiş düz metin.
 - `kubectl get crd sealedsecrets.bitnami.com` → CRD var: araç kurulu, kullanılmıyor.
 
-**Nerede çözülüyor:** kısmen — sealed-secrets hazır; sır pod'un ortam değişkeninde yine düz metin. Sır yönetimi bir
-zincirdir: git → küme → pod → süreç → log → yedek.
+**Nasıl çözülüyor:** Kısmen: sealed-secrets hazır, ama sırlar SealedSecret'a çevrilmiş değil ve pod'un ortam değişkeninde yine düz metin. Sır yönetimi bir zincirdir (git → küme → pod → süreç → log → yedek); devamı 14 §9'da.
 
 ---
 
 ### P13-05 · TRAP · DNS ile gizlenen iç adresler
 
-**Ne deniyoruz:** İç adrese çözülen bir alan adı (`localtest.me` → 127.0.0.1) kısaltılabiliyor mu?
-**Neden:** 01'deki kontrol yalnızca düz IP'lere bakar; saldırgan iç adrese çözülen bir alan adı kaydeder. 13 adı DNS
-ile çözüp kontrol eder; `TRAP_NO_DNS_CHECK` bunu kapatır.
+**Ne oluyor:** Kısaltıcıya iç ağ adresine çözülen bir alan adı verilirse (ör. `localtest.me` → 127.0.0.1) link
+kabul edilir; linke tıklayan, zararsız görünen bir adla iç ağa yönlendirilir.
+**Neden oluyor:** 01'deki kontrol yalnızca düz yazılmış IP'lere bakar; saldırgan iç adrese çözülen bir alan adı
+kaydederek bunu atlatır. 13 alan adını DNS'ten çözüp çıkan IP'yi kontrol eder; tuzak (`TRAP_NO_DNS_CHECK`) bu çözümü
+kapatır.
+**Bu deney:** Kontrol açıkken iç adres, metadata adresi, iç adrese çözülen `localtest.me` ve normal bir adresle link
+oluşturmayı dener; sonra tuzağı açıp `localtest.me`'yi tekrar dener ve ret sayaçlarını okur.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P13-05` (DNS kontrolü açıkken dört adres dener, tuzağı yalnızca
 api'de açıp `localtest.me`'yi tekrar dener, ret sayacını Prometheus'tan okur ve tuzağı kapatır). Elle:
@@ -398,17 +418,19 @@ girmedi.
 - "Tehlikeli URL reddi (sebebe göre)" → `private_address` (düz IP ve `localhost`) ve `private_address_resolved` (yalnızca DNS çözümünün yakalayabildiği `localtest.me`); tuzak açıkken aynı istek yeni bir tepe yapmaz.
 - "Oluşturma sonuçları" → ilk fazda `invalid`; tuzaklı fazda aynı adres `ok`: atlatılan kontrol metrikte başarı görünür.
 
-**Nerede çözülüyor:** bu seviyede (DNS çözümü) — ama TOCTOU kalır: biz oluşturma anında çözeriz, tarayıcı tıklama anında
-çözer. Azaltmalar: çözülen IP'yi sabitlemek · redirect anında yeniden kontrol · egress politikası. Risk azaldı, yok olmadı.
+**Nasıl çözülüyor:** Bu seviyede: alan adı oluşturma anında DNS'ten çözülür, iç adrese çıkıyorsa reddedilir; tuzak açıkken sorun döner. Risk azalır ama sıfırlanmaz: biz oluşturma anında çözeriz, tarayıcı tıklama anında çözer ve arada DNS cevabı değişebilir (TOCTOU). Azaltmalar: çözülen IP'yi sabitlemek, yönlendirme anında yeniden kontrol, dışa çıkış politikası.
 
 ---
 
 ### P13-06 · Enumeration maliyeti
 
-**Ne deniyoruz:** Var olmayan kodları tarayan biri sisteme ne kadar pahalıya patlar ve ne kadar görünür?
-**Neden:** Kod uzayı 62⁷ ≈ 3.5×10¹², tahmin pratikte imkânsız; mesele maliyet ve görünürlük. Hız sınırı taramayı
-yavaşlatır, negatif önbellek ("bu kod yok" cevabını saklamak) yalnızca **tekrar sorulan** kodlarda DB'yi korur;
-404 oranına özel bir kural yok.
+**Ne oluyor:** Biri var olmayan kodları arka arkaya deneyerek (tarama) geçerli link arar. Her deneme bir 404 ve
+çoğu zaman bir veritabanı okumasıdır; tarama sisteme yük bindirir ve normal trafik içinde zor fark edilir.
+**Neden oluyor:** Kod uzayı çok büyük (62⁷ ≈ 3.5 trilyon), tahminle link bulmak pratikte imkânsız; mesele maliyet ve
+görünürlük. Hız sınırı taramayı yavaşlatır; "bu kod yok" cevabını saklayan negatif önbellek yalnızca **tekrar
+sorulan** kodlarda veritabanını korur; 404 oranına bakan bir kural yok.
+**Bu deney:** Hız sınırı devredeyken iki faz tarama yükü verir — önce her istek yeni bir kod, sonra aynı 60 kod tekrar
+tekrar — ve her fazda 404, negatif önbellek isabeti, veritabanı okuması ve limiter reddini karşılaştırır.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P13-06` (iki faz × 40 sn `scan` yükü, limiter devrede: önce her
 istek yeni bir kod, sonra aynı 60 yok-olan kod tekrar tekrar; iki fazın "404 başına DB okuması"nı yan yana basar,
@@ -454,16 +476,18 @@ DB okuması belirgin düşer. İki fazda da `reject` 404'ten büyük.
 - "Önbellek işlemleri (katman ve sonuca göre)" → 1. fazda `l2` `miss` yükselir, `negative_hit` düz kalır; 2. fazda `negative_hit` baskın olur.
 - "Önbellek ıskası ve veritabanı sorguları" → 2. fazda ikisi de belirgin düşer: negatif önbelleğin kurtardığı DB okuması aradaki farktır.
 
-**Nerede çözülüyor:** kısmen — rastgele 7 karakter (01), negatif önbellek (03) ve hız sınırı (08) var; 404 **oranına**
-göre limit (`NOT_FOUND_LIMIT`) ayrıldı ama uygulanmadı. Amaç taramayı engellemek değil, pahalı ve görünür kılmak.
+**Nasıl çözülüyor:** Kısmen: rastgele 7 karakterli kod (01), negatif önbellek (03) ve hız sınırı (08) taramayı pahalı ve görünür kılar — amaç taramayı engellemek değil, budur. 404 **oranına** göre sınır (`NOT_FOUND_LIMIT`) yapılandırmada var ama kodda kullanılmıyor; yolun devamı 14 §9'da.
 
 ---
 
 ### P13-07 · README ≠ garanti
 
-**Ne deniyoruz:** `:latest` imajlı, bellek limitsiz ya da probe'suz bir pod kümeye girebiliyor mu?
-**Neden:** Bu kurallar şimdiye kadar yalnızca README'lerde yazıyordu; Kyverno onları admission'da (kümeye giriş
-kapısında) zorunlu kılar.
+**Ne oluyor:** `:latest` etiketli, bellek sınırı olmayan ya da sağlık kontrolü (probe) olmayan bir pod kümeye
+kurulabilir. Önceki seviyelerde bu kurallar yalnızca README'de yazıyor; unutan biri kurulumda hiçbir uyarı almaz.
+**Neden oluyor:** Kubernetes böyle pod'ları kendiliğinden reddetmez. Kyverno, kümeye giriş kapısında (admission) her
+yeni nesneyi kurallara göre denetleyen bir araç; bu seviye üç kuralı onunla zorunlu kılar.
+**Bu deney:** Tanımlı politikayı listeler, her biri tek bir kuralı çiğneyen üç pod'u `--dry-run=server` ile (hiçbir şey
+oluşturmadan) kurmayı dener ve kaçının reddedildiğini sayar.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P13-07` (politikaları listeler, üç ihlali `--dry-run=server` ile
 dener ve kaçının reddedildiğini sayar). Elle — `--dry-run=server` isteği admission'dan geçirir ama hiçbir şey
@@ -491,17 +515,19 @@ kubectl -n lvl13 run policy-test-noprobe --image=busybox:1.36 --restart=Never --
 - "Politika ihlalleri (Kyverno)" → kural başına bir basamak (`disallow-latest-tag`, `require-memory-limit`, `require-probes`), 1'de durur; Kyverno metrikleri ~1 dk gecikmeyle gelir.
 - Explore'da: `up{namespace="kyverno"}` → `1` olmalı; çizgi hiç yoksa Kyverno kazınmıyordur (kanıt yine terminaldeki `denied the request`).
 
-**Nerede çözülüyor:** bu seviyede. Her kural bir kez ölçülmüş bir arızadan gelir: P12-04 (`:latest`), P00-08 (bellek
-limiti), P00-04 + P07-08 (probe). Politikalar bilerek yalnızca `lvl13`'ü kapsar: `ClusterPolicy` `make down` ile
-silinmez ve bütün seviyeleri kapsasaydı 00 (bilerek limitsiz) bir daha kurulamazdı.
+**Nasıl çözülüyor:** Bu seviyede Kyverno ile: kurala uymayan pod hiç oluşmaz. Her kural bir kez ölçülmüş bir arızadan gelir: P12-04 (`:latest`), P00-08 (bellek sınırı), P00-04 + P07-08 (probe). Politikalar yalnızca `lvl13`'ü kapsar; bütün seviyeleri kapsasaydı bilerek sınırsız olan 00 kurulamazdı.
 
 ---
 
 ### P13-08 · Konteyner ve tedarik zinciri sertleştirme
 
-**Ne deniyoruz:** Uygulama konteyneri sertleştirilmiş mi: shell yok, dosya sistemi salt okunur, ek yetki yok, root değil?
-**Neden:** Kod güvenliği çalıştırdığın imajın güvenliğiyle sınırlıdır; shell'siz (distroless) imajda uzaktan kod
-çalıştırma bir `curl | sh` zincirine dönüşemez.
+**Ne oluyor:** Uygulama konteyneri ele geçirilirse saldırganın elinde ne kalır? İmajda shell varsa, süreç root
+çalışıyorsa ve dosya sistemine yazılabiliyorsa, uzaktan kod çalıştıran bir hata tam bir ele geçirmeye dönüşür.
+**Neden oluyor:** Kodun güvenliği, çalıştığı imajın güvenliğiyle sınırlıdır. Shell'siz (distroless) bir imajda uzaktan
+kod çalıştırma bir `curl | sh` zincirine dönüşemez; root olmayan kullanıcı, kapalı yetkiler ve salt okunur dosya
+sistemi hasarı daraltır.
+**Bu deney:** Yalnızca okur: hazır bir redirect pod'unun imajına ve güvenlik ayarlarına (`securityContext`) bakar,
+konteynerde shell çalıştırmayı dener.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P13-08` (hazır bir redirect pod'unun imajını ve `securityContext`'ini
 okur, içinde shell çalıştırmayı dener, eksik tedarik zinciri adımlarını listeler). Elle (yalnızca okur):
@@ -529,9 +555,7 @@ etiket, `:latest` değil) ve `"allowPrivilegeEscalation":false`, `"capabilities"
 - `kubectl -n lvl13 get pod -l app.kubernetes.io/name=redirect -o jsonpath='{.items[0].spec.containers[0].securityContext}'` → `"readOnlyRootFilesystem":true`, `"runAsNonRoot":true` ve `"capabilities":{"drop":["ALL"]}` içeren bir JSON.
 - `kubectl -n lvl13 exec $(kubectl -n lvl13 get pod -l app.kubernetes.io/name=redirect -o name | head -1) -- /bin/sh -c 'echo VAR'` → `VAR` yerine `/bin/sh` bulunamadı hatası: imajda shell yok.
 
-**Nerede çözülüyor:** kısmen — distroless, non-root, `drop ALL` yerinde; eksik: imaj tarama (Trivy), imza (cosign) +
-`verifyImages` politikası, SBOM, base imaj güncelleme. Script bu alanları çalışan pod'dan okur: README bir iddia,
-`kubectl get pod -o jsonpath` kanıt.
+**Nasıl çözülüyor:** Kısmen (13): shell'siz imaj, root olmayan kullanıcı, bütün ek yetkiler kapalı (`drop ALL`), salt okunur dosya sistemi. Eksik: imaj tarama (Trivy), imza (cosign) + imzayı doğrulayan politika, SBOM, temel imaj güncelleme — yolun devamı 14 §9'da.
 
 ## 7. Seviye içi alıştırmalar (TRAP_ bayrakları)
 

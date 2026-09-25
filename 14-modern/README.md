@@ -41,11 +41,14 @@ pub/sub yayını her pod'un L1 kopyasını siler.
 
 ## 3. Önceki seviyeden çözülenler
 
-**Hiçbiri** — `problems/SOLVES` bilerek boş. P13-06 (tarama) burada da açık: ölçüsü "tarama 404 üretti mi?"dir ve
-tarama her zaman 404 üretir; L1'in negatif kayıtları 404'lerin maliyetini düşürür, varlığını değil. 14 bir düzeltme
-değil sentez seviyesidir: katkısı sistemin tamamının aynı anda ayakta kalıp kalmadığını ölçmek (P14-05).
+**Hiçbiri** — `problems/SOLVES` bilerek boş. 13'ün tarama sorunu (P13-06) burada da açık: ölçüsü "tarama 404 üretti
+mi?" ve tarama her zaman 404 üretir; pod belleğindeki "bu kod yok" kayıtları 404'lerin maliyetini düşürür, varlığını
+değil. 14 bir düzeltme değil sentez seviyesi: katkısı sistemin tamamının aynı anda ayakta kalıp kalmadığını ölçmek
+(P14-05).
 
-Kapatılan borçlar: P04-02/P04-03 (L1 ile ağ adımı ve sıcak anahtar), P06-03 (3 partition), P04-06 (`allkeys-lru`).
+Bu seviyede kapanan eski borçlar: her okumada Redis'e gitmenin ağ bedeli ve sıcak anahtar (P04-02, P04-03 — pod
+belleğinde ikinci önbellek katmanı, L1), tek partition yüzünden boşta oturan tüketiciler (P06-03 — 3 partition), Redis
+dolunca önbelleğin sessizce yazmayı bırakması (P04-06 — dolunca en az kullanılanı atan `allkeys-lru`).
 
 ## 4. Ayağa kaldırma
 
@@ -115,25 +118,30 @@ Her seviyede aynı: [docs/API.md](../docs/API.md). 13'e göre değişiklik yok.
 
 ## 6. Reproduce edilebilir sorunlar
 
-Her sorun aynı düzende: **Ne deniyoruz** (deneyin sorusu) → **Neden** → adımlar (her adım ne yaptığını söyler)
-→ **Terminalde ne görmelisin** → **Grafana'da gör** (giriş: admin / ladder) → **Nerede çözülüyor**.
-`make repro` hükmü: `REPRODUCED` = sorun var · `NOT-REPRODUCED` = yok · `SKIPPED` = ölçülemedi.
+Bu seviyede yaşayacağın 5 sorun. Her birini iki yoldan görebilirsin: **Otomatik** — `make repro P=<ID>` deneyi
+kendisi yapar, ölçer ve hükmünü basar (`REPRODUCED` = sorun var · `NOT-REPRODUCED` = yok · `SKIPPED` =
+ölçülemedi); **Elle** — adımları sırayla yapıştırıp sonucu kendi gözünle görürsün. Her sorunun bölümü aynı
+düzende: **Ne oluyor** → **Neden oluyor** → **Bu deney** → adımlar → **Terminalde ne görmelisin** →
+**Grafana'da gör** (giriş: admin / ladder) → **Nasıl çözülüyor**.
 
-| ID | Sorun | Reproduce | Grafana'da | Çözüm |
-|---|---|---|---|---|
-| P14-01 | L1'in kazancı: ağ adımı olmadan isabet | `make repro P=P14-01` | [04 · Cache](http://grafana.localtest.me/d/ladder-cache?var-level=lvl14&from=now-30m&to=now&refresh=10s) · [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl14&from=now-30m&to=now&refresh=10s) → "Önbellek işlemleri (katman ve sonuca göre)" | seviye içi |
-| P14-02 | **TRAP** her kopya bir kanal borçlanır | `make repro P=P14-02` | [04 · Cache](http://grafana.localtest.me/d/ladder-cache?var-level=lvl14&from=now-30m&to=now&refresh=10s) · [03 · App Business](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl14&from=now-30m&to=now&refresh=10s) → "Önbellekten çıkarılma sebepleri" | seviye içi (pub/sub + kısa TTL) |
-| P14-03 | Partition tavanı kalktı | `make repro P=P14-03` | [08 · Stream (Redpanda)](http://grafana.localtest.me/d/ladder-stream?var-level=lvl14&from=now-15m&to=now&refresh=10s) → "Onaylama / sn ve tüketici pod sayısı" | seviye içi |
-| P14-04 | Kapasite modeli (ölçümle) | `make repro P=P14-04` | [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl14&from=now-15m&to=now&refresh=10s) · [01 · Pods & Resources](http://grafana.localtest.me/d/ladder-pods?var-level=lvl14&from=now-15m&to=now&refresh=10s) → "İstek / saniye (uç noktaya göre)" | `docs-capacity.md` |
-| P14-05 | **GAME DAY**: üç arıza üst üste | `CONFIRM=1 make repro P=P14-05` | [11 · Resilience](http://grafana.localtest.me/d/ladder-resilience?var-level=lvl14&from=now-15m&to=now&refresh=10s) · [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl14&from=now-15m&to=now&refresh=10s) → "Devre kesici durumu (0 kapalı · 1 yarı açık · 2 açık)" | prova |
+| ID | Ne olur? | Neden olur? | Nasıl çözülür? |
+|---|---|---|---|
+| P14-01 | Pod belleğinde önbellek (L1) yokken en sıcak link bile her okumada ağ üzerinden Redis'e sorulur; Redis'in tek çekirdeği okuma hızını sınırlar | Önbellek yalnızca Redis'te (L2); her isabet bir ağ çağrısı | **14:** iki katmanlı önbellek — önce pod belleği (L1), bulamazsa Redis (L2) |
+| P14-02 | Silinen bir link bazı pod'larda bir süre daha yönlendirmeye devam eder | Her pod linkin kendi kopyasını (L1) tutar; silme duyurusu kapalıyken (`TRAP_NO_INVALIDATION_PUBSUB`) kopya süresi dolana kadar yaşar | **14:** silme bütün pod'lara Redis üzerinden duyurulur (pub/sub); kısa önbellek süresi (10 sn) yedek |
+| P14-03 | Olay tüketicisine kopya eklemek işi hızlandırmayabilir: partition sayısından fazla kopya boşta oturur | Olay akışında bir partition'ı aynı anda yalnızca bir tüketici okur; partition sayısı paralelliğin tavanı | **14:** `clicks` topic'i 3 partition, otomatik ölçekleyici (KEDA) en fazla 3 kopya |
+| P14-04 | "Günde 100 milyon yönlendirme için kaç pod gerekir?" tahminle cevaplanırsa kapasite ya boşa gider ya ilk yoğunlukta yetmez | Kapasite modeli ancak bu kümede ölçülmüş "pod başına istek/sn" sayısıyla kurulabilir | **14:** tek pod kademeli yükle doyurulur, model ölçülen sayıyla kurulur (`docs-capacity.md`) |
+| P14-05 | Redis yavaşlar, veritabanı paket kaybeder ve bir pod ölür — hepsi aynı anda, yük altında: sistem kısmen mi, tamamen mi çöker? | Korumalar (devre kesici, yeniden deneme, yük atma, önbellek) tek tek sınandı ama birlikte hiç | **Prova (game day):** amaç geçmek değil, hangi korumanın ne zaman devreye girdiğini görmek |
 
 ---
 
 ### P14-01 · L1'in geri dönüşü
 
-**Ne deniyoruz:** Pod belleğindeki önbellek (L1) açılınca sıcak okumalar Redis'e (L2) gitmeyi bırakıyor mu?
-**Neden:** En sıcak anahtarlar L1'den cevaplanınca ağa hiç çıkmaz; 04'teki ağ adımı (P04-02) ve Redis'in tek çekirdek
-tavanı (P04-03) geç gelir.
+**Ne oluyor:** 04'ten beri önbellek yalnızca Redis'te; en sıcak link bile her okumada ağ üzerinden Redis'e sorulur.
+Bu ağ adımı her isteğe süre ekler (P04-02) ve Redis'in tek çekirdek tavanı (P04-03) okuma hızını sınırlar.
+**Neden oluyor:** Pod'un kendi belleğinde bir kopya (L1) yoksa her isabet bir ağ çağrısıdır. 14 iki katmanlı önbellek
+kullanır: önce pod belleği (L1), bulamazsa Redis (L2); en sıcak anahtarlar ağa hiç çıkmadan cevaplanır.
+**Bu deney:** L1 kapalı ve açık iki fazda aynı "tek koda yoğun" yükü verir; Redis'e giden okuma sayısını, L1 isabet
+oranını ve gecikmeyi karşılaştırır. Her L1 değişikliği bir canary dağıtımıdır (~4 dk sürer).
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P14-01` (L1 kapalı ve açık iki fazda `hot-key` yükü verir; okuma
 yolundaki L2 erişimini, L1 isabetini ve p50/p99'u karşılaştırır; her `L1_ENABLED` değişikliği bir canary dağıtımıdır
@@ -192,15 +200,19 @@ p50 iki fazda aynı ya da biraz düşük: fark histogram kovasından küçük ol
 - "Gecikme (p50 / p95 / p99)" → p50 2. fazda aynı ya da biraz aşağıda; fark kovadan küçükse iki faz aynı görünür.
 - "Komut / sn" → Redis'in toplam komut hızı düşmeyebilir, artabilir de (ölçülen: 767 → 1560/s): L1 açıkken pub/sub geçersiz kılma trafiği de Redis komutudur. Okuma yolundaki azalmayı `l2` serileri gösterir.
 
-**Nerede çözülüyor:** bu seviyede (L1+L2). L1 bedava değil; bedeli P14-02'de.
+**Nasıl çözülüyor:** Bu seviyede L1+L2 ile: sıcak okumaların çoğu pod belleğinden döner, Redis'e giden okuma belirgin düşer. L1 bedava değil: her pod gerçeğin bir kopyasını tutar; bedeli P14-02'de.
 
 ---
 
 ### P14-02 · TRAP · Her kopya bir geçersiz kılma kanalı borçlanır
 
-**Ne deniyoruz:** Silinen bir link, her pod'un L1 kopyasından ne kadar hızlı kayboluyor?
-**Neden:** L1, gerçeğin N kopyasıdır. Pub/sub yayını açıkken silme her pod'a duyurulur; kapalıyken
-(`TRAP_NO_INVALIDATION_PUBSUB`, 03'ün hâli) kopya TTL dolana kadar yaşar — P03-01'in aynısı.
+**Ne oluyor:** Bir link silindikten sonra bazı pod'lar onu bir süre daha yönlendirmeye devam eder: kullanıcı silinmiş
+bir linkle hâlâ hedefe gider. 03'teki tutarsızlığın (P03-01) aynısı.
+**Neden oluyor:** L1 ile her pod linkin kendi kopyasını tutar — gerçeğin N kopyası. Silme, Redis'in yayın kanalıyla
+(pub/sub) bütün pod'lara duyurulur ve her pod kopyasını siler; tuzak (`TRAP_NO_INVALIDATION_PUBSUB`) duyuruyu
+kapatınca kopya, süresi (TTL) dolana kadar yaşar.
+**Bu deney:** L1 süresini deney için 90 sn'ye çıkarır; duyuru açıkken ve kapalıyken "oluştur → 40 okuma → sil → 40
+okuma" turunu koşar, silmeden sonra kaç okumanın hâlâ yönlendirdiğini ve kaç duyuru mesajı gidip geldiğini sayar.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P14-02` (deney süresince redirect'in `L1_TTL`'ini 90 sn'ye çıkarır
 ki pencere ölçülebilsin; en az iki redirect replikası olduğunu doğrular; yayın açık ve kapalıyken "oluştur → 40 okuma
@@ -264,17 +276,18 @@ dolana kadar yönlendirmeye devam ediyor. `sent` yine sıfırdan büyük, `recei
 - "Yönlendirme sonuçları" → silinmiş koda yapılan okumalar 1. fazda `not_found`, 2. fazda `ok` — bayat cevap uygulamanın gözünden **başarıdır**.
 - Explore'da: `sum by (direction) (increase(cache_invalidation_messages_total{namespace="lvl14"}[2m]))` → 1. fazda `sent` ve `received` birlikte artar; 2. fazda `sent` artar ama `received` neredeyse durur: gönderilen ile alınan arasındaki fark, yayını kaçıran kopyalardır.
 
-**Nerede çözülüyor:** bu seviyede (pub/sub yayını + kısa TTL). Kanal en-iyi-çabadır: Redis yeniden başlarsa ya da mesaj
-düşerse kimse fark etmez; kısa TTL (10 sn) bu yüzden bir yedek mekanizmadır ve kaçan bir yayında bayatlık penceresi
-tam o kadardır. Alternatifler: sürüm damgalı anahtar · yazmada L1'i atlamak · dayanıklı akışla yayın.
+**Nasıl çözülüyor:** Bu seviyede pub/sub duyurusu + kısa TTL (10 sn) ile; tuzak açıkken sorun döner. Duyuru en-iyi-çabadır: Redis yeniden başlarsa ya da mesaj düşerse kimse fark etmez; kısa TTL bu yüzden yedektir ve kaçan bir duyuruda bayatlık en fazla o kadar sürer. Alternatifler: sürüm damgalı anahtar, yazmada L1'i atlamak, dayanıklı akışla duyuru.
 
 ---
 
 ### P14-03 · Partition tavanı kalktı
 
-**Ne deniyoruz:** 3 partition ile üç tüketici replikası gerçekten iş bölüşüyor mu?
-**Neden:** Bir partition'ı aynı anda tek tüketici okur; 06'da 1 partition vardı ve fazla replika boşta otururdu
-(P06-03). 14'te `clicks` topic'i 3 partition, KEDA'nın üst sınırı da 3.
+**Ne oluyor:** Tıklama olaylarını işleyen tüketiciye kopya eklemek işi hızlandırmayabilir: 06'da topic tek
+partition'dı ve fazla kopyalar boşta otururdu (P06-03). 14'te üç kopyanın gerçekten iş bölüşüp bölüşmediği sınanır.
+**Neden oluyor:** Olay akışında (Redpanda/Kafka) bir partition'ı aynı anda yalnızca bir tüketici okur; partition sayısı
+paralelliğin tavanıdır. 14'te `clicks` topic'i 3 partition ve otomatik ölçekleyicinin (KEDA) üst sınırı da 3.
+**Bu deney:** Partition sayısını ve KEDA tavanını okur, tüketiciyi 3 kopyaya sabitler, 60 sn yük verir ve kaç kopyanın
+gerçekten olay işlediğini sayar; sonunda sabitlemeyi kaldırır.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P14-03` (partition sayısını ve KEDA tavanını okur, tüketiciyi KEDA'nın
 `paused-replicas` anotasyonuyla 3 replikaya sabitler — `hot-key` yükünde lag KEDA eşiğinin altında kalır ve KEDA tek
@@ -328,17 +341,18 @@ bekleme süresi (`cooldownPeriod: 60`) dolunca pod sayısı düşebilir.
 - "Tüketici gecikmesi (bölüme göre)" → üç ayrı çizgi (partition 0, 1, 2); tüketiciler yetiştikçe sıfıra yakın. Biri birikiyorsa o partition'ın tüketicisi darboğazdır.
 - Explore'da: `sum by (pod) (rate(consumer_records_total{namespace="lvl14",result="ok"}[1m]))` → üç çizgi, üçü de sıfırın üstünde (tek partition'da yalnızca biri çizgi verirdi); biri belirgin yüksek — partition başına sıranın bedeli.
 
-**Nerede çözülüyor:** bu seviyede (3 partition). Yeni sınır: sıra yalnızca partition içinde garantili, global sıra
-yok; partition sayısı azaltılamaz ve artırıldığı an mevcut anahtarlar taşınır. Partition artırmak planlanan bir
-değişikliktir.
+**Nasıl çözülüyor:** Bu seviyede 3 partition ile: üç tüketici kopyası işi bölüşür. Yeni sınır: sıra yalnızca partition içinde garantili, genel sıra yok; partition sayısı azaltılamaz ve artırıldığında mevcut anahtarlar başka partition'a taşınır — partition artırmak planlanan bir değişikliktir.
 
 ---
 
 ### P14-04 · Kapasite modeli
 
-**Ne deniyoruz:** Günde 100 milyon redirect için kaç pod ve ne kadar DB okuması gerekir — tahminle değil, bu kümede ölçülen sayıyla?
-**Neden:** Model yalnızca ölçülen bir "pod başına istek/sn" üzerine kurulabilir; tek pod kademeli yükle doyurulur ve
-tavanı okunur.
+**Ne oluyor:** "Günde 100 milyon yönlendirme için kaç pod ve ne kadar veritabanı okuması gerekir?" sorusu tahminle
+cevaplanırsa kapasite ya boşa harcanır ya da ilk yoğunlukta yetmez.
+**Neden oluyor:** Model ancak ölçülmüş bir "pod başına istek/sn" sayısı üzerine kurulabilir. Bunun için tek pod kademeli
+artan yükle doyurulur ve kaldırabildiği en yüksek hız okunur.
+**Bu deney:** redirect'i tek pod'a indirir, 50 → 100 → 200 → 400 istek/sn basamaklı yük verir; tek pod'un tepe hızını,
+gecikmesini, CPU'sunu, önbellek isabetini ve veritabanı okumasını okur, modeli bu sayıyla kurar ve pod sayısını geri alır.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P14-04` (redirect'i tek pod'a indirir, `stairs` yükü verir —
 varsayılan `RATES=50,100,200,400`, basamak başına ~40 sn —, tepe kabul edilen rps'i, p99'u, CPU'yu, önbellek
@@ -402,18 +416,20 @@ ve `DB okuma (hit …%) = …/s · SOĞUK anda = 3472/s`: önbellek soğukken DB
 - "CPU kullanımı (bir çekirdeğin %'si)" → tek redirect pod'unun çizgisi basamaklarla tırmanır: yük gerçekten koştu.
 - "İsabet oranı (toplam)" → yüksek; modelin "DB okuma = tepe × (1 − hit)" satırı buradan gelir. Soğuk anda oran 0'dır ve DB tepe trafiğin tamamını görür (P03-02).
 
-**Nerede çözülüyor:** model [`docs-capacity.md`](docs-capacity.md)'de. En kritik satırı: önbellek soğukken DB tepe
-trafiğin tamamını görür — kapasite ortalamaya göre planlanırsa ilk dağıtım sistemi devirir. Belgedeki darboğaz
-sıralamasının sonuncusu (tek primary'ye yazma) aşılmadı; sharding ister.
+**Nasıl çözülüyor:** Model [`docs-capacity.md`](docs-capacity.md)'de. En kritik satırı: önbellek soğukken (ör. yeni dağıtımdan hemen sonra) veritabanı tepe trafiğin tamamını görür — kapasite ortalamaya göre planlanırsa ilk dağıtım sistemi devirir. Belgedeki son darboğaz (bütün yazmaların tek primary'ye gitmesi) aşılmadı; aşmak için veriyi bölmek (sharding) gerekir — yolun devamı §9'da.
 
 ---
 
 ### P14-05 · GAME DAY
 
-**Ne deniyoruz:** Redis gecikmesi, DB paket kaybı ve pod ölümü tek bir yük altında üst üste gelince sistem kısmen mi,
-tamamen mi bozulur?
-**Neden:** Korumalar (breaker, retry, yük atma, önbellek) tek tek sınandı ama birlikte hiç; birlikte davranışları ayrı
-bir sorudur ve yalnızca denenerek öğrenilir. Beklenen: kısmi bozulma, tam çöküş değil.
+**Ne oluyor:** Gerçek arızalar tek tek gelmez: Redis yavaşlar, veritabanı paket kaybeder ve bir pod ölür — hepsi
+aynı anda, yük altında. Soru şu: sistem kısmen mi bozulur, tamamen mi çöker?
+**Neden oluyor:** Korumalar (devre kesici, bütçeli yeniden deneme, yük atma, önbellek) önceki seviyelerde tek tek
+sınandı ama birlikte hiç; birlikte nasıl davrandıkları ayrı bir sorudur ve yalnızca denenerek öğrenilir. Beklenen:
+kısmi bozulma, tam çöküş değil.
+**Bu deney:** 30 sn taban ölçümünden sonra saniyede 300 istek verir ve bu sırada üç arızayı üst üste bindirir (Redis
++200 ms, Postgres %30 paket kaybı, bir pod'u zorla silmek); erişilebilirliği, hangi korumanın devreye girdiğini ve
+kalan hata bütçesini raporlar, sonra toparlanmayı bekler.
 
 **Reproduce (adım adım):** Otomatik: `CONFIRM=1 make repro P=P14-05` (30 sn taban ölçümünden sonra sabit 300 istek/sn
 yük altında üç arızayı üst üste bindirir; erişilebilirliği, breaker'ı, yük atmayı, retry'ı ve kalan hata bütçesini
@@ -508,8 +524,7 @@ değil — game day'i küme sakinken tekrarla.
 - "İstek / saniye (durum koduna göre)" (App RED) ile "Dönen durum kodları" (k6) → uygulamanın saydığı 5xx ile istemcinin gördüğü 5xx arasındaki fark, araya giren katmanın (ingress) cevabıdır.
 - Explore'da: `slo:period_error_budget_remaining:ratio{namespace="lvl14",sloth_slo="redirect-availability"}` → game day'in 5xx'leri kalan bütçeyi aşağı çeker (`12 · SLO` → "Kalan hata bütçesi" aynı seri); Prometheus 48 saat tuttuğu için değer önceki deneylerin izini de taşır, eksi olabilir.
 
-**Nerede çözülüyor:** bu bir test değil, provadır: amaç geçmek değil, hangi korumanın ne zaman devreye girdiğini
-görmek ve runbook'u buna göre yazmak.
+**Nasıl çözülüyor:** Bu bir test değil provadır (game day): amaç geçmek değil, hangi korumanın ne zaman devreye girdiğini görmek ve arıza anında ne yapılacağını (runbook) buna göre yazmak. Kalan tek noktalar — tek Redis, tek broker, tek bölge — yolun devamı §9'da.
 
 ## 7. Seviye içi alıştırmalar (TRAP_ bayrakları)
 

@@ -44,15 +44,15 @@ metrik uçları bu zincirin **dışında**, yük altında probe düşmesin diye 
 
 | ID | Sorun | Nasıl çözüldü |
 |---|---|---|
-| P00-01 | Eşzamanlı map yazımı → çökme | `sync.RWMutex` ile korunan depo |
-| P00-04 | Rollout'ta hata dalgası | Probe'lar, `maxUnavailable: 0`, `preStop`, kapanma sırası: önce readiness düşer, sonra `Shutdown` |
-| P00-05 | 4 karakter kod, sessiz üzerine yazma | `crypto/rand`, 7 karakter, koşullu ekleme + çakışmada yeniden dene |
-| P00-06 | Doğrulama yok | Yalnızca `http`/`https`, özel adres reddi, 8 KB gövde sınırı |
-| P00-07 | Sunucu timeout'u yok | Sunucu timeout'ları + istek başına 5 sn |
-| P00-09 | Gözlemlenebilirlik sıfır | `/metrics`, JSON log + request-id, ServiceMonitor |
-| P00-10 | 301 + önbellek kontrolü yok | `302` + `Cache-Control: no-store` |
+| P00-01 | Aynı anda gelen yazmalar uygulamayı çökertir | Link tablosuna yazmadan önce kilit alınır, yazmalar sıraya girer (`sync.RWMutex`) |
+| P00-04 | Yeni sürüm dağıtılırken istekler hata alır | Pod hazır olunca sinyal verir (readiness/liveness probe); yenisi hazır olmadan eskisi kapatılmaz (`maxUnavailable: 0`); eski pod önce trafikten çıkar, bekler (`preStop`), elindeki istekleri bitirip kapanır (`Shutdown`) |
+| P00-05 | İki kullanıcı aynı kısa kodu alıp birbirinin linkini ezebilir | Kod 7 karakter ve tahmin edilemez rastgelelikle üretilir (`crypto/rand`); kod zaten varsa yenisi denenir |
+| P00-06 | Zararlı URL'ler (`javascript:`, iç ağ adresi) ve dev istekler kabul edilir | Yalnızca `http`/`https` kabul edilir, iç ağ adresleri reddedilir, istek gövdesi 8 KB ile sınırlı |
+| P00-07 | İsteğini bitirmeyen istemciler bağlantıyı sonsuza kadar tutar | Sunucuya zaman aşımları eklenir (başlık 3 sn, okuma 10 sn, boşta bağlantı 60 sn) ve her istek en fazla 5 sn sürebilir |
+| P00-09 | Uygulamanın ne yaptığını gösteren hiçbir sayı yok | Uygulama metrik yayınlar (`/metrics`), her isteği istek kimliğiyle bir JSON log satırı olarak yazar; Prometheus bunları toplar (ServiceMonitor) |
+| P00-10 | Silinen link tarayıcıda çalışmaya devam eder | Yönlendirme geçici (`302`) ve "saklama" başlığıyla (`Cache-Control: no-store`) döner |
 
-Açık kalanlar: P00-02, P00-03, P00-08 → burada P01-01, P01-02, P01-04 olarak ölçülebilir; çözümü 02/03.
+Açık kalanlar: linklerin yeniden başlamada kaybolması (P00-02), uygulamanın büyütülememesi (P00-03) ve sınırsız bellek (P00-08) burada da var — ama artık ölçülebiliyorlar (P01-01, P01-02, P01-04); çözümleri 02 ve 03'te.
 
 ## 4. Ayağa kaldırma
 
@@ -119,28 +119,34 @@ hedef `400 unsafe_url:<sebep>`, büyük gövde `413`, limit aşımı `429 + Retr
 
 ## 6. Reproduce edilebilir sorunlar
 
-Her sorun aynı düzende: **Ne deniyoruz** (deneyin sorusu) → **Neden** → adımlar (her adım ne yaptığını söyler)
-→ **Terminalde ne görmelisin** → **Grafana'da gör** (giriş: admin / ladder) → **Nerede çözülüyor**.
-`make repro` hükmü: `REPRODUCED` = sorun var · `NOT-REPRODUCED` = yok · `SKIPPED` = ölçülemedi.
+Bu seviyede yaşayacağın 8 sorun. Her birini iki yoldan görebilirsin: **Otomatik** — `make repro P=<ID>` deneyi
+kendisi yapar, ölçer ve hükmünü basar (`REPRODUCED` = sorun var · `NOT-REPRODUCED` = yok · `SKIPPED` =
+ölçülemedi); **Elle** — adımları sırayla yapıştırıp sonucu kendi gözünle görürsün. Her sorunun bölümü aynı
+düzende: **Ne oluyor** → **Neden oluyor** → **Bu deney** → adımlar → **Terminalde ne görmelisin** →
+**Grafana'da gör** (giriş: admin / ladder) → **Nasıl çözülüyor**.
 
-| ID | Sorun | Reproduce | Grafana'da | Çözüm |
-|---|---|---|---|---|
-| P01-01 | Restart = tüm linkler gider (artık görünür) | `CONFIRM=1 make repro P=P01-01` | [03 · App Business](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl01&from=now-15m&to=now&refresh=10s) → "Kayıtlı link sayısı (pod'a göre)" | 02 |
-| P01-02 | Ölçeklenemez (artık pod bazında görünür) | `CONFIRM=1 make repro P=P01-02` | [03 · App Business](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl01&from=now-15m&to=now&refresh=10s) · [01 · Pods & Resources](http://grafana.localtest.me/d/ladder-pods?var-level=lvl01&from=now-15m&to=now&refresh=10s) → "404 (pod'a göre)" | 02 |
-| P01-03 | Tek replika + PDB = güvenlik yanılsaması | `CONFIRM=1 make repro P=P01-03` | [01 · Pods & Resources](http://grafana.localtest.me/d/ladder-pods?var-level=lvl01&from=now-15m&to=now&refresh=10s) · [15 · k6](http://grafana.localtest.me/d/ladder-k6?var-level=lvl01&from=now-15m&to=now&refresh=10s) → "Hazır pod adresi (endpoint) sayısı" | 02 |
-| P01-04 | Bellek sınırsız (artık önceden görülür) | `make repro P=P01-04` | [01 · Pods & Resources](http://grafana.localtest.me/d/ladder-pods?var-level=lvl01&from=now-15m&to=now&refresh=10s) · [03 · App Business](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl01&from=now-15m&to=now&refresh=10s) → "Heap bellek (Go)" | 02 · 03 |
-| P01-05 | Süreç içi limit N replikada N katı | `CONFIRM=1 make repro P=P01-05` | [10 · Rate limit](http://grafana.localtest.me/d/ladder-ratelimit?var-level=lvl01&from=now-15m&to=now&refresh=10s) → "İzin verilen (pod'a göre)" | 08 |
-| P01-06 | **TRAP** kısa kod label → kardinalite patlaması | `make repro P=P01-06` | [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl01&from=now-15m&to=now&refresh=10s) → "İstek / saniye (uç noktaya göre)" | seviye içi |
-| P01-07 | **TRAP** sağlık ucu zincirin arkasında → restart fırtınası | `make repro P=P01-07` | [01 · Pods & Resources](http://grafana.localtest.me/d/ladder-pods?var-level=lvl01&from=now-15m&to=now&refresh=10s) · [10 · Rate limit](http://grafana.localtest.me/d/ladder-ratelimit?var-level=lvl01&from=now-15m&to=now&refresh=10s) → "Hazır pod adresi (endpoint) sayısı" | seviye içi |
-| P01-08 | Tıklama sayacı istek yolunda ve bellekte | `CONFIRM=1 make repro P=P01-08` | [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl01&from=now-15m&to=now&refresh=10s) · [03 · App Business](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl01&from=now-15m&to=now&refresh=10s) → "p99 süre (uç noktaya göre)" | 05 · 06 |
+| ID | Ne olur? | Neden olur? | Nasıl çözülür? |
+|---|---|---|---|
+| P01-01 | Uygulama yeniden başlayınca bütün linkler yine kaybolur — ama kayıp artık bir grafikte görünür | Kilit çökmeyi durdurdu ama linkler hâlâ yalnızca programın belleğinde | **02:** linkler veritabanında tutulur |
+| P01-02 | 3 kopyaya çıkınca aynı link yine bazen 404 verir — artık hangi kopyanın 404 verdiği görünür | Her kopyanın kendi belleği var; istek linki bilmeyen kopyaya düşerse link bulunamaz | **02:** bütün kopyalar aynı veritabanını okur |
+| P01-03 | Tek kopyalı servisi korumak için konan kural (PDB) düğüm bakımını kilitler; bakım zorlanırsa servis kesilir | PDB "en az 1 kopya ayakta kalsın" der; tek kopya varken hiçbir kapatmaya izin verilmez. PDB yedek kopya üretmez | **02:** farklı makinelere yayılmış 3 kopya |
+| P01-04 | Link eklendikçe bellek yine sınırsız büyür — ama artık çarpmadan önce grafikte görünür | Bellekteki link sayısının üst sınırı yok | **02** veriyi veritabanına taşır · **03** önbellek sınırlı boyutta |
+| P01-05 | "Saniyede 50 istek" sınırı 3 kopyada saniyede 150'ye çıkar | Her kopya sınırı kendi belleğinde ayrı sayar; toplamı kimse bilmez | **08:** sınır sayacı bütün kopyaların ortak kullandığı Redis'te |
+| P01-06 | **Tuzak:** kısa kod metriğe etiket olarak eklenince Prometheus'taki seri sayısı link sayısıyla birlikte patlar | Prometheus her farklı etiket değerini ayrı bir zaman serisi olarak saklar | **Bu seviyenin ayarı:** tuzağı kapat; tekil kimlikler loga ve trace'e gider (11) |
+| P01-07 | **Tuzak:** yük artınca sağlıklı pod trafikten çıkarılır, sonunda yeniden başlatılır | Sağlık kontrolleri de hız sınırına takılıp "429" alır; Kubernetes pod'u hasta sanır | **Bu seviyenin ayarı:** tuzağı kapat; sağlık kontrolleri hız sınırının dışında |
+| P01-08 | Her tıklama yönlendirmeyi bir kilitte bekletir; uygulama yeniden başlayınca tıklama sayıları sıfırlanır | Tıklama sayacı yönlendirme isteğinin içinde ve programın belleğinde | **05:** tıklamalar kuyruğa alınıp toplu yazılır · **06:** dayanıklı olay akışı |
 
 ---
 
 ### P01-01 · Restart = tüm linkler gider — ama artık görünür
 
-**Ne deniyoruz:** Pod yenilenince kaybolan linkleri artık bir grafikte görebiliyor muyuz?
-**Neden:** Kilit çökmeyi durdurdu ama kalıcılık getirmedi: tek veri kaynağı hâlâ süreç belleği. Fark, `links_total`
-metriğinin kaybı gösterebilmesi.
+**Ne oluyor:** Uygulama yeniden başlayınca (yeni sürüm, çökme, bellek dolması) bütün kısa linkler 00'daki gibi
+kaybolur ve 404 döner. Fark şu: 01'de uygulama kaç link tuttuğunu bir metrikle (`links_total`) yayınlıyor; kayıp
+artık grafikte dikey bir düşüş olarak görünür.
+**Neden oluyor:** Kilit (mutex) aynı anda yazmaların çökertmesini durdurdu ama kalıcılık getirmedi: linklerin tek
+kopyası hâlâ programın belleğinde. Program yeniden başladığında bellek boş başlar.
+**Bu deney:** Bir "kanarya" link ve 25 link daha oluşturur, pod'un kaç link bildiğini okur; pod'u siler ve yeni
+pod'da aynı linki ve sayacı tekrar okur.
 
 **Reproduce (adım adım):** Otomatik: `CONFIRM=1 make repro P=P01-01` (25 link oluşturur, pod'u siler, sayacı ve
 kanarya kodu yeniden okur). Elle:
@@ -171,14 +177,19 @@ curl -s http://lvl01.localtest.me/metrics | grep '^links_total'
 - "Kayıtlı link sayısı" → restarttan sonra `0`.
 - "Yönlendirme sonuçları" → restarttan sonra `not_found` serisinde küçük bir tümsek (kanarya kodu bulunamadı).
 
-**Nerede çözülüyor:** 02 (Postgres). 01'in kazancı kaybı ölçebilmek.
+**Nasıl çözülüyor:** 02'de linkler Postgres veritabanında tutulur; pod'lar gelip gider, veri kalır. 01'in kazancı kaybı ölçebilmek: sayaç sıfıra düştüğünde alarm yazılabilir.
 
 ---
 
 ### P01-02 · Ölçeklenemez — ama artık pod bazında görünür
 
-**Ne deniyoruz:** 3 replikada 404'leri hangi pod'ların verdiğini görebiliyor muyuz?
-**Neden:** Her pod'un kendi belleği var ve Service istekleri pod'lara dağıtır; link yalnızca onu oluşturan pod'da.
+**Ne oluyor:** Uygulama 3 kopyaya (replika) çıkınca aynı kısa link isteklerin yaklaşık üçte ikisinde 404 verir;
+uygulama hâlâ büyütülemez. 01'de her kopya kendi 404 sayısını yayınladığı için artık hangi kopyaların linki
+bilmediği grafikte görünür.
+**Neden oluyor:** Her kopyanın kendi belleği, dolayısıyla kendi link tablosu var. Link yalnızca onu oluşturan
+kopyada; istekler kopyalara dağıtıldığı için çoğu, linki bilmeyen bir kopyaya düşer.
+**Bu deney:** Tek kopya varken bir link oluşturur, 3 kopyaya çıkar, aynı linki 30 kez ister ve 404'leri sayar;
+sonunda tek kopyaya döner.
 
 **Reproduce (adım adım):** Otomatik: `CONFIRM=1 make repro P=P01-02` (3 replikaya çıkar, 60 kez okur, hangi pod'un
 kaç 404 saydığını basar, geri alır). Elle:
@@ -210,16 +221,20 @@ kubectl -n lvl01 scale deploy/linkly --replicas=1
 - "Yönlendirme sonuçları" → `ok` ile `not_found` yan yana; `not_found` kabaca iki katı.
 - "Hazır pod adresi (endpoint) sayısı" → 1'den **3**'e çıkar, geri alınca 1'e döner: 404'ler pod sayısı arttığı an başlar.
 
-**Nerede çözülüyor:** 02.
+**Nasıl çözülüyor:** 02'de bütün kopyalar aynı veritabanını okur; kopya sayısı artık doğruluğu etkilemez.
 
 ---
 
 ### P01-03 · Tek replika + PDB = güvenlik yanılsaması
 
-**Ne deniyoruz:** Tek replikalı bir servisi PodDisruptionBudget (PDB) düğüm bakımında koruyor mu?
-**Neden:** PDB, gönüllü kapatmalarda "en az 1 pod ayakta kalsın" der. Tek replikada kapatılabilecek pod yok
-(`ALLOWED DISRUPTIONS 0`): normal tahliye hep reddedilir, bakım kilitlenir; zorlarsan servis kesilir. PDB yedeklilik
-üretmez, yalnızca var olanı korur.
+**Ne oluyor:** Servisi korumak için bir PodDisruptionBudget (PDB — "bakım sırasında en az şu kadar kopya ayakta
+kalsın" kuralı) tanımlı; ama tek kopya olduğu için iki kötü sonuçtan biri kaçınılmaz: düğüm bakımı (`kubectl drain`)
+hiç ilerlemez ve zaman aşımına düşer, ya da bakımı zorlarsan servis kesilir.
+**Neden oluyor:** PDB "en az 1 kopya ayakta kalsın" der. Tek kopya kapatılırsa kural bozulacağı için hiçbir
+kapatmaya izin verilmez (`ALLOWED DISRUPTIONS 0`). PDB yedek kopya üretmez, yalnızca var olan yedekliliği korur;
+yedek yoksa koruyacak bir şey de yoktur.
+**Bu deney:** Önce kibar yolu dener (`kubectl drain`'in gönderdiği tahliye isteği) ve reddedildiğini gösterir; sonra
+yük altında pod'u zorla silip kesintiyi ölçer.
 
 **Reproduce (adım adım):** Otomatik: `CONFIRM=1 make repro P=P01-03` (yük altında iki ucu gösterir: normal
 `kubectl drain` reddedilip timeout'a düşer; zorla silme 5xx üretir; sonunda düğümü `uncordon` eder). Elle (yalnızca
@@ -262,14 +277,19 @@ yeni pod'un boş belleği (P01-01), `429`'lar hızlı dönen 404'lerin pod'un IP
 - "Dönen durum kodları" → boşluk anında `503` (ingress: gönderilecek pod yok); ardından `302`'nin yerini `404` alır.
 - "İstek / saniye (durum koduna göre)" → `503` görmezsin: kesintiyi uygulama değil ingress yaşadı; iki panel arasındaki fark aradaki katmandır.
 
-**Nerede çözülüyor:** 02 (3 replika + farklı düğümlere yayma); PDB orada anlam kazanır.
+**Nasıl çözülüyor:** 02'de uygulama 3 kopya çalışır ve kopyalar farklı düğümlere yayılır; bir kopya bakıma alınırken diğerleri trafiği taşır. PDB orada gerçekten işe yarar.
 
 ---
 
 ### P01-04 · Bellek hâlâ sınırsız — ama artık önceden görülür
 
-**Ne deniyoruz:** Belleğin sınıra tırmandığını OOM'dan önce görebiliyor muyuz?
-**Neden:** Depoda üst sınır, süre (TTL) ya da atma yok; fark, heap metriğinin artık görünmesi.
+**Ne oluyor:** Link eklendikçe uygulamanın belleği sınırsız büyür ve sonunda bellek sınırına çarpıp öldürülür
+(OOMKilled) — 00'daki gibi. Fark şu: 01 bellek kullanımını (Go heap) ve link sayısını yayınlıyor; büyüme artık
+çarpmadan önce grafikte görünür ve bunun için bir alarm yazılabilir.
+**Neden oluyor:** Bellekte tutulan linklerin üst sınırı, süresi (TTL) ya da eskileri atma kuralı yok; her yeni link
+belleğe eklenir ve orada kalır.
+**Bu deney:** Tek kullanıcıyla 90 sn boyunca büyük (2 KB) linkler üretir, öncesinde ve sonrasında link sayısını ve
+bellek kullanımını okur; istersen 4 dk boyunca sınıra kadar götürür.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P01-04` (90 sn link üretir; tepe heap, tepe `links_total` ve tepe
 bellek okur; uzun sürüm `DURATION=240s URL_SIZE=8000 make repro P=P01-04` OOMKilled üretir). Elle:
@@ -303,15 +323,19 @@ ve heap `1.51e+08` (~150 MB); `top pod` ~143Mi — 256Mi sınırın yarısından
 - "Bellek: sınırın yüzde kaçı" → aynı büyüme 256 MiB sınırın yüzdesi olarak %100'e gider; uzun sürümde "Son sonlanma nedeni" panelinde `OOMKilled` belirir.
 - "Kayıtlı link sayısı (pod'a göre)" → heap ile aynı biçimde tırmanır: bellek = link sayısı × link boyutu.
 
-**Nerede çözülüyor:** 02 (veri DB'de) · 03 (sınırlı önbellek). 01'in kazancı: çarpmadan önce alarm yazabilmek.
+**Nasıl çözülüyor:** 02 veriyi veritabanına taşır, uygulamanın belleği link sayısıyla büyümez; 03'teki önbellek sabit bir üst sınırla tutulur. 01'in kazancı: çarpmadan önce görüp alarm yazabilmek.
 
 ---
 
 ### P01-05 · Süreç içi hız sınırı N replikada N katına çıkar
 
-**Ne deniyoruz:** "Saniyede 50" sınırı 3 pod'da hâlâ 50 mi?
-**Neden:** Sınır sayacı (token bucket) her pod'un kendi belleğinde; her pod ayrı sayar, toplam sınır replika sayısıyla
-çarpılır.
+**Ne oluyor:** Uygulamada "saniyede 50 istek" gibi bir hız sınırı var; ama uygulama 3 kopyaya çıkınca aynı istemci
+saniyede 150 istek geçirebilir. Sınır kopya sayısıyla çarpılır; dağılım eşit değilse aynı istemci bazı kopyalarda
+reddedilir, bazılarında geçer.
+**Neden oluyor:** Sınır sayacı (token bucket — "her saniye yeniden dolan jeton kovası") her kopyanın kendi
+belleğinde. Her kopya yalnızca kendisine gelen istekleri sayar; toplamı bilen yok.
+**Bu deney:** Sınırı kopya başına saniyede 50 yapar, aynı yükü önce 1 sonra 3 kopyaya verir ve kabul edilen istek
+sayılarını karşılaştırır; sonunda ayarları geri alır.
 
 **Reproduce (adım adım):** Otomatik: `CONFIRM=1 make repro P=P01-05` (sınırı pod başına 50/s yapar, aynı yükü önce 1
 sonra 3 pod'a verir, kabul edilen istekleri karşılaştırır, geri alır). Elle:
@@ -352,15 +376,19 @@ make reset
 - "İzin verilen (pod'a göre)" → ilk fazda tek çizgi (~50/s), ikinci fazda **üç ayrı** çizgi, her biri ~50/s: üç ayrı sayaç, toplam 3 katı.
 - "Kararlar (anahtar türüne göre)" → `ip allow` ikinci fazda ~3 katına çıkar; yük aynı, değişen yalnızca pod sayısı.
 
-**Nerede çözülüyor:** 08 (Redis'te paylaşılan sınır).
+**Nasıl çözülüyor:** 08'de sınır sayacı bütün kopyaların ortak kullandığı Redis'te tutulur; kopya sayısı ne olursa olsun sınır tek bir yerde sayılır.
 
 ---
 
 ### P01-06 · TRAP · Kısa kodu metrik label'ı yapmak
 
-**Ne deniyoruz:** Metriğe kısa kodu etiket (label) olarak eklemek Prometheus'a ne yapar?
-**Neden:** Her farklı etiket değeri yeni bir zaman serisi demek; sınırsız değerli alanlar (kısa kod, URL, IP,
-kullanıcı) etiket olursa seri sayısı link sayısıyla büyür (kardinalite patlaması).
+**Ne oluyor:** Metriğe kısa kodu etiket (label) olarak eklemek zararsız bir ayrıntı gibi görünür. Ama her yeni link
+Prometheus'ta yeni bir veri serisi açar; seri sayısı link sayısıyla birlikte büyür, Prometheus'un belleği dolar ve
+sorgular yavaşlar (kardinalite patlaması).
+**Neden oluyor:** Prometheus her farklı etiket değerini ayrı bir zaman serisi olarak saklar. Sınırsız sayıda değer
+alabilen alanlar (kısa kod, URL, IP, kullanıcı kimliği) etiket olursa seri sayısının da sınırı kalmaz.
+**Bu deney:** Bu seviyenin tuzak ayarını (`TRAP_METRIC_LABEL_CODE`) açar, 200 link oluşturup her birini bir kez açar ve
+uygulamanın kaç ayrı seri ürettiğini sayar; sonra tuzağı kapatıp tekrar sayar.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P01-06` (`TRAP_METRIC_LABEL_CODE=true` açar, 400 kodu ziyaret eder,
 `short_code` seri sayısını ve Prometheus'un toplam seri farkını basar, tuzağı kapatır). Elle:
@@ -393,16 +421,21 @@ Kapanınca `0`, ama Prometheus eski serileri bir süre daha bellekte taşır.
 - Explore'da: `count(count by (short_code) (http_requests_total{namespace="lvl01"}))` → tuzak açıkken ziyaret edilen kod sayısı kadar (yüzlerce).
 - Explore'da: `prometheus_tsdb_head_series` → yüzlerce serilik bir basamak yapar ve tuzak kapansa da hemen inmez.
 
-**Nerede çözülüyor:** seviye içi tuzak — bayrağı kapat; tekil kimlikler metriğe değil log'a ve trace'e gider (11).
+**Nasıl çözülüyor:** Bu seviyenin kendi tuzağı: bayrak açıkken sorun var, kapalıyken yok. Kural: tekil kimlikler (kod, kullanıcı) metriğe değil loga ve trace'e yazılır (11).
 
 ---
 
 ### P01-07 · TRAP · Sağlık uçlarını iş zincirinin arkasına koymak
 
-**Ne deniyoruz:** Sağlık kontrolleri (probe) hız sınırının arkasına girerse yük altında ne olur?
-**Neden:** Probe'lar da sınıra takılıp `429` alır; Kubernetes sağlıklı pod'u trafikten çıkarır (readiness), yeterince
-sürerse yeniden başlatır (liveness). Tuzakta sınır tek bir ortak kova olduğu için istemcinin yükü probe'un payını da
-tüketir.
+**Ne oluyor:** Trafik arttığında uygulama aslında sağlıklıyken Kubernetes onu trafikten çıkarır, yeterince uzun
+sürerse yeniden başlatır. Yük artışı kendi kendine bir kesintiye dönüşür; birden çok kopya varsa yük kalanlara biner
+ve onlar da düşer.
+**Neden oluyor:** Kubernetes pod'un sağlığını düzenli aralıklarla `/readyz` ve `/healthz` adreslerine sorarak anlar
+(probe). Tuzakta bu adresler de hız sınırının arkasında: yük altında sınır dolunca sağlık sorusu da "429 — çok fazla
+istek" cevabı alır ve Kubernetes pod'u hasta sanır. Sınır tek bir ortak kova olduğu için istemcinin yükü sağlık
+kontrolünün payını da tüketir.
+**Bu deney:** Tuzağı (`TRAP_LIVENESS_STRICT`) açıp hız sınırını düşürür, 150 sn boyunca sınırın çok üstünde yük
+verir ve Kubernetes'in "sağlıksız" olaylarını ve yeniden başlatmaları sayar.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P01-07` (`TRAP_LIVENESS_STRICT=true` + 30/s sınır, 150 sn yük;
 `Unhealthy` olaylarını ve restart'ları sayar, tuzağı kapatır). Elle:
@@ -443,15 +476,19 @@ olayları ilgisiz.)
 - "Reddedilen / sn" → yük boyunca yüksek: sınırın üstü reddediliyor.
 - "Dönen durum kodları" → `429` baskın; pod trafikten düştüğü anlarda `503`.
 
-**Nerede çözülüyor:** seviye içi tuzak — varsayılanda sağlık uçları zincirin dışında; bağımlılık kontrolü liveness'a
-girmez (aynı tuzağın büyüğü: P10-02).
+**Nasıl çözülüyor:** Bu seviyenin kendi tuzağı: varsayılan kurulumda sağlık adresleri hız sınırının ve diğer ara katmanların dışında, liveness de dış bağımlılıklara bakmaz. Aynı tuzağın büyüğü 10'da (P10-02).
 
 ---
 
 ### P01-08 · Tıklama sayacı hâlâ istek yolunda ve bellekte
 
-**Ne deniyoruz:** Tıklama sayacı yönlendirmeyi yavaşlatıyor mu ve restart'tan sağ çıkıyor mu?
-**Neden:** Her yönlendirme cevap dönmeden önce ortak bir sayacı kilit altında artırır; sayaç süreç belleğinde.
+**Ne oluyor:** Her yönlendirme, cevabı dönmeden önce ortak bir tıklama sayacını kilit altında artırır; popüler bir
+linkte bütün yönlendirmeler aynı kilidi bekler. Sayaç bellekte olduğu için uygulama yeniden başlayınca bütün
+tıklamalar da sıfırlanır.
+**Neden oluyor:** Tıklama sayımı (analitik) okuma yolunun içinde ve programın belleğinde. Bu ölçekte ucuz (kilit +
+bellek), ama sayaç veritabanına taşındığında her tıklama bir veritabanı yazması ve satır kilidi olur.
+**Bu deney:** Bir linki 300 kez açıp sayacı okur, aynı linke 50 kullanıcıyla 30 sn yük verip gecikmeye bakar, sonra
+pod'u yenileyip sayacın ve linkin gittiğini gösterir.
 
 **Reproduce (adım adım):** Otomatik: `CONFIRM=1 make repro P=P01-08` (300 tıklama yapar, sayacı okur, sıcak linkte
 p99'u ölçer, pod'u yenileyip sayacın gittiğini gösterir). Elle:
@@ -485,8 +522,7 @@ dönüşünce görünür). Restart sonrası `404`: link de 300 tıklama da gitti
 - "Başarılı yönlendirme / sn" → tıklamalar burada görünür: Prometheus onları hatırlıyor, uygulamanın kendi sayacı restartta yok oluyor.
 - "Kayıtlı link sayısı (pod'a göre)" → restartta eski pod'un çizgisi biter, yenisi 0'dan başlar.
 
-**Nerede çözülüyor:** 05 (kuyruk + toplu yazıcı ile istek yolundan çıkar) · 06 (olay akışıyla dayanıklı). 02'de bu
-kilit bir DB satır kilidine dönüşür (P02-08).
+**Nasıl çözülüyor:** 05'te tıklamalar istek yolundan çıkar: sınırlı bir kuyruğa atılır ve arka planda toplu yazılır. 06'da bir olay akışına (Redpanda) yazılarak kalıcı olur. 02'de bu kilit bir veritabanı satır kilidine dönüşür (P02-08).
 
 ## 7. Seviye içi alıştırmalar (TRAP_ bayrakları)
 

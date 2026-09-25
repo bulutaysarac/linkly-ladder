@@ -45,9 +45,10 @@ Dışarıdan hiçbir şey değişmedi: aynı host, aynı URL'ler, aynı API. Ser
 
 | ID | Sorun | Nasıl çözüldü |
 |---|---|---|
-| P06-02 | Tüketici gecikmesi (lag) elle yönetiliyordu | KEDA `ScaledObject`: tüketici lag'e göre 1→6 ölçeklenir (CPU değil: bekleyen bir tüketici boşta görünür) |
+| P06-02 | Kuyrukta bekleyen tıklama olayları biriktiğinde (tüketici gecikmesi, lag) tüketici sayısını elle artırmak gerekiyordu | Tüketici, kuyrukta bekleyen mesaj sayısına göre kendiliğinden 1'den 6 kopyaya çıkar (KEDA `ScaledObject`). CPU'ya bakılmaz: mesaj bekleyen bir tüketici boşta görünür |
 
-P05-03'ü (yazıcının okumayla aynı süreci paylaşması) 06 çözmüştü; 07 okuma ve yazma yollarını da ayırır.
+P05-03'ü (tıklama yazıcısının yönlendirmeyle aynı programı paylaşması) 06 çözdü; 07 ayrıca okuma (yönlendirme) ve
+yazma (link oluşturma) yollarını ayrı servislere böler.
 
 ## 4. Ayağa kaldırma
 
@@ -121,28 +122,35 @@ api-svc, geri kalan → redirect-svc).
 
 ## 6. Reproduce edilebilir sorunlar
 
-Her sorun aynı düzende: **Ne deniyoruz** (deneyin sorusu) → **Neden** → adımlar (her adım ne yaptığını söyler)
-→ **Terminalde ne görmelisin** → **Grafana'da gör** (giriş: admin / ladder) → **Nerede çözülüyor**.
-`make repro` hükmü: `REPRODUCED` = sorun var · `NOT-REPRODUCED` = yok · `SKIPPED` = ölçülemedi.
+Bu seviyede yaşayacağın 8 sorun. Her birini iki yoldan görebilirsin: **Otomatik** — `make repro P=<ID>` deneyi
+kendisi yapar, ölçer ve hükmünü basar (`REPRODUCED` = sorun var · `NOT-REPRODUCED` = yok · `SKIPPED` =
+ölçülemedi); **Elle** — adımları sırayla yapıştırıp sonucu kendi gözünle görürsün. Her sorunun bölümü aynı
+düzende: **Ne oluyor** → **Neden oluyor** → **Bu deney** → adımlar → **Terminalde ne görmelisin** →
+**Grafana'da gör** (giriş: admin / ladder) → **Nasıl çözülüyor**.
 
-| ID | Sorun | Reproduce | Grafana'da | Çözüm |
-|---|---|---|---|---|
-| P07-01 | HPA gecikir: burst'te pod yok | `make repro P=P07-01` | [09 · Autoscaling](http://grafana.localtest.me/d/ladder-autoscaling?var-level=lvl07&from=now-15m&to=now&refresh=10s) · [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl07&from=now-15m&to=now&refresh=10s) → "İstek / sn ve pod sayısı" | seviye içi (tampon) |
-| P07-02 | Ölçekleme darboğazı DB'ye taşır | `make repro P=P07-02` | [05 · Postgres](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl07&from=now-15m&to=now&refresh=10s) · [09 · Autoscaling](http://grafana.localtest.me/d/ladder-autoscaling?var-level=lvl07&from=now-15m&to=now&refresh=10s) → "Otomatik ölçekleyici: istenen / mevcut pod" | 09 |
-| P07-03 | Yeni pod hazır ama soğuk | `make repro P=P07-03` | [09 · Autoscaling](http://grafana.localtest.me/d/ladder-autoscaling?var-level=lvl07&from=now-15m&to=now&refresh=10s) · [04 · Cache](http://grafana.localtest.me/d/ladder-cache?var-level=lvl07&from=now-15m&to=now&refresh=10s) → "p99 süre (pod'a göre; yeni pod soğuk)" | seviye içi |
-| P07-04 | CPU limiti = kota → throttling | `make repro P=P07-04` | [01 · Pods & Resources](http://grafana.localtest.me/d/ladder-pods?var-level=lvl07&from=now-15m&to=now&refresh=10s) · [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl07&from=now-15m&to=now&refresh=10s) → "CPU kısıtlama (throttling)" | seviye içi |
-| P07-05 | Node kapasitesi bitti → Pending | `CONFIRM=1 make repro P=P07-05` | [09 · Autoscaling](http://grafana.localtest.me/d/ladder-autoscaling?var-level=lvl07&from=now-15m&to=now&refresh=10s) → "Yer bekleyen pod" | (bulut: autoscaler) |
-| P07-06 | **TRAP** N+1: maliyet sonuç kümesiyle orantılı | `make repro P=P07-06` | [05 · Postgres](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl07&from=now-15m&to=now&refresh=10s) · [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl07&from=now-15m&to=now&refresh=10s) → "Veritabanı sorguları (türe göre)" | seviye içi · 14 |
-| P07-07 | Node donunca yedeklilik işe yaramıyor | `CONFIRM=1 make repro P=P07-07` | [09 · Autoscaling](http://grafana.localtest.me/d/ladder-autoscaling?var-level=lvl07&from=now-30m&to=now&refresh=10s) · [15 · k6](http://grafana.localtest.me/d/ladder-k6?var-level=lvl07&from=now-30m&to=now&refresh=10s) → "Düğüm başına pod" | 10 |
-| P07-08 | **TRAP** her zaman hazır diyen probe | `make repro P=P07-08` | [01 · Pods & Resources](http://grafana.localtest.me/d/ladder-pods?var-level=lvl07&from=now-15m&to=now&refresh=10s) · [15 · k6](http://grafana.localtest.me/d/ladder-k6?var-level=lvl07&from=now-15m&to=now&refresh=10s) → "Hazır pod adresi (endpoint) sayısı" | seviye içi |
+| ID | Ne olur? | Neden olur? | Nasıl çözülür? |
+|---|---|---|---|
+| P07-01 | Trafik birkaç saniyede 80 katına çıkınca istekler yavaşlar; yeni pod'lar ancak dalga geçtikten sonra gelir | Otomatik ölçekleyici (HPA) CPU'yu 15 sn'de bir ölçüp karar verir; pod'un yerleşmesi, açılması ve hazır olması da sürer — zincir dalgadan uzun | **Bu seviyede:** ölçekleme yavaş büyüyen trafik içindir; ani dalgaya karşı en az pod sayısı (`minReplicas`) yüksek tutulur |
+| P07-02 | Pod sayısı artınca uygulama rahatlar ama veritabanı bağlantıları tükenir; istekler veritabanını bekler | Her yeni pod kendi bağlantı havuzunu açar: toplam 112 bağlantı, veritabanı en fazla 100 kabul eder | **09:** bağlantı havuzlayıcı (PgBouncer) + okuma replikaları |
+| P07-03 | Yük altında yeni eklenen pod'lar eskilerden yavaş cevap verir | "Hazır" sinyali yalnızca "program açıldı" demek; bağlantılar ve önbellek henüz ısınmadı | **Bu seviyede:** açılış kontrolü (`startupProbe`), baştan açık bağlantılar, yeni pod'a trafiği yavaş açmak |
+| P07-04 | CPU grafiği boşta görünürken istekler yavaşlar | CPU limiti bir kotadır: pod her 100 ms'de payını bitirince dilimin sonuna kadar bekletilir (throttling) | **Bu seviyede:** CPU limiti yerine yalnızca CPU isteği (`requests`); bellek limiti kalır |
+| P07-05 | Ölçekleyici 10 pod ister ama bir kısmı hiç çalışmaz, `Pending` bekler | Düğümlerde yer (CPU) kalmadı; ölçekleyici yalnızca sayı ister, yeni makine ekleyen yok | **Bulutta:** yeni düğüm ekleyen küme ölçekleyici (cluster autoscaler) + kapasite planı |
+| P07-06 | 100 linki listeleyen tek istek veritabanına 101 sorgu gönderir; sayfa büyüdükçe yavaşlar | Tuzak (`TRAP_LIST_N_PLUS_ONE`): liste bir sorguyla gelir, sonra her link için ayrı sorgu (N+1) | **Bu seviyede:** tek toplu sorgu (tuzak kapalıyken) · **14:** servisler arası toplu çağrı |
+| P07-07 | Bir sunucu (düğüm) donunca isteklerin bir kısmı dakikalarca takılı kalır | Kubernetes donmuş düğümdeki pod'u hâlâ sağlam sanır ve trafik göndermeye devam eder (40 sn + 5 dk) | **10:** devre kesici + aktif sağlık kontrolü |
+| P07-08 | Yeni sürüm dağıtılırken hata sayısı artabilir | Tuzak (`TRAP_READY_ALWAYS`): pod her zaman "hazırım" der; Kubernetes gerçekten hazır olanı ayıramaz | **Bu seviyede:** tuzak kapalıyken hazır olma kontrolü gerçek durumu söyler |
 
 ---
 
 ### P07-01 · HPA gecikir
 
-**Ne deniyoruz:** Ani bir yük dalgasında (burst) otomatik ölçekleyici pod'ları zamanında getiriyor mu?
-**Neden:** Ölçekleme tepkiseldir ve zinciri uzundur: CPU örneklemesi (15 sn) → HPA döngüsü (15 sn) → yerleştirme →
-imaj → süreç başlangıcı → hazır olma.
+**Ne oluyor:** Trafik birkaç saniyede saniyede 5 istekten 400'e fırlayınca (burst) yanıt süreleri uzar. Otomatik
+ölçekleyici (HPA) yeni pod'ları getirir ama pod'lar ancak dalga geçtikten sonra hazır olur; ani trafiğe karşı
+otomatik ölçekleme geç kalır.
+**Neden oluyor:** Ölçekleme bir olaya tepki verir ve zinciri uzundur: CPU 15 sn'de bir ölçülür → HPA 15 sn'de bir
+karar verir → pod bir düğüme yerleştirilir → imaj açılır → program başlar → hazır olur. Bu zincirin toplamı, 20 sn
+süren bir dalgadan uzundur.
+**Bu deney:** `burst` yüküyle (5 → 400 istek/sn, 20 sn tepe) yanıt süresini (p99), HPA'nın istediği pod sayısını ve
+gerçekten hazır olan pod sayısını karşılaştırır.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P07-01` (`burst` senaryosu: 5 → 400 istek/sn, 20 sn tepe; tepe p99
 ile HPA'nın istediği ve gerçekten hazır olan replika sayısını karşılaştırır; daha sert tepe için
@@ -186,15 +194,19 @@ kademeli olarak 2'ye iner.
 - "Otomatik ölçekleyici: istenen / mevcut pod" → `istenen: redirect` burst'ün ortasında ya da sonunda artar, `mevcut: redirect` onu gecikmeyle izler; tepeyle aradaki yatay mesafe ölçekleme zincirinin süresi.
 - "p99 süre (uç noktaya göre)" → `/{code}` burst anında sıçrar ve yeni pod'lar hazır olmadan, yük bittiği için düşer.
 
-**Nerede çözülüyor:** seviye içi — otomatik ölçekleme trend içindir, burst için değil; `minReplicas`'ı tabanı
-karşılayacak kadar yüksek tutmak burst sigortasıdır.
+**Nasıl çözülüyor:** Bu seviyenin dersi: otomatik ölçekleme yavaş büyüyen trafik içindir, ani dalga için değil. Dalgaya karşı sigorta, en az pod sayısını (`minReplicas`) normal tepeyi karşılayacak kadar yüksek tutmaktır.
 
 ---
 
 ### P07-02 · Ölçekleme darboğazı taşır, yok etmez
 
-**Ne deniyoruz:** redirect pod'ları çoğalınca yük azalıyor mu, yoksa Postgres'e mi taşınıyor?
-**Neden:** Her yeni pod kendi bağlantı havuzunu açar: `12 × 6 + 2 × 15 + 10 = 112 > max_connections=100`.
+**Ne oluyor:** Yük artınca HPA yönlendirme servisini 12 pod'a çıkarır ve uygulamanın CPU'su rahatlar; ama Postgres
+bağlantıları tavana dayanır ve istekler veritabanından bağlantı beklemeye başlar. Darboğaz yok olmaz, veritabanına
+taşınır — ve veritabanı pod eklenerek büyütülemez.
+**Neden oluyor:** Her yeni pod kendi bağlantı havuzunu açar: 12 redirect pod'u × 6 + 2 api pod'u × 15 + analytics'in
+10 bağlantısı = 112. Postgres en fazla 100 bağlantı kabul eder (`max_connections=100`).
+**Bu deney:** Merdiven gibi artan yük altında pod sayısını, veritabanı bağlantı sayısını, havuzdan bağlantı bekleme
+süresini ve CPU'yu birlikte ölçer.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P07-02` (aritmetiği basar, `stairs` ve rastgele kodlu `scan`
 yükünü birlikte koşar; pod sayısı, DB bağlantısı, havuz beklemesi ve CPU'yu birlikte ölçer). Elle:
@@ -241,14 +253,18 @@ büyük (scriptin eşiği): uygulama pod'ları DB'yi **bekliyor**.
 - "Veritabanı CPU" → merdivenle yükselir.
 - "CPU kullanımı (bir çekirdeğin %'si)" → `redirect-…` pod'larının her biri düşük kalır: darboğaz uygulamada değil.
 
-**Nerede çözülüyor:** 09 (PgBouncer: yüzlerce uygulama bağlantısı → onlarca DB bağlantısı; okuma replikaları).
+**Nasıl çözülüyor:** 09'da bağlantı havuzlayıcı (PgBouncer) yüzlerce uygulama bağlantısını onlarca veritabanı bağlantısına indirir; okuma replikaları okuma yükünü böler. Ölçekleme darboğazı yok etmez, taşır — ve genelde büyütülemeyen yere taşır.
 
 ---
 
 ### P07-03 · Yeni pod "hazır" ama soğuk
 
-**Ne deniyoruz:** Yük altında eklenen yeni pod'lar eskiler kadar hızlı mı?
-**Neden:** readiness "süreç ayakta ve dinliyor" der; "havuzum açık, önbelleğim ısındı" demez.
+**Ne oluyor:** Yük altında yeni pod eklendiğinde yanıt süreleri kısa bir süre yükselir; en genç pod'lar en yavaş
+olanlardır. Ölçekleme tam yardıma ihtiyaç duyulan anda kısa bir yavaşlama getirir.
+**Neden oluyor:** Hazır olma kontrolü (readiness) yalnızca "program açıldı ve dinliyor" der; "veritabanı
+bağlantılarım açık, önbelleğim ısındı" demez. Yeni pod'un ilk istekleri bağlantı kurmayı ve veri getirmeyi bekler.
+**Bu deney:** Isınmış hâldeki yanıt süresini ölçer, yük altında yönlendirme servisini 6 pod'a çıkarır ve pod başına
+yanıt süresini basar; sonra 2'ye döner.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P07-03` (ısınmış taban p99'u ölçer, yük altında redirect'i 6
 replikaya çıkarır, pod başına p99'u basar, sonra 2'ye döner). Elle:
@@ -291,15 +307,19 @@ yeniden hesapladığı için sayı 6'da kalmayabilir.
 - "p99 süre (pod'a göre; yeni pod soğuk)" → ölçekleme anında dört yeni `redirect-…` çizgisi belirir; ilk noktaları eskilerden yüksek, sonra yakınsar (`api-…` çizgilerini yok say).
 - "İsabet oranı (pod'a göre)" → yeni pod'ların oranı ilk noktadan eskilerle aynı: önbellek Redis'te ve zaten sıcak.
 
-**Nerede çözülüyor:** seviye içi — `startupProbe`, havuzda `MinConns`, ingress'te slow-start.
+**Nasıl çözülüyor:** Bu seviyede ele alınan ayarlar: açılış kontrolü (`startupProbe`), havuzda baştan açık bağlantılar (`MinConns`), ingress'in yeni pod'a trafiği yavaş yavaş açması (slow-start). Önbellek Redis'te paylaşıldığı için yeni pod boş bellekle doğmaz; fark 03'tekinden küçüktür.
 
 ---
 
 ### P07-04 · CPU limiti bir kota'dır
 
-**Ne deniyoruz:** CPU limiti, CPU boşta görünürken gecikme üretiyor mu?
-**Neden:** CPU limiti her 100 ms'lik dilimde kullanılabilecek çekirdek zamanını sınırlar; kota dilim ortasında
-biterse süreç dilimin sonuna kadar **bekletilir** (throttling).
+**Ne oluyor:** CPU grafiği boşta görünürken istekler yavaşlar. CPU limiti kaldırılınca aynı yükte CPU kullanımı artar
+ve yanıt süresi düşer; yani limit sessizce gecikme üretiyordu.
+**Neden oluyor:** CPU limiti bir kotadır: pod her 100 ms'lik dilimde en fazla limiti kadar çekirdek zamanı
+kullanabilir. Kota dilimin ortasında biterse program dilimin sonuna kadar bekletilir (throttling); ortalama CPU düşük
+görünür ama istekler bekler.
+**Bu deney:** Tek pod'u önce dar bir CPU kotasıyla (50m = bir çekirdeğin %5'i), sonra pratikte kotasız aynı yükle
+koşar; yanıt süresini (p99) ve CPU kullanımını karşılaştırır.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P07-04` (tek pod'u önce dar kotayla — varsayılan 50m — sonra
 pratikte kotasız aynı yükte koşar, p99 ve CPU'yu karşılaştırır, sonra geri alır; daha dar kota:
@@ -349,16 +369,19 @@ yayınlamadığı için kanıt bu dolaylı p99 farkıdır.
 - "CPU kullanımı (bir çekirdeğin %'si)" → dar kotada %5'te düz bir tavan; kotasız fazda belirgin yükselir.
 - "p99 süre (uç noktaya göre)" → `/{code}` dar kotada yüksek, kotasızda düşük.
 
-**Nerede çözülüyor:** seviye içi — bellek limiti şart (OOM koruması); CPU limiti çoğu zaman zarar verir, `requests`
-planlamayı ve adil paylaşımı zaten sağlar.
+**Nasıl çözülüyor:** Bu seviyenin dersi: bellek limiti şarttır (bellek taşarsa pod öldürülür), CPU limiti ise çoğu zaman zarar verir. CPU isteği (`requests`) yerleştirmeyi ve adil paylaşımı zaten sağlar.
 
 ---
 
 ### P07-05 · Node kapasitesi bitince Pending
 
-**Ne deniyoruz:** Ölçekleyici 10 replika isteyince 10 pod gerçekten çalışıyor mu?
-**Neden:** Ölçekleyici yalnızca replika **sayısı** ister; pod'u düğüme yerleştirmek scheduler'ın işidir ve yer yoksa
-pod `Pending` bekler. kind'da düğüm ekleyen bir cluster autoscaler yok.
+**Ne oluyor:** Ölçekleyici 10 pod ister, Deployment "10 pod" der ve her şey yolunda görünür; ama pod'ların bir
+kısmı hiç çalışmaz, `Pending` durumunda bekler. İsteği veren taraf bunu bilmez.
+**Neden oluyor:** Ölçekleyici yalnızca pod **sayısını** ister; pod'u bir düğüme yerleştirmek zamanlayıcının
+(scheduler) işidir. Düğümlerde istenen CPU kadar yer kalmadıysa pod bekler. kind'da yeni düğüm ekleyen bir küme
+ölçekleyicisi (cluster autoscaler) yok.
+**Bu deney:** Pod başına CPU isteğini bir düğümün %60'ına çıkarır, en az pod sayısını 10'a çeker; kaç pod'un
+`Pending` kaldığını ve zamanlayıcının neden yerleştiremediğini (`Insufficient cpu`) gösterir, sonra geri alır.
 
 **Reproduce (adım adım):** Otomatik: `CONFIRM=1 make repro P=P07-05` (pod başına CPU isteğini bir düğümün %60'ına
 çıkarır, HPA tabanını geçici olarak 10'a çeker — yoksa HPA ölçeği geri çeker ve ölçüm kapasiteyi değil HPA'yı
@@ -407,16 +430,18 @@ Olay satırında `… Insufficient cpu`. Bu pod'lar sen geri alana kadar Pending
 - "Düğüm CPU: ayrılabilir / istenen" → `pod'ların istediği` çizgisi `ayrılabilir`'a dayanır: yeni pod'lar hiçbir düğüme sığmıyor (küme geneli, seviye seçicisine bakmaz).
 - "Otomatik ölçekleyici: istenen / mevcut pod" → `istenen` ve `mevcut` ikisi de 10: Pending pod'lar da sayılır, ölçekleyici "10 pod var" sanır; farkı yalnızca "Yer bekleyen pod" gösterir.
 
-**Nerede çözülüyor:** bulutta cluster autoscaler (düğüm ekler, dakikalar sürer); kapasite planlaması ölçekleme
-zincirinin en yavaş halkasına göre yapılır.
+**Nasıl çözülüyor:** Bulutta küme ölçekleyici (cluster autoscaler) yeni düğüm ekler — ama bu dakikalar sürer. Kapasite, ölçekleme zincirinin en yavaş halkasına göre planlanır.
 
 ---
 
 ### P07-06 · TRAP · N+1: maliyet sonuç kümesiyle orantılı
 
-**Ne deniyoruz:** 100 linki listeleyen tek bir istek kaç veritabanı sorgusu yapıyor?
-**Neden:** Döngü içinde sorgu (N+1): liste için 1 sorgu, ardından her link için 1 sorgu daha. Küçük veride görünmez,
-sayfa büyüdükçe maliyet büyür.
+**Ne oluyor:** 100 linki listeleyen tek bir istek veritabanına 101 sorgu gönderir. Az veriyle fark edilmez; sayfa
+boyutu büyüdükçe süre ve veritabanı yükü de büyür.
+**Neden oluyor:** Bu seviyenin tuzağı (`TRAP_LIST_N_PLUS_ONE`) açıkken liste bir sorguyla gelir, sonra her linkin
+istatistiği ayrı bir sorguyla okunur (N+1: döngü içinde sorgu). Maliyet, sonuçtaki satır sayısıyla orantılıdır.
+**Bu deney:** Bir kiracı için 100 link oluşturur; tuzak kapalı ve açıkken liste süresini ve api pod'larının yaptığı
+sorgu sayısını karşılaştırır, sonra tuzağı kapatır.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P07-06` (bir kiracı için 100 link oluşturur, tuzak kapalı/açık liste
 süresini ve api pod'larının sorgu sayısını karşılaştırır, sonra tuzağı kapatır). Elle:
@@ -466,16 +491,19 @@ görünür) — maliyet sonuç kümesiyle orantılı. `liste süresi` de genelde
 - "Veritabanı sorguları (türe göre)" → 100 oluşturma `create` serisinde; varsayılan fazda liste yalnızca `list`'te küçük bir kıpırtı, tuzakta aynı istek `stats`'ta ayrı bir tepe (~100 sorgu). Tepeler alçak ve kısa; kesin sayı terminalde.
 - "p99 süre (uç noktaya göre)" → `/api/links` tuzak fazında daha yüksek.
 
-**Nerede çözülüyor:** seviye içi (tek toplu sorgu `WHERE code = ANY($1)` ya da JOIN) · 14 (servisler arası çağrıda
-gRPC + batch: 101 fonksiyon çağrısı 101 ağ çağrısına dönmesin).
+**Nasıl çözülüyor:** Bu seviyenin kendi ayarı: tuzak kapalıyken (varsayılan) bütün istatistikler tek toplu sorguyla (`WHERE code = ANY($1)`) gelir. 14'te aynı ilke servisler arası çağrılara uygulanır: 101 fonksiyon çağrısı 101 ağ çağrısına dönmesin diye toplu çağrı.
 
 ---
 
 ### P07-07 · Node donunca yedeklilik işe yaramıyor
 
-**Ne deniyoruz:** Bir düğüm donunca trafik sağlam pod'lara ne kadar hızlı geçiyor?
-**Neden:** Donmuş düğümdeki pod'lar Endpoints'te **kalır**: kubelet cevap vermiyor ama API sunucusu pod'u hâlâ hazır
-sanıyor. 40 sn (düğüm NotReady) + 5 dk (tahliye) boyunca trafik ölü pod'a gider.
+**Ne oluyor:** Bir sunucu (worker düğüm) donduğunda, pod'lar birden fazla düğüme dağılmış olsa bile isteklerin bir
+kısmı takılır ve bu dakikalarca sürer. Birden çok kopya (yedeklilik) tam da bu anda işe yaramaz.
+**Neden oluyor:** Donmuş düğümdeki pod'lar trafik listesinde (Endpoints) kalır: düğüm cevap vermiyor ama Kubernetes
+pod'u hâlâ hazır sanıyor. Düğümün "hazır değil" sayılması 40 sn, pod'ların taşınması 5 dk sürer; bu sürede trafiğin
+bir kısmı ölü pod'a gider.
+**Bu deney:** Normal istek hızını ölçer, bir redirect pod'unun düğümünü `docker pause` ile dondurur; düğümün
+NotReady olma süresini, tamamlanan istek hızını ve 5xx'i ölçer, sonra düğümü çözer.
 
 **Reproduce (adım adım):** Otomatik: `FREEZE_NODE=1 CONFIRM=1 make repro P=P07-07` (taban hızı ölçer, bir redirect
 pod'unun düğümünü `docker pause` ile dondurur, NotReady süresini, tamamlanan istek hızını ve 5xx'i ölçer, sonra
@@ -531,15 +559,19 @@ sıfır — arızanın işareti hata kodu değil, işin bitmemesi (60 sn'yi aşa
 - "Dönen durum kodları" → donmadan itibaren `302` belirgin düşer; zaman aşımına uğrayan istekler `502`/`504` olarak belirir.
 - "İstek / saniye (pod'a göre)" → donmuş düğümdeki `redirect-…` çizgisi kesilir, diğerleri sürer; zaman aşımını ingress ürettiği için uygulamanın 5xx paneli 0 kalabilir.
 
-**Nerede çözülüyor:** 10 (devre kesici + aktif sağlık kontrolü: Kubernetes'i beklemek yerine istemci hızlı karar verir).
+**Nasıl çözülüyor:** 10'da devre kesici ve aktif sağlık kontrolü gelir: istemci, Kubernetes'in fark etmesini beklemeden cevap vermeyen hedefi kendisi devreden çıkarır.
 
 ---
 
 ### P07-08 · TRAP · Her zaman hazır diyen probe
 
-**Ne deniyoruz:** readiness probe'u her zaman 200 dönerse rollout sırasında hata artıyor mu?
-**Neden:** Probe'un değeri "hayır" diyebilmesindedir; sabit 200, Kubernetes'in pod'un gerçekten hazır olup olmadığı
-bilgisini siler.
+**Ne oluyor:** Bu seviyenin tuzağı (`TRAP_READY_ALWAYS`) açıkken pod'lar her zaman "hazırım" der; yeni sürüm
+dağıtılırken henüz hazır olmayan pod'lar trafik alabilir ve hata sayısı artabilir.
+**Neden oluyor:** Hazır olma kontrolünün (readiness probe) değeri "hayır" diyebilmesindedir. Sabit "evet" (200)
+cevabı, Kubernetes'in pod'un gerçekten hazır olup olmadığını öğrenmesinin tek yolunu siler.
+**Bu deney:** Aynı dağıtımı yük altında önce dürüst, sonra her zaman "evet" diyen readiness ile koşar; 5xx sayısını ve
+hazır sayılan pod'ların tepesini karşılaştırır. Kubernetes kapanan pod'u zaten trafikten çıkardığı için fark
+çıkmayabilir; script o zaman nedenini yazar.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P07-08` (preStop beklemesini 0 yapar — yoksa 5 sn'lik preStop
 trafiği emer ve iki modda da 5xx=0 çıkar —, aynı rollout'u yük altında varsayılan ve tuzaklı readiness ile koşar,
@@ -596,8 +628,7 @@ o zaman script NOT-REPRODUCED der ve nedenini yazar (probe'un değeri P01-07 ve 
 - "Hazır pod adresi (endpoint) sayısı" → her rollout'ta `redirect` çizgisi kısa bir tepe/çukur çizer; iki rollout'un şeklini yan yana karşılaştır.
 - "Dönen durum kodları" → rollout anlarında `502`/`503` kıvılcımları (ingress'ten gelir); tuzaklı rollout'takileri varsayılanla karşılaştır.
 
-**Nerede çözülüyor:** seviye içi (bayrağı kapat) — probe'un ne sorduğunu tanımla: TCP kontrolü, `/healthz`'i readiness
-yapmak ve readiness'a bağımlılık koymak (P02-10) aynı kökten hatalar.
+**Nasıl çözülüyor:** Bu seviyenin kendi ayarı: tuzak kapalıyken probe gerçek durumu söyler. Probe'un neyi sorduğu açıkça tanımlanmalı: yalnızca bağlantı kontrolü (TCP), canlılık ucunu (`/healthz`) hazır olma için kullanmak ya da hazır olmaya dış bağımlılık koymak (P02-10) aynı kökten hatalardır.
 
 ## 7. Seviye içi alıştırmalar (TRAP_ bayrakları)
 

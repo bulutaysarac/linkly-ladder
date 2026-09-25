@@ -44,9 +44,10 @@ Her bağımlılığın kendi guard'ı ve `dep` etiketi var (`postgres`, `redis`)
 
 | ID | Sorun | Nasıl çözüldü |
 |---|---|---|
-| P04-01 | Redis düşünce tüm yük DB'ye iner | Bulkhead + devre kesici: DB'ye giden eşzamanlılık sınırlı, bozuk bağımlılık hızlı reddedilir; kesinti taşınmaz, sınırlanır |
+| P04-01 | Redis düşünce bütün okumalar veritabanına iniyor ve veritabanını boğuyordu | Veritabanına giden eşzamanlı çağrı sayısı sınırlı (bulkhead) ve bozuk bağımlılığa giden çağrılar hızlı reddediliyor (devre kesici): kesinti sisteme yayılmaz, sınırlanır |
 
-P02-06 (yavaş sorgu → havuz tıkanması) ve P09-02 (failover penceresi) de büyük ölçüde emilir: timeout + retry + breaker.
+P02-06 (yavaş sorgunun bağlantı havuzunu tıkaması) ve P09-02 (veritabanı devrinde yazmaların durması) de büyük ölçüde
+emilir: her çağrının süre sınırı (timeout), sınırlı yeniden deneme (retry) ve devre kesici birlikte çalışır.
 
 ## 4. Ayağa kaldırma
 
@@ -119,26 +120,33 @@ ettiklerine hızlı cevap verebilmek için fazlasını erken reddeder.
 
 ## 6. Reproduce edilebilir sorunlar
 
-Her sorun aynı düzende: **Ne deniyoruz** (deneyin sorusu) → **Neden** → adımlar (her adım ne yaptığını söyler)
-→ **Terminalde ne görmelisin** → **Grafana'da gör** (giriş: admin / ladder) → **Nerede çözülüyor**.
-`make repro` hükmü: `REPRODUCED` = sorun var · `NOT-REPRODUCED` = yok · `SKIPPED` = ölçülemedi.
+Bu seviyede yaşayacağın 6 sorun. Her birini iki yoldan görebilirsin: **Otomatik** — `make repro P=<ID>` deneyi
+kendisi yapar, ölçer ve hükmünü basar (`REPRODUCED` = sorun var · `NOT-REPRODUCED` = yok · `SKIPPED` =
+ölçülemedi); **Elle** — adımları sırayla yapıştırıp sonucu kendi gözünle görürsün. Her sorunun bölümü aynı
+düzende: **Ne oluyor** → **Neden oluyor** → **Bu deney** → adımlar → **Terminalde ne görmelisin** →
+**Grafana'da gör** (giriş: admin / ladder) → **Nasıl çözülüyor**.
 
-| ID | Sorun | Reproduce | Grafana'da | Çözüm |
-|---|---|---|---|---|
-| P10-01 | **TRAP** bütçesiz retry = yükseltec | `make repro P=P10-01` | [11 · Resilience](http://grafana.localtest.me/d/ladder-resilience?var-level=lvl10&from=now-15m&to=now&refresh=10s) → "Yeniden deneme / sn" | seviye içi |
-| P10-02 | **TRAP** readiness bağımlılığa bakar | `CONFIRM=1 make repro P=P10-02` | [11 · Resilience](http://grafana.localtest.me/d/ladder-resilience?var-level=lvl10&from=now-15m&to=now&refresh=10s) · [15 · k6](http://grafana.localtest.me/d/ladder-k6?var-level=lvl10&from=now-15m&to=now&refresh=10s) → "Hazır pod adresi (endpoint) sayısı" | seviye içi |
-| P10-03 | Timeout hizasızlığı: boşa çalışan sunucu | `make repro P=P10-03` | [11 · Resilience](http://grafana.localtest.me/d/ladder-resilience?var-level=lvl10&from=now-15m&to=now&refresh=10s) · [15 · k6](http://grafana.localtest.me/d/ladder-k6?var-level=lvl10&from=now-15m&to=now&refresh=10s) → "Başarısız oran (zaman içinde)" | seviye içi |
-| P10-04 | **TRAP** devre kesici yok / flapping | `make repro P=P10-04` | [11 · Resilience](http://grafana.localtest.me/d/ladder-resilience?var-level=lvl10&from=now-15m&to=now&refresh=10s) · [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl10&from=now-15m&to=now&refresh=10s) → "Devre kesici durumu (0 kapalı · 1 yarı açık · 2 açık)" | seviye içi |
-| P10-05 | **TRAP** yavaş bağımlılık, ölüden beter | `make repro P=P10-05` | [01 · Pods & Resources](http://grafana.localtest.me/d/ladder-pods?var-level=lvl10&from=now-15m&to=now&refresh=10s) · [11 · Resilience](http://grafana.localtest.me/d/ladder-resilience?var-level=lvl10&from=now-15m&to=now&refresh=10s) → "Goroutine sayısı" | seviye içi |
-| P10-06 | Yük atma: kabul edileni hızlı tut | `make repro P=P10-06` | [11 · Resilience](http://grafana.localtest.me/d/ladder-resilience?var-level=lvl10&from=now-30m&to=now&refresh=10s) · [15 · k6](http://grafana.localtest.me/d/ladder-k6?var-level=lvl10&from=now-30m&to=now&refresh=10s) → "Atılan yük / sn" | seviye içi |
+| ID | Ne olur? | Neden olur? | Nasıl çözülür? |
+|---|---|---|---|
+| P10-01 | Tuzak açıkken bağımlılık hata verdikçe ona giden yük katlanır | Her başarısız çağrı sınırsız yeniden denenir (retry); zaten zorlanan bağımlılığa ikinci bir yük kaynağı eklenir | **Seviye içi:** retry bütçesi (trafiğin en fazla %10'u) + giderek uzayan, rastgele bekleme (backoff + jitter) |
+| P10-02 | Tuzak açıkken Redis kısa süre kesilince bütün pod'lar trafikten düşer (503) | Hazır olma kontrolü (readiness) Redis'e bakar; Redis yokken bütün pod'lar aynı anda "hazır değilim" der | **Seviye içi:** readiness yalnızca pod'un kendisine bakar; Redis kesintisi önbelleği atlatır (degrade) |
+| P10-03 | İstemci 1 sn'de vazgeçse de sunucu işi saniyelerce taşımaya devam eder | Bekleme sınırları (timeout) katmanlar arasında hizasızsa sunucu, kimseye teslim edemeyeceği iş için kaynak harcar | **Seviye içi:** her katmanda süre sınırı + bağımlılık başına eşzamanlılık sınırı; eksik halka veritabanının kendi sorgu sınırı |
+| P10-04 | Tuzak açıkken bozuk bir bağımlılık her isteği saniyelerce bekletir | Devre kesici yoksa her istek bozuk bağımlılığa gidip cevap bekler; hızlı reddetme yok | **Seviye içi:** devre kesici: hatalar birikince bağımlılığa gitmeyi bir süre bırakıp hızlı reddeder |
+| P10-05 | Tuzak açıkken Redis ölmeyip yavaşlayınca istekler birikir, bellek ve eşzamanlı istek sayısı tırmanır | Süre sınırı olmayan çağrı sınırsız bekler; yavaş ama başarılı cevaplar devre kesiciyi de tetiklemez | **Seviye içi:** her bağımlılık çağrısının süre sınırı var (500 ms) |
+| P10-06 | Kapasite dolunca bütün istekler yavaşlar ve zaman aşımına uğrar | Aşırı yüklü sunucu her isteği kabul ederse herkes sıraya girer | **Seviye içi:** yük atma: eşiği aşan istek anında 503 ile reddedilir, kabul edilenler hızlı kalır |
 
 ---
 
 ### P10-01 · TRAP · Bütçesiz retry bir yükseltectir
 
-**Ne deniyoruz:** Bağımlılık %30 hata verirken "3 kez dene" kuralı ona giden yükü katlıyor mu?
-**Neden:** Retry geçici bir kaybı kurtarmak içindir; bütçe (retry trafiğin en fazla %10'u) olmadan, zaten hata veren
+**Ne oluyor:** Tuzak (`TRAP_NAIVE_RETRY`) açıkken, veritabanı %30 hata verirken uygulamanın ona gönderdiği çağrı
+sayısı katlanır: bir kullanıcı isteği birden çok veritabanı çağrısına dönüşür — tam da veritabanı zorlanırken.
+Gerçek hayatta bu, küçük bir arızayı büyük bir kesintiye çeviren "retry fırtınası"dır.
+**Neden oluyor:** Yeniden deneme (retry) geçici bir kaybı kurtarmak içindir. Bir sınırı (bütçe: retry'lar trafiğin en
+fazla %10'u) ve denemeler arasında giderek uzayan, rastgele bir bekleme (backoff + jitter) yoksa, hata veren
 bağımlılığa ikinci bir yük kaynağı olur.
+**Bu deney:** Veritabanına %30 paket kaybı enjekte eder; aynı yükü önce bütçeli retry'la, sonra tuzak açıkken verir
+ve iki fazın veritabanı çağrı ve retry sayısını karşılaştırır.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P10-01` (`pg-loss-30` altında aynı yükü önce bütçeli retry'la,
 sonra `TRAP_NAIVE_RETRY` ile verir; iki fazın Postgres çağrı ve retry sayısını karşılaştırır). Elle:
@@ -185,16 +193,21 @@ kuyruğunu da biraz içerir; script de aynı pencereyle ölçer.)
 - "Bağımlılık hatası / sn" → `postgres` iki fazda da sıfırın üstünde: retry'ların üstüne bindiği arıza bu.
 - Explore'da: `sum(rate(dependency_requests_total{namespace="lvl10",dep="postgres"}[1m]))` → aynı yükle ikinci fazda daha yüksek: istek başına birden çok bağımlılık çağrısı.
 
-**Nerede çözülüyor:** Seviye içinde: üstel geri çekilme + jitter (retry'lar senkronize olmasın) + bütçe. Bütçenin
-gerçekten harcandığını `TestRetryBudgetCapsAmplification` birim testi doğrular.
+**Nasıl çözülüyor:** Bu seviyenin kendi koruması: denemeler arasında giderek uzayan, rastgele bir bekleme (üstel geri çekilme +
+jitter; retry'lar aynı anda patlamasın) ve bir bütçe (retry trafiğin en fazla %10'u). Tuzak bunları kapatınca sorun
+döner. Bütçenin gerçekten sınırladığını `TestRetryBudgetCapsAmplification` birim testi doğrular.
 
 ---
 
 ### P10-02 · TRAP · Readiness'ın bağımlılığa bakması (ikinci kez)
 
-**Ne deniyoruz:** Redis ~40 sn kesilince redirect pod'ları trafikten düşüyor mu?
-**Neden:** Uygulama Redis'siz de çalışır (önbelleği atlayıp DB'ye gider), ama readiness Redis'e bakarsa bütün pod'lar
-aynı anda "hazır değilim" der ve trafik alacak pod kalmaz (P02-10'un kardeşi).
+**Ne oluyor:** Tuzak (`TRAP_READY_CHECKS_REDIS`) açıkken Redis ~40 sn kesilince bütün redirect pod'ları aynı
+anda trafikten çıkar ve kullanıcılar 503 alır — oysa uygulama Redis olmadan da çalışabilir.
+**Neden oluyor:** Hazır olma kontrolü (readiness) "bu pod trafik alabilir mi?" sorusudur. Kontrol Redis'e bakarsa
+Redis gittiğinde bütün pod'lar aynı anda "hazır değilim" der; ingress'in gönderecek pod'u kalmaz. Uygulama aslında
+önbelleği atlayıp veritabanından cevap verebilirdi (P02-10'un kardeşi).
+**Bu deney:** Yük altında Redis'i iki kez ~40 sn durdurur — önce varsayılan readiness'la, sonra tuzak açıkken — ve
+her fazda hazır pod sayısını, 5xx'i ve önbelleksiz çalışma (`no_cache`) modunu izler.
 
 **Reproduce (adım adım):** Otomatik: `CONFIRM=1 make repro P=P10-02` (yük altında Redis'i iki kez ~40 sn durdurur —
 önce varsayılan readiness, sonra `TRAP_READY_CHECKS_REDIS`; her fazda en düşük hazır adres sayısını, 5xx'i ve `no_cache`
@@ -261,16 +274,22 @@ gelir.
 - "Azaltılmış mod (degrade)" → birinci fazda `no_cache` 1'e çıkar: bağımlılığın durumu bir metrikte görünüyor, pod ise trafik almaya devam ediyor.
 - "Dönen durum kodları" (k6) → birinci fazda `302` kesintisiz; ikinci fazda kesinti boyunca `503`.
 
-**Nerede çözülüyor:** Seviye içinde: Redis kendi guard'ının arkasında; kesinti devresini açar ve `no_cache` degrade
-modunu işaretler. Readiness "trafik alabilir miyim?" sorusudur; "bağımlılığım iyi mi?" bir metriktir.
+**Nasıl çözülüyor:** Bu seviyenin kendi ayarı: readiness yalnızca pod'un kendisine bakar; Redis kendi korumasının (guard) arkasında,
+kesintide devre açılır ve uygulama önbelleksiz çalışır (`no_cache` modu). Readiness "trafik alabilir miyim?"
+sorusudur; "bağımlılığım iyi mi?" bir metriktir. Tuzak Redis'i readiness'a geri koyunca sorun döner.
 
 ---
 
 ### P10-03 · Timeout hizasızlığı
 
-**Ne deniyoruz:** İstemci 1 sn'de vazgeçtiğinde sunucu işi bırakıyor mu, yoksa kimseye teslim edemeyeceği işi taşıyor mu?
-**Neden:** Timeout bütçesi bir zincirdir: her katman, kendisini çağıranın kalan süresinden az beklemeli
-(`handler > bağımlılık ≥ sorgu`).
+**Ne oluyor:** Kullanıcı (istemci) 1 sn'de vazgeçip gitse bile sunucu o isteğin işini saniyelerce taşımaya devam
+eder: kimsenin beklemediği cevaplar için bağlantı, goroutine ve veritabanı zamanı harcanır.
+**Neden oluyor:** Bekleme sınırları (timeout) bir zincirdir: her katman, kendisini çağıranın kalan süresinden daha az
+beklemeli (`handler > bağımlılık ≥ sorgu`). Zincir hizasızsa ya da bir halka eksikse, yukarıdaki katman vazgeçtiğinde
+alttaki çalışmaya devam eder.
+**Bu deney:** Redirect'in timeout zincirini gösterir, veritabanına 2 sn gecikme ekleyip 1 sn'de vazgeçen istemciyle
+yük verir; sunucunun ne kadar iş taşıdığını ve korumaların (timeout, eşzamanlılık sınırı) devreye girip girmediğini
+ölçer.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P10-03` (redirect'in timeout zincirini basar, `pg-delay-2s` altında
 45 sn yük verir; tepe in-flight, goroutine, Postgres çağrı p99'u, timeout ve bulkhead reddini ölçer). Elle:
@@ -316,16 +335,23 @@ goroutine, taşınan işin büyüklüğü.
 - "Bağımlılık gecikmesi p99" → `postgres` 2–2,5 sn'de düzleşir: bağımlılık timeout'u çağrıyı kesiyor.
 - Explore'da: `sum(rate(dependency_requests_total{namespace="lvl10",dep="postgres",result=~"timeout|bulkhead"}[1m])) by (result)` → `timeout` ve `bulkhead` yükte sıfırdan ayrılır: koruma çalışıyor.
 
-**Nerede çözülüyor:** Seviye içinde (hizalı timeout zinciri). Eksik halka sunucu tarafı `statement_timeout`'tur
-(P02-06): istemci vazgeçse de Postgres sorguyu yalnızca kendisi durdurabilir.
+**Nasıl çözülüyor:** Bu seviyenin kendi çözümü: her katmanın süre sınırı var (handler 5 sn, bağımlılık 2 sn, sorgu 3 sn) ve
+bağımlılık başına eşzamanlılık sınırlı (bulkhead): yavaş veritabanı çağrısı 2 sn'de kesilir, taşınan iş sınırlı kalır.
+Eksik halka veritabanı tarafındaki sorgu sınırıdır (`statement_timeout`,
+P02-06): istemci vazgeçse de Postgres sorguyu yalnızca kendisi durdurabilir.
 
 ---
 
 ### P10-04 · TRAP · Devre kesici: açılma, deneme, flapping
 
-**Ne deniyoruz:** Bağımlılık bozukken devre kesici istekleri hızlı mı cevaplatıyor, yoksa her istek bozuk bağımlılığı mı bekliyor?
-**Neden:** Devre kesici (breaker) belli sayıda hatadan sonra bağımlılığa gitmeyi bir süre bırakır ve hızlı reddeder;
-yoksa her istek bozuk bağımlılığı bekler. İşi bağımlılığı kurtarmak değil, ona ve sana nefes aldırmaktır.
+**Ne oluyor:** Tuzak (`TRAP_NO_BREAKER`) açıkken, veritabanı yarı yarıya bozukken her istek bozuk veritabanına
+gidip cevap bekler; tipik bir istek milisaniyelerden saniyelere çıkar. Yavaş hata, hızlı hatadan kötüdür: kullanıcı
+beklerken kaynaklar da tükenir.
+**Neden oluyor:** Devre kesici (circuit breaker) belli sayıda hatadan sonra bağımlılığa gitmeyi bir süre bırakır ve
+istekleri hemen reddeder; sonra birkaç deneme çağrısıyla bağımlılığın düzelip düzelmediğine bakar. Devre kesici yoksa
+her istek bozuk bağımlılığı bekler. İşi bağımlılığı kurtarmak değil, ona ve sana nefes aldırmaktır.
+**Bu deney:** Veritabanına %50 paket kaybı enjekte eder; aynı yükü önce devre kesiciyle, sonra tuzak açıkken verir ve
+bozuk bağımlılığa ulaşan çağrı oranını ve tipik istek süresini (p50) karşılaştırır.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P10-04` (`pg-loss-50` altında aynı yükü önce devre kesiciyle, sonra
 `TRAP_NO_BREAKER` ile verir; her fazın kendi penceresinde bozuk bağımlılığa ulaşan çağrıyı, istek sayısını ve tipik
@@ -381,16 +407,22 @@ hata, hızlı hatadan kötü.
 - "Gecikme (p50 / p95 / p99)" (App RED) → ikinci fazda belirgin yükselir: her istek bozuk bağımlılığı bekliyor.
 - Explore'da: `sum(rate(dependency_requests_total{namespace="lvl10",dep="postgres",result="open"}[1m]))` → yalnızca birinci fazda sıfırdan ayrılır: DB'ye hiç gitmeden reddedilen çağrılar.
 
-**Nerede çözülüyor:** Seviye içinde (devre kesici). Eşik ayarı bir ölçüm işidir: çok hassas → sağlıklı bağımlılık bozuk
-ilan edilir; çok tembel → arıza fark edilmez. `ErrNotFound` (404) devreyi tetiklemez: 404 arıza değildir.
+**Nasıl çözülüyor:** Bu seviyenin kendi koruması: devre kesici. Eşik ayarı bir ölçüm işidir: çok hassassa sağlıklı bağımlılık bozuk
+ilan edilir, çok tembelse arıza fark edilmez. "Bulunamadı" (404) devreyi tetiklemez, çünkü arıza değildir. Tuzak
+devre kesiciyi kapatınca sorun döner.
 
 ---
 
 ### P10-05 · TRAP · Yavaş bağımlılık, ölüden beterdir
 
-**Ne deniyoruz:** Redis ölmeyip 3 sn yavaşlarsa, timeout'suz kodda istekler birikiyor mu?
-**Neden:** Ölü bağımlılık hızlı hata verir; yavaş olan her isteği bekletir. Timeout'suz çağrı sınırsız bir kuyruktur ve
-devre kesici de kördür: 3 sn'de gelen cevap başarılı sayılır.
+**Ne oluyor:** Tuzak (`TRAP_NO_DEP_TIMEOUT`) açıkken Redis ölmeyip her cevabı 3 sn geciktirince istekler
+birikir: aynı anda işlenen istek (in-flight), goroutine ve bellek tırmanır. Ölü bir bağımlılık hızlı hata verir;
+yavaş olanı her isteği bekletir.
+**Neden oluyor:** Süre sınırı (timeout) olmayan bir çağrı sınırsız bir kuyruktur. Devre kesici de burada kördür:
+3 sn'de gelen cevap "başarılı" sayıldığı için devre hiç açılmaz.
+**Bu deney:** Redis'e 3 sn gecikme ekler ve sabit hızda (saniyede 60 istek) yük verir — gerçek trafik servis
+yavaşladı diye yavaşlamaz. Önce süre sınırlarıyla, sonra tuzak açıkken; goroutine, in-flight ve Redis çağrı süresini
+karşılaştırır.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P10-05` (`redis-delay-3s` altında sabit geliş hızlı yükle — saniyede
 60 istek, `RATE=` ile değişir — timeout'lu/timeout'suz goroutine, in-flight, bellek ve Redis çağrı süresini
@@ -455,16 +487,20 @@ uzamadıysa tuzak etkili olmamıştır; script hüküm vermez.
 - "Şu an işlenen istek (pod'a göre)" → ikinci fazda belirgin yüksek: istekler bitmiyor, birikiyor.
 - "Bellek kullanımı" → goroutine'lerle aynı yönde: bekleyen her çağrı bellekte duruyor.
 
-**Nerede çözülüyor:** Seviye içinde: bir bağımlılığa yapılan her çağrının süre sınırı var — guard'da ve istemcinin
-kendisinde. Timeout, süre sınırının uygulandığı yerdedir.
+**Nasıl çözülüyor:** Bu seviyenin kendi çözümü: bir bağımlılığa yapılan her çağrının süre sınırı var — hem korumada (guard) hem
+Redis istemcisinin kendisinde (500 ms). Süre dolunca çağrı hata sayılır, devre açılır ve istek önbelleği atlayıp hızlı
+döner. Tuzak bu sınırları kaldırınca sorun döner.
 
 ---
 
 ### P10-06 · Yük atma: kabul ettiğini hızlı tut
 
-**Ne deniyoruz:** Kapasite dolunca fazlasını reddetmek (yük atma), kabul edilen isteklerin hızını koruyor mu?
-**Neden:** Aşırı yüklü sunucu her şeyi kabul ederse herkes yavaşlar ve zaman aşımına uğrar. Eşiği aşan isteği hızlı
-bir 503 ile reddetmek, kabul edilenleri hızlı tutar.
+**Ne oluyor:** Trafik kapasiteyi aşınca, sunucu her isteği kabul ederse herkes yavaşlar ve isteklerin çoğu zaman
+aşımına uğrar: kimse hızlı cevap alamaz.
+**Neden oluyor:** Aşırı yüklü bir sunucu gelen her işi sıraya koyar; sıra uzadıkça her istek daha uzun bekler. Eşiği
+aşan isteği anında reddetmek (yük atma, load shedding) sırayı kısa tutar ve kabul edilen isteklerin hızını korur.
+**Bu deney:** Redis'e 200 ms gecikme ekleyip (istekler sürsün, birikebilsin) basamak basamak artan yük verir; yük
+atma açıkken ve kapalıyken kabul edilen isteklerin p99'unu karşılaştırır.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P10-06` (`redis-delay-200ms` altında — istekler sürsün, birikebilsin
 — `stairs` yüküyle yük atma açık (eşik 40) / kapalı, kabul edilen isteklerin p99'unu karşılaştırır; atılan 503'ler
@@ -524,9 +560,9 @@ yüksek: her şey kabul edildiği için herkes yavaşladı. Hüküm: yük atma a
 - "Şu an işlenen istek (pod'a göre)" → birinci fazda eşik (40) civarında tavan yapar; ikinci fazda sınırsız yükselir.
 - "Dönen durum kodları" (k6) → birinci fazda hızlı `503`'ler: atılan istekler. `02 · App RED` bunları saymaz — shedder metrik katmanının önünde.
 
-**Nerede çözülüyor:** Seviye içinde (shedder). Toplam p99'a bakarsan yük atma kötü görünür, kabul edilenlere bakarsan
-iyi: doğru metrik kabul edilenlerinki. Yük atma bir kalite aracıdır, kapasite için ölçekleme gerekir (07); sağlık uçları
-asla atılmaz (P01-07).
+**Nasıl çözülüyor:** Bu seviyenin kendi çözümü: yük atıcı (shedder) pod başına eşzamanlı istek eşiğini aşanı hızlı bir 503 ile
+reddeder. Toplam p99'a bakarsan yük atma kötü görünür, kabul edilenlere bakarsan iyi: doğru ölçü kabul edilenlerinki.
+Yük atma bir kalite aracıdır; kapasite için ölçekleme gerekir (07). Sağlık uçları asla atılmaz (P01-07).
 
 ## 7. Seviye içi alıştırmalar (TRAP_ bayrakları)
 

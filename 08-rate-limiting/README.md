@@ -38,10 +38,11 @@ Katmanlı: ingress kaba (yalnızca IP'yi bilir), uygulama ince (kiracıyı, ucu 
 
 | ID | Sorun | Nasıl çözüldü |
 |---|---|---|
-| P07-06 | N+1: liste maliyeti sonuç kümesiyle orantılı | **Çözülmüş sayılmaz:** `TRAP_` alıştırması, tuzak 08'de de duruyor; bu yüzden `SOLVES`'ta yok. Kalıcı çözüm 14'te |
+| P07-06 | 100 linki listeleyen istek veritabanına 101 sorgu gönderiyordu (N+1) | **Çözülmüş sayılmaz:** bu bir alıştırma tuzağı (`TRAP_`) ve 08'de de duruyor; bu yüzden `SOLVES`'ta yok. Kalıcı çözüm 14'te |
 
-Asıl kapanan borç üç seviyedir taşınan süreç içi limit (P01-05, P02-04, 07'de iki serviste ayrı); `SOLVES` yalnızca
-bir önceki seviyeyi kapsadığı için orada görünmez.
+Bu seviyenin asıl kapattığı borç, 01'den beri her pod'un kendi belleğinde tuttuğu hız sınırı (P01-05, P02-04; 07'de
+iki serviste ayrı ayrı): N pod'da limit N katına çıkıyordu. Sayaç artık bütün pod'ların paylaştığı Redis'te. `SOLVES`
+yalnızca bir önceki seviyeyi kapsadığı için bu orada görünmez.
 
 ## 4. Ayağa kaldırma
 
@@ -116,26 +117,32 @@ reddetti). "Ne zaman tekrar dene" demeyen bir limit istemciyi daha sık denemeye
 
 ## 6. Reproduce edilebilir sorunlar
 
-Her sorun aynı düzende: **Ne deniyoruz** (deneyin sorusu) → **Neden** → adımlar (her adım ne yaptığını söyler)
-→ **Terminalde ne görmelisin** → **Grafana'da gör** (giriş: admin / ladder) → **Nerede çözülüyor**.
-`make repro` hükmü: `REPRODUCED` = sorun var · `NOT-REPRODUCED` = yok · `SKIPPED` = ölçülemedi.
+Bu seviyede yaşayacağın 6 sorun. Her birini iki yoldan görebilirsin: **Otomatik** — `make repro P=<ID>` deneyi
+kendisi yapar, ölçer ve hükmünü basar (`REPRODUCED` = sorun var · `NOT-REPRODUCED` = yok · `SKIPPED` =
+ölçülemedi); **Elle** — adımları sırayla yapıştırıp sonucu kendi gözünle görürsün. Her sorunun bölümü aynı
+düzende: **Ne oluyor** → **Neden oluyor** → **Bu deney** → adımlar → **Terminalde ne görmelisin** →
+**Grafana'da gör** (giriş: admin / ladder) → **Nasıl çözülüyor**.
 
-| ID | Sorun | Reproduce | Grafana'da | Çözüm |
-|---|---|---|---|---|
-| P08-01 | Limiter'ın kendi bağımlılığı: fail-open mı closed mı | `CONFIRM=1 make repro P=P08-01` | [10 · Rate limit](http://grafana.localtest.me/d/ladder-ratelimit?var-level=lvl08&from=now-15m&to=now&refresh=10s) · [06 · Redis](http://grafana.localtest.me/d/ladder-redis?var-level=lvl08&from=now-15m&to=now&refresh=10s) → "Sınırlayıcı arka uç hatası / sn" | karar + alarm (11) |
-| P08-02 | Her isteğe +2 Redis gidiş-gelişi | `make repro P=P08-02` | [10 · Rate limit](http://grafana.localtest.me/d/ladder-ratelimit?var-level=lvl08&from=now-15m&to=now&refresh=10s) · [06 · Redis](http://grafana.localtest.me/d/ladder-redis?var-level=lvl08&from=now-15m&to=now&refresh=10s) → "Kararlar (anahtar türüne göre)" | seviye içi (pipeline) |
-| P08-03 | **TRAP** XFF: adaletsiz mi, etkisiz mi? | `make repro P=P08-03` | [10 · Rate limit](http://grafana.localtest.me/d/ladder-ratelimit?var-level=lvl08&from=now-15m&to=now&refresh=10s) · [15 · k6](http://grafana.localtest.me/d/ladder-k6?var-level=lvl08&from=now-15m&to=now&refresh=10s) → "Kararlar (anahtar türüne göre)" | seviye içi |
-| P08-04 | Sabit pencere sınırında 2× burst | `make repro P=P08-04` | [10 · Rate limit](http://grafana.localtest.me/d/ladder-ratelimit?var-level=lvl08&from=now-15m&to=now&refresh=10s) → "Kararlar (anahtar türüne göre)" | seviye içi (kayan pencere) |
-| P08-05 | **TRAP** global anahtar = Redis hot key | `make repro P=P08-05` | [06 · Redis](http://grafana.localtest.me/d/ladder-redis?var-level=lvl08&from=now-15m&to=now&refresh=10s) · [10 · Rate limit](http://grafana.localtest.me/d/ladder-ratelimit?var-level=lvl08&from=now-15m&to=now&refresh=10s) → "Redis CPU" | seviye içi (parçalama) |
-| P08-06 | Gürültülü komşu izole ediliyor mu? | `make repro P=P08-06` | [10 · Rate limit](http://grafana.localtest.me/d/ladder-ratelimit?var-level=lvl08&from=now-15m&to=now&refresh=10s) · [15 · k6](http://grafana.localtest.me/d/ladder-k6?var-level=lvl08&from=now-15m&to=now&refresh=10s) → "Normal ve kötü niyetli kullanıcının gecikmesi (k6)" | 13 (tier kotaları) |
+| ID | Ne olur? | Neden olur? | Nasıl çözülür? |
+|---|---|---|---|
+| P08-01 | Hız sınırı sayaçlarının tutulduğu Redis durunca ya koruma kalkar ya da herkes reddedilir | Koruma paylaşılan bir sayaca (Redis) bağlı; sayaca ulaşamayan limiter ya geçirir (fail-open) ya reddeder (fail-closed) | **Bir karar:** geçir + alarm (**11**'de SLO alarmı); pod içinde gevşek bir yedek limit |
+| P08-02 | Her istek, hız sınırı kontrolü için Redis'e iki kez gidip gelir; bu, isteğin süresine eklenir | 07'de sayaç pod'un belleğindeydi (~100 nanosaniye); şimdi kiracı ve IP için iki ağ çağrısı | **Bu seviyede:** iki kontrolü tek gidiş-gelişte yapmak (pipeline), pod'da kısa ömürlü tampon |
+| P08-03 | İstemcinin adresi yanlış okunursa hız sınırı ya herkesi birden cezalandırır ya da saldırgan onu atlatır | Tuzaklar (`TRAP_IGNORE_XFF`, `TRAP_TRUST_ANY_XFF`): adres, istemcinin de yazabildiği `X-Forwarded-For` başlığından yanlış okunur | **Bu seviyede:** tuzaklar kapalıyken yalnızca kendi proxy'lerinin eklediği adrese güvenilir |
+| P08-04 | Sayaç her 10 sn'de sıfırlanan bir pencereyse, iki pencerenin sınırında limitin iki katı istek geçer | Tuzak (`TRAP_FIXED_WINDOW`): 9.9. saniyede 300, sayaç sıfırlanınca 10.1. saniyede 300 daha | **Bu seviyede:** kayan pencere (varsayılan) — önceki pencere ağırlıklı sayılır |
+| P08-05 | "Bütün sistem için saniyede N istek" kuralı, pod eklenerek aşılamayan bir tavana çarpar | Tuzak (`TRAP_GLOBAL_LIMIT`): her istek aynı tek Redis anahtarına yazar; Redis tek çekirdekte çalışır | **Bu seviyede:** anahtarı parçalara bölmek (`global:0..15`) |
+| P08-06 | Açgözlü bir istemci sınırlanırken normal kullanıcılar etkilenmiyor mu? Bu seviyenin asıl sorusu | Hız sınırının amacı adalet: IP ve kiracı başına ayrı sayaçlar gürültülü komşuyu diğerlerinden ayırmalı | **Bu seviye** IP + kiracı limiti getirir · **13:** kimliğe göre müşteri kotaları |
 
 ---
 
 ### P08-01 · Limiter'ın kendi bağımlılığı
 
-**Ne deniyoruz:** Redis durunca limiter ne yapar: istekleri geçirir mi (fail-open), reddeder mi (fail-closed)?
-**Neden:** Koruma paylaşılan duruma (Redis) taşındı; artık koruma da arızalanabilir. `RATE_LIMIT_FAIL_OPEN=true` ile
-hizmet sürer ama koruma kalkar, `false` ile koruma sürer ama herkes reddedilir.
+**Ne oluyor:** Hız sınırı sayaçları Redis'te tutuluyor. Redis durunca iki kötü sonuçtan biri olur: ayar
+`RATE_LIMIT_FAIL_OPEN=true` ise hizmet sürer ama koruma kalkar (kötü istemci sınırsız istek atar); `false` ise koruma
+sürer ama normal kullanıcılar dahil herkes reddedilir.
+**Neden oluyor:** Koruma paylaşılan bir duruma (Redis) taşındı; artık korumanın kendisi de arızalanabilir. Sayaca
+ulaşamayan limiter "geçir" (fail-open) ile "reddet" (fail-closed) arasında seçim yapmak zorunda.
+**Bu deney:** Kötü niyetli bir istemciyle önce Redis ayaktayken, sonra Redis durdurulup iki ayarla ayrı ayrı yük
+verir; reddedilen istekleri, 5xx'i ve limiter hatalarını karşılaştırır, sonunda her şeyi geri alır.
 
 **Reproduce (adım adım):** Otomatik: `CONFIRM=1 make repro P=P08-01` (normal, fail-open ve fail-closed davranışını
 sırayla ölçer: Redis'i durdurur, ayarı değiştirir, sonunda ikisini de geri alır). Elle — 2. adım Redis'i (önbellekle
@@ -186,15 +193,18 @@ neredeyse `reqs` kadar: koruma çalışıyor ama normal kullanıcılar da redded
 - "429 oranı" → fail-closed fazında neredeyse %100.
 - "Redis ayakta mı" → 0'a inmez, **kesilir**: exporter Redis pod'unun içinde, pod gidince ölçen de gider.
 
-**Nerede çözülüyor:** bir karardır: fail-open **+ alarm** (korumayı kaybetmek telafi edilir, hizmeti kaybetmek
-edilmez); "limiter devre dışı" alarmı 11'de SLO'lardan türer. Azaltma: pod içinde daha gevşek bir yedek limiter.
+**Nasıl çözülüyor:** Bu bir karardır: geçir + alarm — korumayı bir süre kaybetmek telafi edilir, hizmeti kaybetmek edilmez; "limiter devre dışı" alarmı 11'de SLO'lardan türetilir. Pod içinde daha gevşek bir yedek limit etkiyi azaltır.
 
 ---
 
 ### P08-02 · Her isteğe iki ağ çağrısı
 
-**Ne deniyoruz:** Limit kontrolü isteğin süresinin ne kadarını alıyor?
-**Neden:** 07'de bellekteki bir map'ti (~100 ns); şimdi her istek kiracı ve IP için iki Redis çağrısı yapıyor.
+**Ne oluyor:** Her isteğe, hız sınırı kontrolü için iki Redis çağrısı eklenir; bu kontrol isteğin toplam süresinin
+ölçülebilir bir kısmını alır. Koruma bedava değildir.
+**Neden oluyor:** 07'de sayaç pod'un belleğindeydi ve kontrol ~100 nanosaniye sürüyordu. Şimdi sayaç Redis'te: izin
+verilen her istek, kiracı ve IP sayaçları için iki ağ gidiş-gelişi yapar.
+**Bu deney:** Limit kontrolünün süresini toplam istek süresiyle karşılaştırır ve istek başına Redis komut sayısını
+sayar (beklenen ~3: 1 önbellek + 2 limit).
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P08-02` (limit kontrolü süresini toplam istek süresiyle ve istek
 başına Redis komut sayısını beklenen ~3 ile karşılaştırır: 1 önbellek + 2 limit). Elle:
@@ -224,21 +234,27 @@ izin verilen istek bu kontrolden iki tane yapar. `istek başına Redis komutu` ~
 - "Kararlar (anahtar türüne göre)" → her istek iki karar üretir: `tenant allow` ile `ip allow` + `ip reject` aynı hızda ilerler — iki ağ çağrısı bu iki çizgi.
 - "Komut / sn" → App RED'deki "Saniyedeki istek"e böl: istek başına ~3 Redis komutu.
 
-**Nerede çözülüyor:** seviye içi — iki kontrolü tek gidiş-gelişte yapmak (pipeline), pod'da kısa ömürlü token tamponu,
-ucuz reddi ingress'e bırakmak.
+**Nasıl çözülüyor:** Bu seviyenin kendi ayarları: iki kontrolü tek gidiş-gelişte yapmak (pipeline), pod'da kısa ömürlü bir izin tamponu tutmak, ucuz reddi ingress'e bırakmak.
 
 ---
 
 ### P08-03 · TRAP · X-Forwarded-For'u yanlış okumanın iki yolu
 
-**Ne deniyoruz:** Limiter istemcinin adresini `X-Forwarded-For` (XFF) başlığından yanlış okursa ne olur?
-**Neden:** XFF, istemcinin de yazabildiği bir listedir; güvenilir tek kısmı **senin** proxy'lerinin eklediği girdiler.
+**Ne oluyor:** Limiter istemcinin adresini yanlış okursa hız sınırı iki yoldan bozulur: ya bütün kullanıcılar tek
+kovaya düşer ve bir kötü istemci herkesi sınırlatır (adaletsiz), ya da kötü istemci her istekte kendine yeni bir
+adres uydurup sınırdan kaçar (etkisiz).
+**Neden oluyor:** İstemcinin gerçek adresi, araya giren proxy'lerin eklediği `X-Forwarded-For` (XFF) başlığında
+taşınır; ama bu başlığa istemci de istediğini yazabilir. Güvenilir tek kısım **senin** proxy'lerinin eklediği
+girdilerdir. İki tuzak iki yanlış okumayı açar:
 
 | Okuma | Sonuç |
 |---|---|
 | `TRAP_IGNORE_XFF` — soket adresini oku | Herkes ingress'in adresinde tek kovada: bir kötü istemci herkesi limitler → **adaletsiz** |
 | `TRAP_TRUST_ANY_XFF` — ilk girdiye güven | İstemci kendi kovasını seçer → limit **etkisiz** |
 | **Doğru** — sağdan `TRUSTED_PROXY_HOPS` kadar geri say | Yalnızca kendi proxy'lerinin eklediğine güvenilir |
+
+**Bu deney:** Aynı kötü istemci yükünü üç modda (doğru okuma, `TRAP_IGNORE_XFF`, `TRAP_TRUST_ANY_XFF`)
+koşar; her fazda Redis'teki adres kovalarını ve kimin sınırlandığını ölçer.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P08-03` (üç modu aynı `abuser` yüküyle koşar, her fazda Redis'teki IP
 kovalarını ve kimin sınırlandığını ölçer). k6'nın bütün istemcileri tek makineden gelir; bu yüzden k6 güvenilir bir yük
@@ -295,15 +311,18 @@ istemcinin payı sıfıra inmeyebilir.
 - "Normal ve kötü niyetli kullanıcının gecikmesi (k6)" → gecikmede büyük fark bekleme (429 hızlı bir cevap); fark **kimin** reddedildiğinde.
 - Explore'da: `k6_normal_client_limited_rate{level="lvl08"}` → normal istemcinin sınırlanan payı (0–1): ignore-xff fazında yükselir, diğerlerinde sıfıra yakın.
 
-**Nerede çözülüyor:** seviye içi (bayrakları kapat) — kaç proxy olduğunu ve hangisinin senin olduğunu yazıya dök;
-gerisi veridir, kanıt değil.
+**Nasıl çözülüyor:** Bu seviyenin kendi ayarı: tuzaklar kapalıyken adres sağdan, önündeki proxy sayısı (`TRUSTED_PROXY_HOPS`) kadar geri sayılarak okunur. Kaç proxy olduğu ve hangisinin senin olduğu bilinmeli; gerisi istemcinin iddiasıdır, kanıt değil.
 
 ---
 
 ### P08-04 · Sabit pencere sınırında 2× burst
 
-**Ne deniyoruz:** Sabit pencereli sayaç, iki pencerenin sınırında limitin iki katını geçiriyor mu?
-**Neden:** 10 sn'de 300 limitte, 9.9. saniyede 300 ve 10.1. saniyede 300 daha geçebilir: 0.2 saniyede 600.
+**Ne oluyor:** Sayaç her 10 saniyede sıfırlanan sabit bir pencere olursa, iki pencerenin sınırına denk gelen bir
+istemci çok kısa sürede limitin iki katını geçirebilir.
+**Neden oluyor:** Tuzak (`TRAP_FIXED_WINDOW`) açıkken, 10 sn'de 300 limitte istemci 9.9. saniyede 300, sayaç
+sıfırlandıktan hemen sonra 10.1. saniyede 300 daha gönderebilir: 0.2 saniyede 600 istek.
+**Bu deney:** Aynı yükü kayan ve sabit pencereyle koşar; herhangi bir 10 sn'lik aralıkta geçen en fazla isteği sayar
+(sabit pencerede limitin iki katına yaklaşır, ama yalnızca yük pencere sınırına denk gelirse).
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P08-04` (redirect'i tek pod'a indirir, IP limitini geçici olarak
 60 / 10 sn'ye çeker, önce kayan sonra sabit pencereyle `burst` koşar, pod'un `/metrics` ucunu saniyede bir okuyup
@@ -364,17 +383,20 @@ sınıra denk gelirse.
 - "Kararlar (anahtar türüne göre)" → iki fazda da `ip reject` > 0 olmalı (yük limiti aşıyor); `ip allow` iki fazda da limite yakın (≈6/s) düz bir çizgi.
 - "Sınırdan geçen istek / sn (10 sn çözünürlük)" → büyük olasılıkla boş ya da kesik: 1 sn'den kısa taşma 10 sn'lik kazımada ortalamaya karışır; kanıt terminaldeki saniyelik sayım.
 
-**Nerede çözülüyor:** seviye içi — kayan pencere sayacı (önceki pencerenin sayımı, mevcut pencerede ne kadar ilerlendiğine
-göre ağırlıklandırılır; `internal/ratelimit/redis.go`'daki Lua). Alternatifler: sliding window log (kesin ama pahalı),
-token bucket (patlamaya izin verir, ortalamayı korur).
+**Nasıl çözülüyor:** Bu seviyenin varsayılanı kayan pencere: önceki pencerenin sayısı, yeni pencerede ne kadar ilerlendiğine göre ağırlıklı eklenir (`internal/ratelimit/redis.go`'daki Lua). Alternatifleri: kesin ama pahalı kayan kayıt (sliding window log), patlamaya izin verip ortalamayı koruyan jeton kovası (token bucket).
 
 ---
 
 ### P08-05 · TRAP · Global anahtar = Redis hot key
 
-**Ne deniyoruz:** "Bütün sistem için saniyede N istek" kuralı (tek global anahtar) limitin tavanını neye bağlar?
-**Neden:** Her istek aynı tek Redis anahtarına yazar ve Redis komutları tek iş parçacığında çalıştırır: tavan tek bir
-çekirdektir, pod eklemek yükseltmez. Bu kümenin yükünde fark küçüktür — sorun yavaşlama değil, henüz çarpılmayan bir tavan.
+**Ne oluyor:** "Bütün sistem için saniyede en fazla N istek" gibi tek bir global kural açıldığında limitin tavanı tek
+bir Redis çekirdeği olur ve pod eklemek bu tavanı yükseltmez. Bu kümenin yükünde fark küçüktür: sorun bugünkü bir
+yavaşlık değil, henüz çarpılmamış bir tavandır.
+**Neden oluyor:** Tuzak (`TRAP_GLOBAL_LIMIT`) açıkken her istek aynı tek Redis anahtarını artırır. Redis komutları tek
+iş parçacığında çalıştırır; tek anahtara gelen bütün yük tek çekirdekte toplanır (sıcak anahtar, hot key).
+**Bu deney:** Redis'in içinde `redis-benchmark` ile tek anahtar ve dağıtık anahtarlar için saniyedeki artırma
+(`INCR`) tavanını ölçer; sonra dağıtık ve global modlarda 40'ar sn yük verip limit kontrolü süresini ve Redis CPU'sunu
+bilgi için basar.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P08-05` (önce Redis pod'unda `redis-benchmark` ile 100 bin anahtara
 dağılmış ve tek anahtardaki `INCR` tavanını ölçer — ikisi yakınsa sınır instance'ta, hüküm bu; sonra dağıtık ve global
@@ -423,15 +445,18 @@ basar: bütün istekler aynı anahtarda. İki fazın `limit kontrolü p99` ve `R
 - "Komutlar (türe göre)" → benchmark'ta `incr` tepesi; yük fazlarında `evalsha`, global fazda daha yüksek (her istek bir kontrol daha yapıyor).
 - "Kararlar (anahtar türüne göre)" → `global allow` / `global reject` yalnızca tuzak fazında belirir.
 
-**Nerede çözülüyor:** seviye içi — anahtarı parçala (`global:0..15`, rastgele seç, limiti 16'ya böl). Aynı fizik 02'de
-DB satırında (P02-08), 04'te önbellek anahtarında (P04-03) görüldü.
+**Nasıl çözülüyor:** Bu seviyenin kendi ayarı: anahtarı parçalara böl (`global:0..15`, her istek rastgele birini seçer, limit 16'ya bölünür). Aynı fizik 02'de veritabanı satırında (P02-08), 04'te önbellek anahtarında (P04-03) görüldü.
 
 ---
 
 ### P08-06 · Gürültülü komşu izole ediliyor mu?
 
-**Ne deniyoruz:** Açgözlü bir istemci 429 alırken normal istemcilerin deneyimi bozulmadan kalıyor mu?
-**Neden:** Hız sınırının amacı kapasiteyi değil **adaleti** korumaktır; bu seviyenin asıl sorusu bu.
+**Ne oluyor:** Bu seviyenin asıl sorusu: çok hızlı istek atan açgözlü bir istemci (gürültülü komşu) `429`
+("yavaşla") alırken normal kullanıcıların yanıt süresi bozulmadan kalıyor mu?
+**Neden oluyor:** Hız sınırının amacı kapasiteyi değil adaleti korumaktır. IP ve kiracı başına ayrı sayaçlar, bir
+istemcinin aşırılığını diğerlerinden ayırmak için vardır; bunun gerçekten işlediği ancak ölçülerek bilinir.
+**Bu deney:** 1 açgözlü + çok sayıda normal istemciyle (`abuser` senaryosu) yük verir; kimin ne oranda sınırlandığını
+ve normal istemcinin yanıt süresini ölçer (beklenen: kötü istemcinin en az %30'u, normalin %5'ten azı sınırlanır).
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P08-06` (`abuser`: 1 açgözlü + N normal istemci; P08-03'teki gibi
 k6 yük dengeleyiciyi oynar ve `TRUSTED_PROXY_HOPS=2` denir — yoksa hepsi tek IP kovasında olur ve izolasyon
@@ -474,8 +499,7 @@ make reset
 - "Dönen durum kodları" → `429` baskın, yanında `302`; `503` kötü istemcinin ingress'in kaba sınırını (400/sn) aşması — normal istemci 503 almaz.
 - Explore'da: `k6_normal_client_limited_rate{level="lvl08"}` → normal istemcinin sınırlanan payı: sıfıra yakın kalmalı.
 
-**Nerede çözülüyor:** 13 (kimliğe göre müşteri kotaları). IP limiti tek saldırganı, kiracı limiti bir müşterinin
-bütün altyapısını sınırlar; ikisi birlikte gerekir.
+**Nasıl çözülüyor:** Bu seviye IP ve kiracı limitlerini birlikte getirir. 13'te kimliğe göre müşteri kotaları gelir: IP limiti tek saldırganı, kiracı limiti bir müşterinin bütün altyapısını sınırlar; ikisi birlikte gerekir.
 
 ## 7. Seviye içi alıştırmalar (TRAP_ bayrakları)
 

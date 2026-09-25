@@ -41,9 +41,9 @@ Okuma yolu DB'ye hiç yazmaz; yazıcı geri kalsa bile kullanıcı beklemez (`Te
 
 | ID | Sorun | Nasıl çözüldü |
 |---|---|---|
-| P02-08 | Sıcak link → satır kilidi kuyruğu | Yazma istek yolundan çıktı ve toplanıyor: aynı koda gelen 1000 tıklama tek satır güncellemesi. Anahtar ne kadar sıcaksa toplama o kadar iyi |
+| P02-08 | Popüler bir linke gelen her tıklama veritabanında aynı satırı güncellemeye çalışıyordu; istekler o satırın kilidini (satır kilidi) sırayla bekliyor, yönlendirmeler yavaşlıyordu | Tıklama artık yönlendirmenin içinde yazılmıyor: kısa bir kuyruğa bırakılıyor, arka planda toplanıp toplu yazılıyor. Aynı koda gelen 1000 tıklama tek satır güncellemesi olur; link ne kadar popülerse toplama o kadar verimli |
 
-`links.clicks` yerine `(code, day)` başına tek satır tutan `clicks_daily` geldi (`migrations/003`).
+Tıklamalar `links.clicks` sütununda değil, link ve gün başına tek satır tutan `clicks_daily` tablosunda (`migrations/003`).
 
 ## 4. Ayağa kaldırma
 
@@ -111,25 +111,33 @@ Bu seviyede yeni: **`GET /api/links/{code}/stats`** → `{"code","clicks","by_da
 
 ## 6. Reproduce edilebilir sorunlar
 
-Her sorun aynı düzende: **Ne deniyoruz** (deneyin sorusu) → **Neden** → adımlar (her adım ne yaptığını söyler)
-→ **Terminalde ne görmelisin** → **Grafana'da gör** (giriş: admin / ladder) → **Nerede çözülüyor**.
-`make repro` hükmü: `REPRODUCED` = sorun var · `NOT-REPRODUCED` = yok · `SKIPPED` = ölçülemedi.
+Bu seviyede yaşayacağın 6 sorun. Her birini iki yoldan görebilirsin: **Otomatik** — `make repro P=<ID>` deneyi
+kendisi yapar, ölçer ve hükmünü basar (`REPRODUCED` = sorun var · `NOT-REPRODUCED` = yok · `SKIPPED` =
+ölçülemedi); **Elle** — adımları sırayla yapıştırıp sonucu kendi gözünle görürsün. Her sorunun bölümü aynı
+düzende: **Ne oluyor** → **Neden oluyor** → **Bu deney** → adımlar → **Terminalde ne görmelisin** →
+**Grafana'da gör** (giriş: admin / ladder) → **Nasıl çözülüyor**.
 
-| ID | Sorun | Reproduce | Grafana'da | Çözüm |
-|---|---|---|---|---|
-| P05-01 | At-most-once: sert ölümde tampon kaybolur | `CONFIRM=1 make repro P=P05-01` | görünmez — kanıt terminalde ↓ | 06 |
-| P05-02 | Kuyruk dolunca düşürme (ve sınırsızın daha kötü olması) | `make repro P=P05-02` | [07 · Analytics](http://grafana.localtest.me/d/ladder-analytics?var-level=lvl05&from=now-15m&to=now&refresh=10s) · [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl05&from=now-15m&to=now&refresh=10s) → "Kuyruk doluluğu (pod'a göre)" | 06 · 07 |
-| P05-03 | Yazıcı, okumayla aynı süreç ve havuzu paylaşıyor | `make repro P=P05-03` | [05 · Postgres](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl05&from=now-15m&to=now&refresh=10s) · [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl05&from=now-15m&to=now&refresh=10s) → "Veritabanı sorguları (türe göre)" | 06 · 07 |
-| P05-04 | Toplama ölçeklenir, ayrıntı ölçeklenmez | `make repro P=P05-04` | [05 · Postgres](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl05&from=now-15m&to=now&refresh=10s) · [02 · App RED](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl05&from=now-15m&to=now&refresh=10s) → "Sorgu süresi p99 (türe göre)" | 09 (partition) |
-| P05-05 | Kısa grace → drain yarıda kalır | `CONFIRM=1 make repro P=P05-05` | görünmez — kanıt terminalde ↓ | seviye içi |
-| P05-06 | **TRAP** 301 → sayılamayan tıklama | `make repro P=P05-06` | görünmez — kanıt terminalde ↓ | seviye içi |
+| ID | Ne olur? | Neden olur? | Nasıl çözülür? |
+|---|---|---|---|
+| P05-01 | Uygulama pod'u aniden (sert) öldürülünce son birkaç saniyenin tıklamaları hiç kaydedilmez | Tıklamalar yazılmadan önce programın belleğindeki bir kuyrukta bekler; program aniden ölünce kuyruğu yazacak kimse kalmaz ("en fazla bir kez" teslimat) | **06:** tıklamalar kalıcı bir olay loguna (Redpanda) yazılır |
+| P05-02 | Veritabanı yavaşlayınca tıklamaların bir kısmı bilerek atılır; yönlendirmeler ise yavaşlamaz | Tıklama kuyruğunun boyu sınırlı; dolunca yenileri atılır (beklemek yönlendirmeyi yavaşlatır, sınırsız kuyruk belleği doldurur) | **06:** kalıcı olay logu · **07:** ayrı tüketici servisi |
+| P05-03 | Tıklamaları veritabanına yazan iş, yönlendirme yapan pod'ların içinde çalışır; ayrı büyütülemez, ayrı sınırlanamaz | Yazma işi isteğin yolundan çıktı ama aynı programda kaldı: aynı CPU, aynı veritabanı bağlantı havuzu | **06 + 07:** yazıcı ayrı bir servis (tüketici) olur |
+| P05-04 | Tıklamaları tek tek (ayrıntılı) saklasaydık "bu link kaç kez tıklandı?" sorusu milyonlarca satır taramayı gerektirirdi | Toplama tablosu veriyi yazarken küçültür (link ve gün başına tek satır); ayrıntı tablosu okurken büyür | **09:** ayrıntı gerekiyorsa güne göre bölümlenmiş tablo (partition); asıl karar ürün kararı |
+| P05-05 | Kapanış süresi kısaltılınca her yeni sürüm dağıtımında tıklama kaybolur | Program kapanırken kuyruğu boşaltmaya çalışır ama Kubernetes süre dolunca onu zorla öldürür | **Bu seviyenin ayarı:** kapanış süresi, kuyruğu boşaltmaya yetecek kadar uzun |
+| P05-06 | Aynı link tarayıcıda 5 kez açılınca yalnızca 1 tıklama sayılır | Tuzak açıkken yönlendirme "kalıcı" (301); tarayıcı cevabı saklar, sonraki açılışlar sunucuya hiç gelmez | **Bu seviyenin tuzağı:** kapatınca 302 + "saklama" başlığı döner |
 
 ---
 
 ### P05-01 · At-most-once: sert ölümde tampondaki tıklamalar kaybolur
 
-**Ne deniyoruz:** Pod sert öldürülünce (SIGKILL) kuyruktaki tıklamalar yazılıyor mu?
-**Neden:** Kuyruk süreç belleğinde. Düzgün kapanışta `Stop()` kuyruğu boşaltır; sert ölümde boşaltacak kimse kalmaz.
+**Ne oluyor:** Bir uygulama pod'u kapanışa fırsat verilmeden, aniden öldürülünce (çökme, `--force` ile silme,
+makinenin kapanması) son birkaç saniyede gelen tıklamalar hiç kaydedilmez. Normal kapanışta (yeni sürüm dağıtımı)
+kayıp olmaz. Bir sayaç için kabul edilebilir; fatura gibi "her olay önemli" işler için değil.
+**Neden oluyor:** Tıklamalar veritabanına yazılmadan önce programın belleğindeki bir kuyrukta toplanır ve toplu
+yazılır. Normal kapanışta program kuyruğu boşaltıp çıkar; aniden ölünce (SIGKILL) bellekteki tıklamaları yazacak
+kimse kalmaz. Bu teslimat türüne "en fazla bir kez" (at-most-once) denir.
+**Bu deney:** Kuyruğun yazılma aralığını 15 sn'ye açar (kayıp görünür olsun), bir linke 400 tıklama üretip pod'ları
+sert öldürür ve kaç tıklamanın kaydedildiğini sayar; aynı senaryoyu normal kapanışla tekrarlayıp karşılaştırır.
 
 **Reproduce (adım adım):** Otomatik: `CONFIRM=1 make repro P=P05-01` (tamponu 15 sn'ye açar, bir linke 400 tıklama
 üretip pod'ları `--force` ile öldürür, aynısını `rollout restart` ile tekrarlar; sert ölümde kayıp %10'u geçerse
@@ -179,15 +187,21 @@ kuyruğunu yazıp çıktı. Boşaltma planlı kapanışı kurtarır, plansız ö
 - `CONFIRM=1 make repro P=P05-01` → `sert ölüm: 400 tıklama üretildi, kaydedilen … → KAYIP …` satırında büyük kayıp, `graceful: … → KAYIP …` satırında sıfıra yakın
 - `curl -s http://lvl05.localtest.me/api/links/<kod>/stats | jq .clicks` → sert ölümden sonra gönderilenin altında kalır ve yükselmez
 
-**Nerede çözülüyor:** 06 — olaylar dayanıklı bir loga yazılır (en az bir kez); yeni sorun çift sayma olur.
+**Nasıl çözülüyor:** **06:** tıklama olayları programın belleği yerine kalıcı bir olay loguna (Redpanda) yazılır; tüketici ölse de olay logda durur ve tekrar okunur ("en az bir kez"). Karşılığında yeni sorun çift saymadır; 06 onu da çözer (P06-01).
 
 ---
 
 ### P05-02 · Kuyruk dolunca düşürme — ve alternatifinin neden daha kötü olduğu
 
-**Ne deniyoruz:** Yazıcı yavaşlayınca ne olur: tıklamalar mı düşer, redirect'ler mi yavaşlar?
-**Neden:** Kuyruk dolunca `Record()` tıklamayı düşürür ve sayar. Bu kasıtlı: bekleyen bir gönderim redirect'i yine
-DB'ye bağlardı.
+**Ne oluyor:** Veritabanı yavaşlayınca tıklama yazıcısı geride kalır, kuyruk dolar ve yeni tıklamalar bilerek
+atılır (atıldığı sayılır ama kendisi yazılmaz). Yönlendirmeler ise hızlı kalır: kullanıcı bir şey fark etmez, yalnızca
+istatistik eksik kalır.
+**Neden oluyor:** Kuyruğun boyu sınırlı (pod başına 20.000 olay; deneyde 500). Dolunca iki seçenek var: tıklamayı
+atmak ya da yer açılana kadar beklemek. Beklemek yönlendirmeyi yavaş veritabanına bağlardı; sınırsız bir kuyruk ise
+belleği doldurup pod'u öldürürdü (OOMKilled) ve o an kuyruktaki her şey giderdi.
+**Bu deney:** Kuyruğu 500'e küçültür, veritabanına 2 sn gecikme ekler ve tek linke yoğun tıklama yükü verir; atılan
+tıklamaları, kuyruk doluluğunu ve yönlendirme süresini ölçer. İstersen sınırsız kuyruğun belleği nasıl doldurduğunu da
+gösterir.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P05-02` (kuyruğu 500'e küçültür, önce ısıtır, sonra Postgres'e 2 sn
 gecikme ekleyip 80 kullanıcıyla 45 sn tek linke yük verir; düşürülen > 0 ise `REPRODUCED`). Elle:
@@ -245,15 +259,19 @@ belleğinde bekliyor (`kubectl top pod`, sınır 256 MiB). Sınırsız kuyruk er
 - "Bellek: sınırın yüzde kaçı" → yalnızca 4. adımda yükselir: bekleyen tıklamalar bellekte birikiyor; %100'e değen konteyner öldürülür.
 - "Son sonlanma nedeni" → 4. adımda sınıra çarpan konteyner `OOMKilled` (kırmızı): tampondaki her şey gider.
 
-**Nerede çözülüyor:** 06 (dayanıklı log) · 07 (ayrı tüketici).
+**Nasıl çözülüyor:** **06** tıklamaları kalıcı bir loga yazar (atılmak yerine logda bekler), **07** yazıcıyı ayrı bir servis yapıp yük altında büyütür. Kural değişmez: her kuyruğun bir üst sınırı ve dolunca ne yapılacağı tanımlı olmalı.
 
 ---
 
 ### P05-03 · Yazıcı, okumayla aynı süreci ve havuzu paylaşıyor
 
-**Ne deniyoruz:** Tıklamaları DB'ye yazan iş, redirect'i servis eden pod'ların içinden mi çıkıyor?
-**Neden:** Yazma istek yolundan çıktı ama süreçten çıkmadı: aynı pod CPU'su, aynı bağlantı havuzu (`pgxpool`), aynı
-veritabanı. Yazıcıyı ayrı ölçekleyemez, ayrı sınırlayamazsın.
+**Ne oluyor:** Tıklamaları veritabanına yazan iş, yönlendirme yapan pod'ların içinde çalışıyor. Yazıcıyı ayrı
+büyütemez, ayrı sınırlayamaz, yönlendirmeye dokunmadan yeniden başlatamazsın; yazıcının CPU'su ve veritabanı yükü
+yönlendirme yapan programın hesabına yazılır.
+**Neden oluyor:** Yazma işi isteğin yolundan çıktı (kullanıcı onu beklemiyor) ama programdan çıkmadı: aynı pod'un
+CPU'sunu, aynı veritabanı bağlantı havuzunu (`pgxpool`) ve aynı veritabanını paylaşıyor. İzolasyon yarım kaldı.
+**Bu deney:** Aynı yükü iki kez verir: önce yazıcının veritabanı işi durdurulmuşken, sonra açıkken. Yazma
+sorgularının hangi pod'lardan çıktığını, yönlendirme süresini ve havuz beklemesini karşılaştırır.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P05-03` (aynı yükü iki kez verir: A'da yazıcının DB işi durdurulmuş,
 B'de açık; B'de `write_clicks` uygulama pod'larından çıkıyor ve A'da sıfırlanıyorsa `REPRODUCED`; iki fazın p99'unu da
@@ -302,15 +320,20 @@ hükmün yapıya bakmasının sebebi bu.
 - "p99 süre (uç noktaya göre)" → `/{code}` iki fazda yakın; küçük fark gürültüden ayırt edilemez.
 - Explore'da: `sum by (pod) (rate(db_queries_total{namespace="lvl05",op="write_clicks"}[1m]))` → B'de her seri bir uygulama pod'u (`linkly-…`).
 
-**Nerede çözülüyor:** 06 + 07 — tüketici ayrı bir süreç ve deployment olur: kendi havuzu, CPU sınırı ve ölçeklenmesi.
+**Nasıl çözülüyor:** **06 + 07:** yazıcı ayrı bir program ve ayrı bir Kubernetes servisi (tüketici) olur: kendi bağlantı havuzu, kendi CPU sınırı, kendi ölçeklenmesi. İzolasyon ancak ayrı süreçle gerçek olur.
 
 ---
 
 ### P05-04 · Toplama ölçeklenir, ayrıntı ölçeklenmez
 
-**Ne deniyoruz:** "Bu kod kaç kez tıklandı?" sorusu, toplama tablosunda ve tıklama başına satır tutan bir ayrıntı
-tablosunda ne kadar sürer?
-**Neden:** Toplama veriyi yazarken küçültür (kod ve gün başına tek satır); ayrıntı okurken büyür (her tıklama bir satır).
+**Ne oluyor:** Bu seviye tıklamaları tek tek değil, link ve gün başına tek satırda topluyor; "bu link kaç kez
+tıklandı?" anında cevaplanır. Tıklama başına bir satır tutan bir ayrıntı tablosu kursaydık aynı soru milyonlarca
+satırı taramayı gerektirirdi.
+**Neden oluyor:** Toplama veriyi yazarken küçültür: 2 milyon tıklama tek satır olur. Ayrıntı ise okurken büyür: her
+soru bütün satırları baştan sona tarar (tam tarama — Seq Scan). Karşılığında toplama tablosu "hangi saatte, hangi
+ülkeden" gibi ayrıntı sorularını cevaplayamaz.
+**Bu deney:** Toplama tablosundan istatistik süresini ölçer; sonra 2 milyon satırlık geçici bir ayrıntı tablosu kurup
+aynı soruyu ikisine de sorar, sorgu planlarını ve sürelerini karşılaştırır.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P05-04` (bir linke 200 tıklama üretip `stats` süresini ölçer; geçici
 `clicks_detail`'e aynı koda 2 M satır yazıp iki sorgunun planını karşılaştırır; ayrıntı planı tam taramaysa
@@ -356,15 +379,19 @@ satır tarar; `clicks_daily` planı birkaç satır okur ve `Execution Time`'ı k
 - "p99 süre (uç noktaya göre)" → `/api/links/{code}/stats` çizgisi düşük.
 - "Veritabanı CPU" → deneyin ortasında postgres pod'unda tepe: 2 M satırı üretmek ve taramak. Ayrıntının bedeli yazarken de ödenir.
 
-**Nerede çözülüyor:** Ayrıntı gerçekten gerekiyorsa 09 (güne göre partition, eskileri düşürme). Asıl karar ürün
-kararı: ayrıntıdan toplam sonradan türetilir, ama yalnızca toplam yazıldıysa ayrıntı geri gelmez.
+**Nasıl çözülüyor:** Ayrıntı gerçekten gerekiyorsa **09:** tablo güne göre bölümlenir (partition) ve eski günler toptan silinir. Asıl karar ürün kararı: ayrıntıdan toplam sonradan hesaplanabilir, ama yalnızca toplam yazıldıysa kaybolan ayrıntı geri gelmez.
 
 ---
 
 ### P05-05 · Kısa `terminationGracePeriodSeconds` → drain yarıda kalır
 
-**Ne deniyoruz:** Kapanış süresi (grace) kısalınca rollout başına kaybolan tıklama artıyor mu?
-**Neden:** Boşaltma kodu doğru olsa da kubelet süre dolunca süreci SIGKILL ile bitirir; boşaltma yarıda kalır.
+**Ne oluyor:** Pod'ların kapanış süresi kısaltılınca her yeni sürüm dağıtımında tıklamalar kaybolur. Kod aynı,
+boşaltma mantığı aynı; değişen tek şey bir YAML satırı.
+**Neden oluyor:** Kapanırken program önce trafikten çıkar, bekler, sonra kuyruktaki tıklamaları yazar. Kubernetes ise
+pod'a sabit bir kapanış süresi verir (`terminationGracePeriodSeconds`); süre dolunca programı zorla öldürür (SIGKILL)
+ve boşaltma yarıda kalır ya da hiç başlamaz.
+**Bu deney:** Kuyruğun yazılma aralığını 15 sn'ye açar; önce normal ayarla (60 sn), sonra 3 sn'lik kapanış süresiyle
+birer linke 2000 tıklama üretip pod'ları yeniden başlatır ve iki durumda kaybolan tıklamayı karşılaştırır.
 
 **Reproduce (adım adım):** Otomatik: `CONFIRM=1 make repro P=P05-05` (tamponu 15 sn'ye açar; mevcut ayarla — grace
 60 sn, preStop 5 sn, `SHUTDOWN_GRACE=20s` — ve `grace=3s` ile birer linke 2000 tıklama üretip rollout sonrası kaybı
@@ -414,15 +441,19 @@ veri kaybı. Kural: grace > preStop + `SHUTDOWN_GRACE` + boşaltma süresi.
 - `CONFIRM=1 make repro P=P05-05` → iki `kayıp: … tıklama` satırı; `grace=3s` fazındaki büyük
 - `kubectl -n lvl05 logs -f -l app.kubernetes.io/name=linkly --prefix` (ikinci terminalde) → mevcut ayarda akış `analitik kuyruğu boşaltılıyor` ve `temiz kapandı` ile biter; `grace=3s`'de `readiness düşürüldü, endpoint yayılımı bekleniyor` satırında kesilir
 
-**Nerede çözülüyor:** Seviye içi: grace'i kapanış adımlarının toplamından uzun tut.
+**Nasıl çözülüyor:** Bu seviyenin kendi ayarı: kapanış süresi, kapanış adımlarının toplamından uzun olmalı (trafikten çıkma beklemesi + `SHUTDOWN_GRACE` + kuyruğu boşaltma). `deploy/`'daki 60 sn buna göre seçili.
 
 ---
 
 ### P05-06 · TRAP · 301 tarayıcı önbelleği, sayılamayan tıklama üretir
 
-**Ne deniyoruz:** Tarayıcıda 5 kez açılan bir link 5 tıklama olarak sayılıyor mu?
-**Neden:** 301 kalıcı yönlendirmedir; tarayıcı sonraki açılışları sunucuya hiç göndermez (P00-10'daki hata, burada
-analitiği bozar).
+**Ne oluyor:** Tuzak açıkken aynı link tarayıcıda 5 kez açılınca istatistikte yalnızca 1 tıklama görünür.
+Analitik sessizce eksik sayar ve yanlış iş kararlarına yol açar.
+**Neden oluyor:** Tuzak (`TRAP_REDIRECT_301`) yönlendirmeyi "kalıcı taşındı" (301) yapar ve "saklama" başlığını
+kaldırır. Tarayıcı 301'i saklar; sonraki açılışlarda sunucuya hiç sormaz, yani tıklama sunucuya hiç gelmez. 00'daki
+hata (P00-10) burada analitiği bozar.
+**Bu deney:** Önce normal modda curl ile 50 tıklamanın sayıldığını gösterir; sonra tuzağı açıp yönlendirme
+başlıklarını karşılaştırır ve linki tarayıcıda 5 kez açıp sayacın 1'de kaldığını gösterir.
 
 **Reproduce (adım adım):** Otomatik: `make repro P=P05-06` (302 modunda 50 tıklamanın sayıldığını ölçer, tuzağı açıp
 iki modun durum kodunu ve `Cache-Control`'ünü karşılaştırır; tarayıcı adımı yalnızca elle). Elle:
@@ -469,7 +500,7 @@ kullanır, çünkü 2. adımdaki `curl -sI` de bir tıklama sayılır.
 - `curl -sI http://lvl05.localtest.me/<kod>` → tuzak kapalıyken `302` + `Cache-Control: no-store, max-age=0`; `TRAP_REDIRECT_301=true` iken `301` ve `Cache-Control` yok
 - Chrome'da linki 5 kez aç → 2.–5. açılış `(disk cache)`; `curl -s http://lvl05.localtest.me/api/links/<kod>/stats | jq .clicks` → `1`
 
-**Nerede çözülüyor:** Seviye içi: tuzağı kapat (`302` + `Cache-Control: no-store`).
+**Nasıl çözülüyor:** Bu seviyenin tuzağı: kapatınca (`make reset`) yönlendirme geçici (302) ve `Cache-Control: no-store` ile döner; tarayıcı her açılışta sunucuya sorar, her tıklama sayılır.
 
 ## 7. Seviye içi alıştırmalar (TRAP_ bayrakları)
 
