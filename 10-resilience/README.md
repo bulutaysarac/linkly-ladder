@@ -1,10 +1,10 @@
 # 10 — resilience · "Hata izolasyonu"
 
 > **Bu seviyede ne yaşayacaksın?**
-> - Bir bağımlılık kısmen bozulunca sistemin tamamen değil kısmen bozulması: timeout bütçesi, bütçeli retry, devre kesici, bulkhead, yük atma — hepsi tek bir `Guard`'da
-> - Tuzak: bütçesiz retry'ın arızalı bağımlılığa giden yükü katlaması (P10-01); tuzak: readiness'ın bağımlılığa bakınca bütün pod'ları birden düşürmesi (P10-02)
-> - İç ve dış timeout'lar hizasızken işin boşa yapılması (P10-03); tuzak: devre kesicinin açılması, denemesi ve flapping (P10-04)
-> - Tuzak: yavaş bir bağımlılığın ölü bir bağımlılıktan beter olması (P10-05); kapasite dolunca kabul edileni hızlı tutmak için yük atmak (P10-06)
+> - Bir bağımlılık kısmen bozulunca sistemin de yalnızca kısmen bozulması: timeout bütçesi, bütçeli retry, devre kesici, bulkhead, yük atma — hepsi tek bir `Guard`'da
+> - Tuzak: bütçesiz retry'ın arızalı bağımlılığa giden yükü katlaması (P10-01); tuzak: bağımlılığa bakan readiness'ın bütün pod'ları birden düşürmesi (P10-02)
+> - Hizasız timeout'larla boşa yapılan iş (P10-03); tuzak: devre kesicinin açılması, denemesi ve flapping (P10-04)
+> - Tuzak: yavaş bağımlılığın ölüden beter olması (P10-05); kapasite dolunca kabul edileni hızlı tutmak için yük atmak (P10-06)
 >
 > **Bu seviye olmasa ne olur?** Yavaşlayan tek bir Redis ya da DB bütün istek havuzunu doldurur; bir bağımlılığın arızası bütün servisin arızası olur.
 >
@@ -12,10 +12,8 @@
 
 ## 1. Bu seviye ne?
 
-Tek soru: bir bağımlılık **kısmen** bozulduğunda sistem tamamen bozulmak yerine nasıl **kısmen
-çalışır** kalır? Beş mekanizma ekleniyor ve hiçbiri diğerinin yerine geçmiyor: timeout bütçesi,
-bütçeli retry, devre kesici, bulkhead ve yük atma. Her biri `internal/resilience` içinde, hepsi
-tek bir `Guard` ile birleşiyor ve `store.Guarded` dekoratörüyle veri yoluna uygulanıyor.
+Tek soru: bir bağımlılık kısmen bozulunca sistem nasıl kısmen çalışır kalır? Beş mekanizma eklenir — timeout
+bütçesi, bütçeli retry, devre kesici, bulkhead, yük atma — ve hepsi tek bir `Guard` ile veri yoluna uygulanır.
 
 ## 2. Mimari
 
@@ -31,36 +29,35 @@ flowchart LR
   GP -.->|"açık / bulkhead dolu"| D1["degrade: cache_only<br/>yalnızca isabetler cevaplanır"]
 ```
 
-Her bağımlılığın **kendi** guard'ı ve kendi `dep` etiketi var (`postgres`, `redis`). Postgres
-guard'ı önbelleğin **altında** durur ve yalnızca veritabanı çağrılarını sarar: önbellek isabetleri
-ona hiç uğramaz. Bu sıra bir tasarım kararıdır — guard'ın nerede durduğu neyi ölçtüğünü belirler
-(bkz. `store/guarded.go`).
-
-Her mekanizmanın işi farklı:
+Her bağımlılığın kendi guard'ı ve `dep` etiketi var (`postgres`, `redis`); Postgres guard'ı önbelleğin altında durur,
+önbellek isabetleri ona hiç uğramaz.
 
 | Mekanizma | Sorusu | Neyi korur |
 |---|---|---|
 | timeout | ne kadar beklerim? | tek isteği |
 | retry (+ bütçe, + jitter) | tekrar dener miyim? | geçici kayıptan kurtarır |
-| breaker | sormaya devam eder miyim? | bağımlılığı **ve** beklemekten seni |
+| breaker (devre kesici) | sormaya devam eder miyim? | bağımlılığı ve beklemekten seni |
 | bulkhead | aynı anda kaç kişi sorar? | diğer bağımlılıkların kapasitesini |
-| shedding | kabul eder miyim? | kabul ettiklerinin gecikmesini |
+| shedding (yük atma) | kabul eder miyim? | kabul ettiklerinin gecikmesini |
 
 ## 3. Önceki seviyeden çözülenler
 
 | ID | Sorun | Nasıl çözüldü |
 |---|---|---|
-| P04-01 | Redis düşünce tüm yük DB'ye iner | Bulkhead + devre kesici: DB'ye giden eşzamanlılık sınırlı, bağımlılık bozulunca hızlı reddediliyor. Kesinti **taşınmıyor**, sınırlanıyor |
+| P04-01 | Redis düşünce tüm yük DB'ye iner | Bulkhead + devre kesici: DB'ye giden eşzamanlılık sınırlı, bozuk bağımlılık hızlı reddedilir; kesinti taşınmaz, sınırlanır |
 
-Ayrıca P02-06 (yavaş sorgu → havuz tıkanması) ve P09-02 (failover penceresi) büyük ölçüde
-emiliyor: timeout + retry + breaker üçlüsü, geçici arızaları kullanıcıya yansıtmadan yutuyor.
+P02-06 (yavaş sorgu → havuz tıkanması) ve P09-02 (failover penceresi) de büyük ölçüde emilir: timeout + retry + breaker.
 
 ## 4. Ayağa kaldırma
 
-İlk kez mi? Önce kök README'deki [Sıfırdan başlangıç](../README.md#sıfırdan-başlangıç) — platform bir kez kurulur (`cd platform && make full`).
-Bu seviyenin platformdan istediği: **temel yığın (kind, ingress, Prometheus, Grafana) + Chaos Mesh, KEDA, CloudNativePG**. `make up` ilk adımda (profil) bunları açar ve kullanılmayanları kapatır; bir bileşen kurulu değilse hangi komutla kurulacağını söyleyip durur.
+İlk kez mi? Önce kök README'deki [Sıfırdan başlangıç](../README.md#sıfırdan-başlangıç): platform bir kez kurulur ve
+`LADDER` (repo kökü) tanımlanır. Her komut bloğu `cd "$LADDER/…"` ile başlar; olduğu gibi yapıştır.
+Bu seviyenin platformdan istediği: **temel yığın (kind, ingress, Prometheus, Grafana) + Chaos Mesh, KEDA, CloudNativePG**; `make up` açar.
+
+Hızlı başvuru (komutları tek tek kullan; satır sonu açıklamaları için zsh'da `setopt interactivecomments` gerekir):
 
 ```bash
+cd "$LADDER/10-resilience"
 make up            # profil → Grafana'yı temizle → build → push → deploy → rollout wait → smoke
 code=$(curl -s -XPOST http://lvl10.localtest.me/api/links -H 'Content-Type: application/json' -d '{"url":"https://example.com"}' | jq -r .code); echo "$code"
 curl -s -o /dev/null -w '%{http_code} → %{redirect_url}\n' http://lvl10.localtest.me/$code   # 302 → https://example.com
@@ -70,31 +67,44 @@ make repro P=P10-01   # §6'daki bir sorunu otomatik üret → REPRODUCED / NOT-
 make env           # açık ayar/tuzaklar · değiştir: make set E="KEY=değer" · hepsini geri al: make reset (§7)
 make chaos C=pg-loss-30   # bu seviyenin ana aracı
 make unchaos
-make down          # seviyeyi kaldır · kümeyi durdurmak için: make -C ../platform stop
+make down          # seviyeyi kaldır · kümeyi durdurmak için: cd "$LADDER/platform" && make stop
 ```
 
-**Rehber — bu seviyeyi baştan sona, sırayla.** Komut bloklarında açıklama yok; her bloğu olduğu gibi yapıştırabilirsin.
+**Rehber — bu seviyeyi baştan sona, sırayla.**
 
-1. Önceki seviye açıksa kapat (aynı anda tek seviye çalışır), bu seviyeyi kur. `make up` Grafana'yı da temizler:
+1. Önceki seviyeyi kapat (aynı anda tek seviye), bu seviyeyi kur. `make up` Grafana'yı da temizler; sonunda
+   `✔ lvl10 ayakta` yazar:
 ```bash
-make -C ../09-database-scaling down
+cd "$LADDER/09-database-scaling"
+make down
+cd "$LADDER/10-resilience"
 make up
 ```
-2. 09'un altı sorun scriptini bu seviyede koş. Koşarken başka komut çalıştırma: aynı pod'lara dokunurlar.
-   `problems/SOLVES` 09'dan bir sorun listelemiyor (içindeki P04-01 04'ün sorunu), bu yüzden `BEKLENEN` sütunu her
-   satırda `(açık kalabilir)` der; `SONUÇ` sütunu 09'un sorunlarından hangilerinin burada hâlâ üretildiğini gösterir.
-   Onay isteyen P09-02 ve P09-06 `SKIPPED` görünür — onları da koşmak için `CONFIRM=1 make verify-prev`:
+
+**Verileri temizleyip sıfırdan koşmak istersen** 1. adımın yerine bunu kullan: bütün seviyelerin verisi
+(linkler, veritabanı, önbellek, kuyruk) ve Grafana'nın gösterdiği metrik, trace, log silinir; küme ve kurulum
+kalır (~2-3 dk). Ardından bu seviye temiz kurulur. Yalnızca Grafana çizgilerini temizlemek için (veri kalır)
+seviye klasöründe `make fresh` yeter; her deneyin ilk komutu zaten bu.
 ```bash
+cd "$LADDER"
+make wipe CONFIRM=1
+cd "$LADDER/10-resilience"
+make up
+```
+2. 09'un sorunlarını burada koş (koşarken başka komut çalıştırma). `problems/SOLVES` 09'dan bir sorun listelemiyor
+   (içindeki P04-01 04'ün sorunu), bu yüzden `BEKLENEN` her satırda `(açık kalabilir)` der; `SONUÇ` 09'un
+   sorunlarından hangilerinin burada hâlâ üretildiğini gösterir. P09-02 ve P09-06 `SKIPPED` görünür — onları da
+   koşmak için `CONFIRM=1 make verify-prev`:
+```bash
+cd "$LADDER/10-resilience"
 make verify-prev
 ```
-3. §6'daki sorunları sırayla yaşa (P10-01 → P10-06). Her sorunda aynı düzen:
-   **Elle** bloklarını sırayla yapıştır (ilk komut `make fresh`: Grafana bu deneye boş başlar) →
-   **Terminalde ne görmelisin** ile karşılaştır → **Grafana'da gör** linklerini aç, her madde hangi panelde neyi
-   göreceğini söyler. İstersen aynı deneyi `make repro P=…` ile otomatik koş: ölçer ve hükmünü basar.
-   Bu seviyede deneylerin çoğu bir arıza enjekte eder (`make chaos`) ve iki faz koşar: önce koruma açıkken, sonra
-   `make set … W=redirect` ile tuzak açıkken. Her sorunun son adımı ikisini de geri alır.
-4. Bitince kalan arızaları ve açık ayarları geri al, seviyeyi kapat:
+3. §6'daki sorunları sırayla yaşa (P10-01 → P10-06): adımları yapıştır → **Terminalde ne görmelisin** ile
+   karşılaştır → **Grafana'da gör** linklerini aç. Deneylerin çoğu bir arıza enjekte eder (`make chaos`) ve iki faz
+   koşar: koruma açık, sonra `make set … W=redirect` ile tuzak açık; son adım ikisini de geri alır.
+4. Bitince kalan arızaları ve ayarları geri al, seviyeyi kapat:
 ```bash
+cd "$LADDER/10-resilience"
 make unchaos
 make reset
 make down
@@ -104,10 +114,14 @@ make down
 
 Her seviyede aynı: [docs/API.md](../docs/API.md).
 
-Yeni davranış: aşırı yükte `503 {"error":"overloaded"}` + `Retry-After`. Bu bir arıza değil bir
-**karardır** — sunucu, kabul ettiği isteklere hızlı cevap verebilmek için fazlasını erken reddediyor.
+Yeni davranış: aşırı yükte `503 {"error":"overloaded"}` + `Retry-After`. Bu bir arıza değil karardır: sunucu kabul
+ettiklerine hızlı cevap verebilmek için fazlasını erken reddeder.
 
 ## 6. Reproduce edilebilir sorunlar
+
+Her sorun aynı düzende: **Ne deniyoruz** (deneyin sorusu) → **Neden** → adımlar (her adım ne yaptığını söyler)
+→ **Terminalde ne görmelisin** → **Grafana'da gör** (giriş: admin / ladder) → **Nerede çözülüyor**.
+`make repro` hükmü: `REPRODUCED` = sorun var · `NOT-REPRODUCED` = yok · `SKIPPED` = ölçülemedi.
 
 | ID | Sorun | Reproduce | Grafana'da | Çözüm |
 |---|---|---|---|---|
@@ -122,27 +136,24 @@ Yeni davranış: aşırı yükte `503 {"error":"overloaded"}` + `Retry-After`. B
 
 ### P10-01 · TRAP · Bütçesiz retry bir yükseltectir
 
-**Belirti:** %30 hata oranında, bütçesiz "3 deneme" bağımlılık çağrılarını katlar — tam da
-bağımlılık zaten hata verirken.
-**Neden:** Retry bir **kurtarma** aracıdır, bir kapasite aracı değil. Bütçe olmadan, arızanın
-hızlandırıcısına dönüşür. [Topic · Konu: Retry amplification, backoff, jitter]
+**Ne deniyoruz:** Bağımlılık %30 hata verirken "3 kez dene" kuralı ona giden yükü katlıyor mu?
+**Neden:** Retry geçici bir kaybı kurtarmak içindir; bütçe (retry trafiğin en fazla %10'u) olmadan, zaten hata veren
+bağımlılığa ikinci bir yük kaynağı olur.
 
-**Reproduce (adım adım):**
+**Reproduce (adım adım):** Otomatik: `make repro P=P10-01` (`pg-loss-30` altında aynı yükü önce bütçeli retry'la,
+sonra `TRAP_NAIVE_RETRY` ile verir; iki fazın Postgres çağrı ve retry sayısını karşılaştırır). Elle:
 
-Otomatik — ölçer ve hüküm basar: `make repro P=P10-01` (`pg-loss-30` altında aynı yükü önce bütçeli retry'la, sonra
-`TRAP_NAIVE_RETRY` ile verir; iki fazın Postgres çağrı ve retry sayısını karşılaştırır, sonra arızayı ve tuzağı geri alır).
-
-Elle — `10-resilience` klasöründe, sırayla yapıştır:
-
-1. Grafana'yı temizle, Postgres'e %30 paket kaybı enjekte et:
+1. Temiz başla; Postgres'e %30 paket kaybı enjekte et:
 ```bash
+cd "$LADDER/10-resilience"
 make fresh
 make chaos C=pg-loss-30
 sleep 5
 ```
-2. Bütçeli retry'la (varsayılan: en fazla 2 tekrar, retry trafiğin en fazla %10'u) 45 sn yük ver, son 3 dakikadaki
-   Postgres çağrısı ve retry sayısını oku:
+2. Bütçeli retry'la (varsayılan: en fazla 2 tekrar, retry trafiğin en fazla %10'u) 45 sn yük ver, Postgres çağrısı ve
+   retry sayısını oku:
 ```bash
+cd "$LADDER/10-resilience"
 make load S=mixed K6_ARGS="--vus 25 --duration 45s"
 sleep 10
 curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum(increase(dependency_requests_total{namespace="lvl10",dep="postgres"}[3m]))' | jq -r '"postgres çağrısı: " + .data.result[0].value[1]'
@@ -150,6 +161,7 @@ curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=su
 ```
 3. Tuzağı aç (3 deneme, bütçe ve jitter yok; redirect pod'ları yeniden başlar), aynı yükü ver, aynı iki sayıyı oku:
 ```bash
+cd "$LADDER/10-resilience"
 make set E="TRAP_NAIVE_RETRY=true" W=redirect
 make load S=mixed K6_ARGS="--vus 25 --duration 45s"
 sleep 10
@@ -158,81 +170,75 @@ curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=su
 ```
 4. Arızayı kaldır, tuzağı kapat:
 ```bash
+cd "$LADDER/10-resilience"
 make unchaos
 make reset
 ```
 
-**Terminalde ne görmelisin:** `make chaos` `networkchaos.chaos-mesh.org/pg-loss-30 created` basar; her yükün k6
-çıktısının sonunda bir özet satırı var: `k6 lvl10: reqs=… failed=…% 5xx=… …`. 2. adımda `retry`, `postgres çağrısı`nın
-en fazla ~%10'u kadardır: bütçe retry'ı sınırlıyor. 3. adımda aynı yükle iki sayı da büyür — `retry` belirgin artar,
-`postgres çağrısı` 2. adımdakini geçer: bir kullanıcı isteği birden çok bağımlılık çağrısına dönüşüyor, tam da bağımlılık
-hata verirken. (Pencere 3 dakika olduğu için 3. adımın sayısı 2. adımın kuyruğunu da biraz içerir; script de aynı
-pencereyle ölçer.)
+**Terminalde ne görmelisin:** `make chaos` `networkchaos.chaos-mesh.org/pg-loss-30 created` basar. 2. adımda `retry`,
+`postgres çağrısı`nın en fazla ~%10'u: bütçe retry'ı sınırlıyor. 3. adımda aynı yükle ikisi de büyür: bir kullanıcı
+isteği birden çok bağımlılık çağrısına dönüşüyor, tam da bağımlılık hata verirken. (3 dakikalık pencere 2. adımın
+kuyruğunu da biraz içerir; script de aynı pencereyle ölçer.)
 
-**Grafana'da gör:** [`11 · Resilience`](http://grafana.localtest.me/d/ladder-resilience?var-level=lvl10&from=now-15m&to=now&refresh=10s) — scripti başlatınca aç; `pg-loss-30` altında iki faz 45'er sn, arada redirect rollout'u (giriş: admin / ladder)
-- "Yeniden deneme / sn" → `postgres` çizgisi birinci fazda (bütçeli) alçak kalır — bütçe, retry'ı trafiğin en fazla %10'uyla sınırlıyor; ikinci fazda (`TRAP_NAIVE_RETRY`) **belirgin** yükselir.
-- "Bağımlılık hatası / sn" → `postgres` çizgisi kayıp boyunca iki fazda da sıfırın üstünde: retry'ların üstüne bindiği arıza bu. Zaman aşımına düşen denemeler bu panelde değil, `result="timeout"` serisinde sayılır.
-- Explore'da: `sum(rate(dependency_requests_total{namespace="lvl10",dep="postgres"}[1m]))` → aynı k6 yüküyle ikinci fazda daha yüksek: bir kullanıcı isteği birden çok bağımlılık çağrısına dönüşüyor — script'in karşılaştırdığı sayı bu.
+**Grafana'da gör:** [`11 · Resilience`](http://grafana.localtest.me/d/ladder-resilience?var-level=lvl10&from=now-15m&to=now&refresh=10s) — deney başlayınca aç; `pg-loss-30` altında iki faz 45'er sn, arada redirect rollout'u
+- "Yeniden deneme / sn" → `postgres` çizgisi birinci fazda (bütçeli) alçak; ikinci fazda (`TRAP_NAIVE_RETRY`) belirgin yükselir.
+- "Bağımlılık hatası / sn" → `postgres` iki fazda da sıfırın üstünde: retry'ların üstüne bindiği arıza bu.
+- Explore'da: `sum(rate(dependency_requests_total{namespace="lvl10",dep="postgres"}[1m]))` → aynı yükle ikinci fazda daha yüksek: istek başına birden çok bağımlılık çağrısı.
 
-**Üçü birlikte olmalı:** üstel geri çekilme + **jitter** + **bütçe**. Jitter'sız retry'lar
-senkronize olur (P03-07'deki TTL hizalanmasıyla aynı fizik); bütçesiz retry ikinci bir yük
-kaynağıdır.
-**Korumanın kendisi de sınanır:** bütçeyi harcayan `retCount++` satırı olmasa bütçe her zaman
-"boş" görünür ve retry sınırsız kalır — kod derlenir, koruma "var" görünür. Bunu
-`TestRetryBudgetCapsAmplification` birim testi yakalar.
-*Bir korumanın var olması ile çalışıyor olması ayrı şeylerdir.*
+**Nerede çözülüyor:** Seviye içinde: üstel geri çekilme + jitter (retry'lar senkronize olmasın) + bütçe. Bütçenin
+gerçekten harcandığını `TestRetryBudgetCapsAmplification` birim testi doğrular.
 
 ---
 
 ### P10-02 · TRAP · Readiness'ın bağımlılığa bakması (ikinci kez)
 
-**Belirti:** Redis 10 saniye kesildiğinde hazır endpoint sayısı **sıfıra** iner.
-**Neden:** P02-10'un kardeşi, yeni bağımlılıkla. Fail-open sayesinde hizmet **çalışır** (DB'ye
-düşülür) ama readiness Redis'e bakıyorsa tüm pod'lar aynı anda düşer.
-[Topic · Konu: Probe semantiği, kaskad]
+**Ne deniyoruz:** Redis ~40 sn kesilince redirect pod'ları trafikten düşüyor mu?
+**Neden:** Uygulama Redis'siz de çalışır (önbelleği atlayıp DB'ye gider), ama readiness Redis'e bakarsa bütün pod'lar
+aynı anda "hazır değilim" der ve trafik alacak pod kalmaz (P02-10'un kardeşi).
 
-**Reproduce (adım adım):**
+**Reproduce (adım adım):** Otomatik: `CONFIRM=1 make repro P=P10-02` (yük altında Redis'i iki kez ~40 sn durdurur —
+önce varsayılan readiness, sonra `TRAP_READY_CHECKS_REDIS`; her fazda en düşük hazır adres sayısını, 5xx'i ve `no_cache`
+degrade tepesini ölçer). Elle — 3. ve 7. adım Redis'i durdurur, aynı bloğun son iki satırı geri getirir; bloğu yarıda
+kesme:
 
-Otomatik: `CONFIRM=1 make repro P=P10-02` — yük altında Redis'i iki kez ~40 sn durdurur (önce varsayılan readiness'la,
-sonra `TRAP_READY_CHECKS_REDIS` ile); her fazda en düşük hazır endpoint sayısını, k6'nın 5xx sayısını ve `no_cache`
-degrade tepesini ölçer, sonunda Redis'i ve tuzağı geri alır.
-
-Elle — sırayla yapıştır. **Dikkat:** 3. ve 7. adım Redis'i durdurur (önbellek ve paylaşılan hız sınırlayıcı ~40 sn
-yok); aynı bloğun son iki satırı onu geri getirir, bloğu yarıda kesme.
-
-1. Grafana'yı temizle, redirect servisinin hazır pod adresi sayısına bak:
+1. Temiz başla; redirect'in hazır pod adresi sayısına bak:
 ```bash
+cd "$LADDER/10-resilience"
 make fresh
 kubectl -n lvl10 get endpointslice -l kubernetes.io/service-name=redirect -o jsonpath='{range .items[*]}{range .endpoints[*]}{.conditions.ready}{"\n"}{end}{end}' | grep -c true
 ```
-2. İKİNCİ bir terminalde `10-resilience` klasöründe 90 sn yük başlat:
+2. İkinci bir terminalde 90 sn yük başlat:
 ```bash
+cd "$LADDER/10-resilience"
 make load S=redirect K6_ARGS="--vus 10 --duration 90s"
 ```
-3. Yük başladıktan ~12 sn sonra İLK terminalde Redis'i durdur, 40 sn boyunca 2 sn'de bir hazır adres sayısını bas,
-   Redis'i geri getir:
+3. ~12 sn sonra ilk terminalde Redis'i durdur, 40 sn boyunca 2 sn'de bir hazır adres sayısını bas, Redis'i geri getir:
 ```bash
+cd "$LADDER/10-resilience"
 kubectl -n lvl10 scale statefulset redis --replicas=0
 for i in $(seq 1 20); do kubectl -n lvl10 get endpointslice -l kubernetes.io/service-name=redirect -o jsonpath='{range .items[*]}{range .endpoints[*]}{.conditions.ready}{"\n"}{end}{end}' | grep -c true; sleep 2; done
 kubectl -n lvl10 scale statefulset redis --replicas=1
 kubectl -n lvl10 rollout status statefulset/redis --timeout=180s
 ```
-4. İkinci terminaldeki yük bitince (k6 çıktısının sonundaki özet satırı `k6 lvl10: …`) kesinti sırasında Redis
-   devresinin açılıp açılmadığına bak:
+4. Yük bitince kesinti sırasında Redis devresinin açılıp açılmadığına bak:
 ```bash
+cd "$LADDER/10-resilience"
 sleep 10
 curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=max_over_time(max(degraded_mode{namespace="lvl10",mode="no_cache"})[2m:10s])' | jq -r '"no_cache tepe: " + .data.result[0].value[1]'
 ```
 5. Tuzağı aç (readiness Redis'e ping atar; redirect pod'ları yeniden başlar):
 ```bash
+cd "$LADDER/10-resilience"
 make set E="TRAP_READY_CHECKS_REDIS=true" W=redirect
 ```
-6. İKİNCİ terminalde yükü yeniden başlat:
+6. İkinci terminalde yükü yeniden başlat:
 ```bash
+cd "$LADDER/10-resilience"
 make load S=redirect K6_ARGS="--vus 10 --duration 90s"
 ```
-7. ~12 sn sonra İLK terminalde aynı kesintiyi tekrarla:
+7. ~12 sn sonra ilk terminalde aynı kesintiyi tekrarla:
 ```bash
+cd "$LADDER/10-resilience"
 kubectl -n lvl10 scale statefulset redis --replicas=0
 for i in $(seq 1 20); do kubectl -n lvl10 get endpointslice -l kubernetes.io/service-name=redirect -o jsonpath='{range .items[*]}{range .endpoints[*]}{.conditions.ready}{"\n"}{end}{end}' | grep -c true; sleep 2; done
 kubectl -n lvl10 scale statefulset redis --replicas=1
@@ -240,52 +246,45 @@ kubectl -n lvl10 rollout status statefulset/redis --timeout=180s
 ```
 8. Yük bitince tuzağı kapat:
 ```bash
+cd "$LADDER/10-resilience"
 make reset
 ```
 
-**Terminalde ne görmelisin:** 1. adımda redirect'in hazır pod sayısı (manifest'te 2; HPA ölçeklediyse daha fazla).
-Varsayılan fazda Redis dururken döngü hep aynı sayıyı basar, ikinci terminaldeki özet satırında `5xx` sıfır ya da sıfıra
-yakındır ve 4. adım `no_cache tepe: 1` der: Redis devresi açıldı, okumalar önbelleği atlayıp DB'den cevaplandı — pod
-trafik almaya devam etti. Tuzaklı fazda döngü birkaç saniye içinde `0` basmaya başlar ve Redis dönene kadar `0`'da kalır;
-özet satırında `5xx` sıfırdan büyüktür (ingress'in gönderecek hazır pod'u yok → 503). Redis dönünce sayı bütün pod'larla
-**aynı anda** eski değerine çıkar.
+**Terminalde ne görmelisin:** 1. adımda hazır pod sayısı (manifest'te 2; HPA ölçeklediyse fazla). Varsayılan fazda
+Redis dururken döngü hep aynı sayıyı basar, k6 özetinde `5xx` ~0 ve `no_cache tepe: 1`: Redis devresi açıldı, okumalar
+DB'den cevaplandı, pod trafik almaya devam etti. Tuzaklı fazda döngü birkaç saniyede `0` basar ve Redis dönene kadar
+`0`'da kalır; `5xx` sıfırdan büyük (ingress'in gönderecek pod'u yok → 503). Redis dönünce bütün pod'lar aynı anda geri
+gelir.
 
-**Grafana'da gör:** [`11 · Resilience`](http://grafana.localtest.me/d/ladder-resilience?var-level=lvl10&from=now-15m&to=now&refresh=10s) ve [`15 · k6`](http://grafana.localtest.me/d/ladder-k6?var-level=lvl10&from=now-15m&to=now&refresh=10s) — scripti başlatınca aç; iki faz 90'ar sn, Redis her fazda ~40 sn durur (giriş: admin / ladder)
-- "Hazır pod adresi (endpoint) sayısı" → `redirect` çizgisine bak. Birinci fazda Redis dururken **düz** kalır; ikinci fazda (`TRAP_READY_CHECKS_REDIS`) **0'a** iner ve Redis dönünce bütün pod'larla **aynı anda** geri gelir. (Aynı metrik `01 · Pods & Resources` → "Hazır pod adresi (endpoint) sayısı" panelinde de var.)
-- "Azaltılmış mod (degrade)" → birinci fazda Redis durunca `no_cache` **1'e çıkar**: Redis guard'ının devresi açıldı, önbellek atlanıyor ve okumalar DB'den cevaplanıyor. Redis dönünce ilk başarılı çağrıyla 0'a iner. Bağımlılığın durumu burada, bir METRİKTE görünüyor — pod ise trafik almaya devam ediyor. İkinci fazda da kısa bir süre 1 olabilir; ama pod'lar zaten trafikten düşmüştür.
-- "Dönen durum kodları" (k6) → birinci fazda `302` kesintisiz sürer; ikinci fazda Redis kesintisi boyunca `503` (ingress: gönderilecek hazır pod yok). Bkz. [Grafana'yı okumak](../README.md#grafanayı-okumak).
+**Grafana'da gör:** [`11 · Resilience`](http://grafana.localtest.me/d/ladder-resilience?var-level=lvl10&from=now-15m&to=now&refresh=10s) ve [`15 · k6`](http://grafana.localtest.me/d/ladder-k6?var-level=lvl10&from=now-15m&to=now&refresh=10s) — deney başlayınca aç; iki faz 90'ar sn, Redis her fazda ~40 sn durur
+- "Hazır pod adresi (endpoint) sayısı" → `redirect` çizgisi birinci fazda düz; ikinci fazda 0'a iner ve Redis dönünce bütün pod'larla aynı anda geri gelir.
+- "Azaltılmış mod (degrade)" → birinci fazda `no_cache` 1'e çıkar: bağımlılığın durumu bir metrikte görünüyor, pod ise trafik almaya devam ediyor.
+- "Dönen durum kodları" (k6) → birinci fazda `302` kesintisiz; ikinci fazda kesinti boyunca `503`.
 
-**En sinsi tarafı:** bağımlılık **döndüğünde** tüm pod'lar aynı anda geri gelir ve onu ikinci kez
-devirir — kurtarma da senkronize olur.
-**Doğrusu kodda:** Redis kendi guard'ının arkasında; kesinti onun devresini açar ve `no_cache`
-degrade modunu işaretler. Tepki pod'u öldürmek değil, önbelleksiz hizmet vermektir.
-*Readiness "ben trafik alabilir miyim?" sorusudur. "Bağımlılığım iyi mi?" sorusunun cevabı bir
-metriktir ve tepkisi degrade mod ya da devre kesicidir.*
+**Nerede çözülüyor:** Seviye içinde: Redis kendi guard'ının arkasında; kesinti devresini açar ve `no_cache` degrade
+modunu işaretler. Readiness "trafik alabilir miyim?" sorusudur; "bağımlılığım iyi mi?" bir metriktir.
 
 ---
 
 ### P10-03 · Timeout hizasızlığı
 
-**Belirti:** Client 1 sn sonra vazgeçer; sunucu 30 sn daha çalışır ve cevabı kimseye teslim edemez.
-**Neden:** Timeout bütçesi bir **zincirdir**: her katman, kendisini çağıranın kalan süresinden az
-beklemeli. `handler > bağımlılık ≥ sorgu`. [Topic · Konu: Timeout bütçesi]
+**Ne deniyoruz:** İstemci 1 sn'de vazgeçtiğinde sunucu işi bırakıyor mu, yoksa kimseye teslim edemeyeceği işi taşıyor mu?
+**Neden:** Timeout bütçesi bir zincirdir: her katman, kendisini çağıranın kalan süresinden az beklemeli
+(`handler > bağımlılık ≥ sorgu`).
 
-**Reproduce (adım adım):**
+**Reproduce (adım adım):** Otomatik: `make repro P=P10-03` (redirect'in timeout zincirini basar, `pg-delay-2s` altında
+45 sn yük verir; tepe in-flight, goroutine, Postgres çağrı p99'u, timeout ve bulkhead reddini ölçer). Elle:
 
-Otomatik: `make repro P=P10-03` — redirect'in timeout zincirini (handler / bağımlılık / sorgu) basar, `pg-delay-2s`
-altında 45 sn yük verir; tepe in-flight, tepe goroutine, Postgres çağrı p99'u, bağımlılık timeout'u ve bulkhead reddini
-ölçer, sonra arızayı kaldırır.
-
-Elle — sırayla yapıştır:
-
-1. Grafana'yı temizle, redirect'in timeout zincirine bak (manifest'te olanlar ve kodun varsayılanları):
+1. Temiz başla; redirect'in timeout zincirine bak (manifest'tekiler ve kodun varsayılanları):
 ```bash
+cd "$LADDER/10-resilience"
 make fresh
 make env W=redirect | grep TIMEOUT
 grep -nE '"(HANDLER_TIMEOUT|DEP_TIMEOUT|DB_QUERY_TIMEOUT)"' internal/config/config.go
 ```
-2. Postgres'e 2 sn gecikme enjekte et, scriptin verdiği yükü ver:
+2. Postgres'e 2 sn gecikme enjekte et, 1 sn'de vazgeçen istemciyle yük ver:
 ```bash
+cd "$LADDER/10-resilience"
 make chaos C=pg-delay-2s
 sleep 5
 make load S=mixed K6_ARGS="--vus 30 --duration 45s -e K6_TIMEOUT=1s"
@@ -293,6 +292,7 @@ sleep 10
 ```
 3. Sunucunun ne kadar iş taşıdığını ve korumaların tetiklenip tetiklenmediğini oku:
 ```bash
+cd "$LADDER/10-resilience"
 curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=max_over_time(sum(http_in_flight_requests{namespace="lvl10"})[3m:15s])' | jq -r '"tepe in-flight: " + .data.result[0].value[1]'
 curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=max_over_time(sum(go_goroutines{namespace="lvl10",pod=~"redirect.*"})[3m:15s])' | jq -r '"tepe goroutine: " + .data.result[0].value[1]'
 curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=histogram_quantile(0.99, sum(rate(dependency_request_duration_seconds_bucket{namespace="lvl10",dep="postgres"}[2m])) by (le))' | jq -r '"postgres çağrı p99 (sn): " + .data.result[0].value[1]'
@@ -300,53 +300,48 @@ curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=su
 ```
 4. Arızayı kaldır:
 ```bash
+cd "$LADDER/10-resilience"
 make unchaos
 ```
 
-**Terminalde ne görmelisin:** 1. adımda manifest yalnızca `DEP_TIMEOUT=2s` verir; `config.go` satırları diğer ikisinin
-varsayılanını gösterir: `HANDLER_TIMEOUT` 5 sn, `DB_QUERY_TIMEOUT` 3 sn (script bunu `handler=5s · bağımlılık=2s ·
-sorgu=3s` diye basar). Yükün özet satırında `failed=` yüksek, `5xx` sıfırdan büyük. 3. adımda Postgres çağrı p99'u
-2–2,5 sn bandında (bağımlılık timeout'u 2 sn'de kesiyor, histogram kovası 2,5 sn'de), `timeout` ve/veya `bulkhead`
-satırları sıfırdan büyük: yavaş bağımlılık kendisine ayrılan eşzamanlılıkla sınırlandı — scriptin REPRODUCED koşulu bu.
-Tepe in-flight ve goroutine, gecikme varken taşınan işin büyüklüğü.
+**Terminalde ne görmelisin:** 1. adımda manifest yalnızca `DEP_TIMEOUT=2s` verir; `config.go` diğer varsayılanları
+gösterir: `HANDLER_TIMEOUT` 5 sn, `DB_QUERY_TIMEOUT` 3 sn. k6 özetinde `failed=` yüksek, `5xx` sıfırdan büyük. 3. adımda
+Postgres çağrı p99'u 2–2,5 sn bandında (bağımlılık timeout'u 2 sn'de kesiyor) ve `timeout` ve/veya `bulkhead` sıfırdan
+büyük: yavaş bağımlılık kendisine ayrılan eşzamanlılıkla sınırlandı (scriptin REPRODUCED koşulu). Tepe in-flight ve
+goroutine, taşınan işin büyüklüğü.
 
-**Grafana'da gör:** [`11 · Resilience`](http://grafana.localtest.me/d/ladder-resilience?var-level=lvl10&from=now-15m&to=now&refresh=10s) ve [`15 · k6`](http://grafana.localtest.me/d/ladder-k6?var-level=lvl10&from=now-15m&to=now&refresh=10s) — scripti başlatınca aç; `pg-delay-2s` altında yük 45 sn sürer (giriş: admin / ladder)
-- "Başarısız oran (zaman içinde)" (k6) → yük boyunca yüksek: client her isteği 1 sn'de bırakıp gidiyor.
-- "Şu an işlenen istek (pod'a göre)" → aynı anda **yükselir**: client'ın bıraktığı istekleri sunucu hâlâ taşıyor. İki panel arasındaki fark, kimseye teslim edilmeyecek iştir.
-- "Bağımlılık gecikmesi p99" → `postgres` tavan yapar ve orada düzleşir: bağımlılık timeout'u (2 sn) çağrıyı kesiyor. Histogram kovası 2,5 sn'de olduğu için çizgi 2–2,5 sn bandında görünür.
-- Explore'da: `sum(rate(dependency_requests_total{namespace="lvl10",dep="postgres",result=~"timeout|bulkhead"}[1m])) by (result)` → `timeout` ve `bulkhead` serileri yükte sıfırdan ayrılır: koruma çalışıyor, yavaş bağımlılık kendisine ayrılan eşzamanlılıkla sınırlı kalıyor. Script'in REPRODUCED koşulu tam bu.
+**Grafana'da gör:** [`11 · Resilience`](http://grafana.localtest.me/d/ladder-resilience?var-level=lvl10&from=now-15m&to=now&refresh=10s) ve [`15 · k6`](http://grafana.localtest.me/d/ladder-k6?var-level=lvl10&from=now-15m&to=now&refresh=10s) — deney başlayınca aç; `pg-delay-2s` altında yük 45 sn
+- "Başarısız oran (zaman içinde)" (k6) → yük boyunca yüksek: istemci her isteği 1 sn'de bırakıyor.
+- "Şu an işlenen istek (pod'a göre)" → aynı anda yükselir: bırakılan istekleri sunucu hâlâ taşıyor; iki panel arasındaki fark kimseye teslim edilmeyecek iş.
+- "Bağımlılık gecikmesi p99" → `postgres` 2–2,5 sn'de düzleşir: bağımlılık timeout'u çağrıyı kesiyor.
+- Explore'da: `sum(rate(dependency_requests_total{namespace="lvl10",dep="postgres",result=~"timeout|bulkhead"}[1m])) by (result)` → `timeout` ve `bulkhead` yükte sıfırdan ayrılır: koruma çalışıyor.
 
-**Eksik kalan halka:** sunucu tarafı `statement_timeout` (P02-06). Client vazgeçse bile Postgres
-sorguyu durdurmaz — *bunu yalnızca DB'nin kendisi yapabilir.*
+**Nerede çözülüyor:** Seviye içinde (hizalı timeout zinciri). Eksik halka sunucu tarafı `statement_timeout`'tur
+(P02-06): istemci vazgeçse de Postgres sorguyu yalnızca kendisi durdurabilir.
 
 ---
 
 ### P10-04 · TRAP · Devre kesici: açılma, deneme, flapping
 
-**Belirti:** Devre kesici kapalıyken (`TRAP_NO_BREAKER`) her istek bozuk bağımlılığa gider ve
-p99 tavan yapar; açıkken istekler hızlıca reddedilir.
-**Neden:** Devre kesicinin işi bağımlılığı **kurtarmak** değil, ona ve sana nefes aldırmaktır.
-[Topic · Konu: Circuit breaker, yanlış pozitif]
+**Ne deniyoruz:** Bağımlılık bozukken devre kesici istekleri hızlı mı cevaplatıyor, yoksa her istek bozuk bağımlılığı mı bekliyor?
+**Neden:** Devre kesici (breaker) belli sayıda hatadan sonra bağımlılığa gitmeyi bir süre bırakır ve hızlı reddeder;
+yoksa her istek bozuk bağımlılığı bekler. İşi bağımlılığı kurtarmak değil, ona ve sana nefes aldırmaktır.
 
-**Reproduce (adım adım):**
+**Reproduce (adım adım):** Otomatik: `make repro P=P10-04` (`pg-loss-50` altında aynı yükü önce devre kesiciyle, sonra
+`TRAP_NO_BREAKER` ile verir; her fazın kendi penceresinde bozuk bağımlılığa ulaşan çağrıyı, istek sayısını ve tipik
+isteğin süresini (p50) ölçüp oranları karşılaştırır — p99 iki fazda da handler'ın 5 sn sınırına dayanır). Elle:
 
-Otomatik: `make repro P=P10-04` — `pg-loss-50` altında aynı yükü önce devre kesiciyle, sonra `TRAP_NO_BREAKER` ile verir;
-her fazın kendi zaman penceresinde bozuk bağımlılığa **ulaşan** çağrıyı (toplam − devre-açık reddi), istek sayısını ve
-tipik isteğin süresini (p50) ölçer, oranları karşılaştırır ve tepe devre durumunu basar. p99 değil p50: iki fazda da en
-yavaş %1 (devre açılmadan önceki istekler, yarı açık denemeler) handler'ın 5 sn'lik sınırına dayanır; devre kesicinin
-"istemci hızlı cevap alır" iddiası tipik isteğe dairdir.
-
-Elle — sırayla yapıştır:
-
-1. Grafana'yı temizle, Postgres'e %50 paket kaybı enjekte et:
+1. Temiz başla; Postgres'e %50 paket kaybı enjekte et:
 ```bash
+cd "$LADDER/10-resilience"
 make fresh
 make chaos C=pg-loss-50
 sleep 5
 ```
-2. Devre kesici açıkken (varsayılan) 50 sn yük ver; bu fazın penceresinde Postgres çağrılarını sonuca göre, tepe devre
-   durumunu ve tipik isteğin süresini (p50) oku:
+2. Devre kesici açıkken (varsayılan) 50 sn yük ver; bu fazda Postgres çağrılarını sonuca göre, tepe devre durumunu ve
+   tipik istek süresini (p50) oku:
 ```bash
+cd "$LADDER/10-resilience"
 t0=$(date +%s)
 make load S=mixed K6_ARGS="--vus 25 --duration 50s"
 sleep 20
@@ -357,6 +352,7 @@ curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode "query=hi
 ```
 3. Devre kesiciyi kapat (redirect pod'ları yeniden başlar), aynı yükü ver, aynı üç ölçümü al:
 ```bash
+cd "$LADDER/10-resilience"
 make set E="TRAP_NO_BREAKER=true" W=redirect
 t0=$(date +%s)
 make load S=mixed K6_ARGS="--vus 25 --duration 50s"
@@ -368,64 +364,51 @@ curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode "query=hi
 ```
 4. Arızayı kaldır, devre kesiciyi geri aç:
 ```bash
+cd "$LADDER/10-resilience"
 make unchaos
 make reset
 ```
 
-**Terminalde ne görmelisin:** sonuç satırları `ok`, `error`, `timeout`, `bulkhead`, `open`. 2. adımda `open` büyüktür:
-bağımlılığa **hiç gitmeden** hızlıca reddedilen çağrılar; `tepe devre durumu: 2` (açık). Bozuk bağımlılığa ulaşan çağrı
-= `open` dışındakilerin toplamı; bunu yükün özet satırındaki `reqs=` ile oranla. 3. adımda `open` `0`, `tepe devre durumu:
-0`: her istek bozuk bağımlılığa gidiyor, ulaşan/istek oranı 2. adımdakinden büyük ve tipik istek (p50) milisaniyelerden
-saniyelere çıkar — yavaş hata, hızlı hatadan kötü. Scriptin hükmü bu iki farka bakar.
+**Terminalde ne görmelisin:** sonuç satırları `ok`, `error`, `timeout`, `bulkhead`, `open`. 2. adımda `open` büyük
+(bağımlılığa hiç gitmeden reddedilen çağrılar) ve `tepe devre durumu: 2` (açık). Bozuk bağımlılığa ulaşan çağrı =
+`open` dışındakilerin toplamı; k6 özetindeki `reqs=` ile oranla. 3. adımda `open` `0`, devre durumu `0`: her istek
+bozuk bağımlılığa gidiyor, ulaşan/istek oranı büyür ve tipik istek (p50) milisaniyelerden saniyelere çıkar — yavaş
+hata, hızlı hatadan kötü.
 
-**Grafana'da gör:** [`11 · Resilience`](http://grafana.localtest.me/d/ladder-resilience?var-level=lvl10&from=now-15m&to=now&refresh=10s) ve [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl10&from=now-15m&to=now&refresh=10s) — scripti başlatınca aç; `pg-loss-50` altında iki faz ~70'er sn, arada redirect rollout'u (giriş: admin / ladder)
-- "Devre kesici durumu (0 kapalı · 1 yarı açık · 2 açık)" → birinci fazda `postgres` 0'dan **2'ye** çıkar ve 2 / 1 / 0 arasında gidip gelir (5 sn açık → yarı açık deneme → yine açık): testere dişi = flapping. Uygulama metrikleri 10 sn'de bir kazındığı için 5 sn'lik dişler düzensiz görünür. İkinci fazda (`TRAP_NO_BREAKER`) **düz 0**: devre hiç açılmıyor.
-- "Azaltılmış mod (degrade)" → birinci fazda devre açıkken `cache_only` 1'e çıkar: önbellek isabetleri DB'ye hiç gitmeden cevaplanmaya devam ediyor, yalnızca ıskalar hızlıca 503 alıyor (Postgres guard'ı önbelleğin altında). İkinci fazda 0.
-- "Gecikme (p50 / p95 / p99)" (App RED) → ikinci fazda p99 belirgin yükselir: her istek bozuk bağımlılığı bekliyor. Birinci fazda açık devre hızlı reddettiği için daha alçak.
-- Explore'da: `sum(rate(dependency_requests_total{namespace="lvl10",dep="postgres",result="open"}[1m]))` → yalnızca birinci fazda sıfırdan ayrılır: DB'ye **hiç gitmeden** reddedilen çağrılar (script'in "devre-açık reddi").
+**Grafana'da gör:** [`11 · Resilience`](http://grafana.localtest.me/d/ladder-resilience?var-level=lvl10&from=now-15m&to=now&refresh=10s) ve [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl10&from=now-15m&to=now&refresh=10s) — deney başlayınca aç; `pg-loss-50` altında iki faz ~70'er sn, arada redirect rollout'u
+- "Devre kesici durumu (0 kapalı · 1 yarı açık · 2 açık)" → birinci fazda `postgres` 0'dan 2'ye çıkar ve 2 / 1 / 0 arasında gidip gelir (açık → yarı açık deneme → yine açık): testere dişi = flapping. İkinci fazda düz 0.
+- "Azaltılmış mod (degrade)" → birinci fazda devre açıkken `cache_only` 1: önbellek isabetleri cevaplanmaya devam ediyor, yalnızca ıskalar hızlı 503 alıyor. İkinci fazda 0.
+- "Gecikme (p50 / p95 / p99)" (App RED) → ikinci fazda belirgin yükselir: her istek bozuk bağımlılığı bekliyor.
+- Explore'da: `sum(rate(dependency_requests_total{namespace="lvl10",dep="postgres",result="open"}[1m]))` → yalnızca birinci fazda sıfırdan ayrılır: DB'ye hiç gitmeden reddedilen çağrılar.
 
-**Ayar riski:** çok hassas → sağlıklı bağımlılığı bozuk ilan eder; çok tembel → arızayı fark etmez.
-**Kritik ayrıntı (kodda):** `ErrNotFound` devre kesiciyi **tetiklemez**. 404 bir arıza değildir;
-bunu ayırt etmemek, çok sayıda 404'ün sağlıklı bir bağımlılığı "bozuk" ilan etmesine yol açar —
-en sık yapılan devre kesici hatası.
-*Yavaş hata, hızlı hatadan kötüdür.*
+**Nerede çözülüyor:** Seviye içinde (devre kesici). Eşik ayarı bir ölçüm işidir: çok hassas → sağlıklı bağımlılık bozuk
+ilan edilir; çok tembel → arıza fark edilmez. `ErrNotFound` (404) devreyi tetiklemez: 404 arıza değildir.
 
 ---
 
 ### P10-05 · TRAP · Yavaş bağımlılık, ölüden beterdir
 
-**Belirti:** Redis 3 sn gecikirse (ölmedi, yavaşladı) timeout'suz modda istekler birikir: goroutine,
-in-flight ve bellek şişer.
-**Neden:** Ölü bağımlılık hızlı hata verir; yavaş olan her isteği bekletir. **Timeout'suz bir
-çağrı, sınırsız bir kuyruktur** (P05-02'nin bağımlılık hâli). Üstelik timeout yoksa devre kesici de
-kördür: 3 sn'de gelen bir cevap **başarılıdır**, hata sayılmaz.
-[Topic · Konu: Kaynak sızıntısı, timeout]
+**Ne deniyoruz:** Redis ölmeyip 3 sn yavaşlarsa, timeout'suz kodda istekler birikiyor mu?
+**Neden:** Ölü bağımlılık hızlı hata verir; yavaş olan her isteği bekletir. Timeout'suz çağrı sınırsız bir kuyruktur ve
+devre kesici de kördür: 3 sn'de gelen cevap başarılı sayılır.
 
-**Reproduce (adım adım):**
+**Reproduce (adım adım):** Otomatik: `make repro P=P10-05` (`redis-delay-3s` altında sabit geliş hızlı yükle — saniyede
+60 istek, `RATE=` ile değişir — timeout'lu/timeout'suz goroutine, in-flight, bellek ve Redis çağrı süresini
+karşılaştırır). Sabit geliş hızı şart: kapalı döngülü yükte her kullanıcı cevabı beklediği için birikim görünmez;
+gerçek trafik servis yavaşladı diye yavaşlamaz. Gecikme yalnızca Redis'ten uygulama pod'larına giden paketlere
+uygulanır (Redis'in yoklamaları etkilenmesin). Elle:
 
-Otomatik: `make repro P=P10-05` — `redis-delay-3s` altında, sabit geliş hızlı yükle (saniyede 60 istek; `RATE=` ile
-değişir) timeout'lu/timeout'suz goroutine, in-flight, bellek ve Redis çağrı süresini karşılaştırır. Yük açık modeldir:
-kapalı döngüde (N sanal kullanıcı) her kullanıcı cevabı beklediği için eşzamanlı istek N'i geçemez ve birikim
-görünmez; gerçek trafik servis yavaşladı diye yavaşlamaz — eşzamanlı istek ≈ geliş hızı × gecikme. `TRAP_NO_DEP_TIMEOUT` hem guard'ların
-timeout'unu hem de **Redis istemcisinin kendi** 500 ms'lik soket süre sınırlarını kaldırır.
-(Yalnızca guard'ınkini kaldırmak yetmez: istemcinin 500 ms'si her çağrıyı iki fazda da keser ve
-"timeout'suz" yol hiç sınanmaz. Timeout, süre sınırının **uygulandığı** yerdedir.) Gecikme yalnızca Redis'ten
-uygulama pod'larına giden paketlere uygulanır — Redis pod'unun tamamı yavaşlasaydı kubelet'in yoklamaları da gecikir,
-pod hazır olmaz ve headless `redis` Service'i DNS'ten düşerdi: deney yavaş bir bağımlılığı değil bulunamayan bir
-bağımlılığı ölçerdi. Chaos Mesh hedef pod'ları uygulandığı anda sabitlediği için gecikme, tuzak fazının yeniden
-başlayan pod'larına ayrıca uygulanır.
-
-Elle — sırayla yapıştır:
-
-1. Grafana'yı temizle, Redis'e 3 sn gecikme enjekte et (ölmedi, yavaşladı):
+1. Temiz başla; Redis'e 3 sn gecikme enjekte et (ölmedi, yavaşladı):
 ```bash
+cd "$LADDER/10-resilience"
 make fresh
 make chaos C=redis-delay-3s
 sleep 5
 ```
-2. Timeout varken (varsayılan) 45 sn sabit geliş hızlı yük ver (saniyede 60 istek); bu fazın penceresinde tepe goroutine, tepe in-flight, Redis çağrı p99'u
-   ve kesilen/devre-açık Redis çağrısı sayısını oku:
+2. Timeout varken (varsayılan) 45 sn saniyede 60 istek ver; tepe goroutine, tepe in-flight, Redis çağrı p99'u ve
+   kesilen/devre-açık Redis çağrısı sayısını oku:
 ```bash
+cd "$LADDER/10-resilience"
 t0=$(date +%s)
 RATE=60 make load S=steady K6_ARGS="--duration 45s"
 sleep 15
@@ -435,9 +418,10 @@ curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode "query=ma
 curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode "query=histogram_quantile(0.99, sum(rate(dependency_request_duration_seconds_bucket{namespace='lvl10',dep='redis'}[${w}s])) by (le))" | jq -r '"redis çağrı p99 (sn): " + .data.result[0].value[1]'
 curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode "query=sum(increase(dependency_requests_total{namespace='lvl10',dep='redis',result=~'timeout|open'}[${w}s]))" | jq -r '"kesilen/devre-açık redis çağrısı: " + .data.result[0].value[1]'
 ```
-3. Süre sınırlarını kaldır (guard'ınki ve Redis istemcisininki; redirect pod'ları yeniden başlar), gecikmeyi yeni
-   pod'lar için yeniden uygula (arıza hedef pod'ları uygulandığı anda sabitler), aynı yükü ver, aynı dört ölçümü al:
+3. Süre sınırlarını kaldır (guard'ınki ve Redis istemcisinin 500 ms'si; redirect pod'ları yeniden başlar), gecikmeyi
+   yeni pod'lar için yeniden uygula (arıza hedef pod'ları uygulandığı anda sabitler), aynı yükü ver, aynı ölçümleri al:
 ```bash
+cd "$LADDER/10-resilience"
 make set E="TRAP_NO_DEP_TIMEOUT=true" W=redirect
 make unchaos
 make chaos C=redis-delay-3s
@@ -453,56 +437,51 @@ curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode "query=su
 ```
 4. Arızayı kaldır, süre sınırlarını geri getir:
 ```bash
+cd "$LADDER/10-resilience"
 make unchaos
 make reset
 ```
 
-**Terminalde ne görmelisin:** 2. adımda Redis çağrı p99'u 1 sn'nin altında (çağrılar istemcinin 500 ms'sinde kesiliyor)
-ve kesilen/devre-açık çağrı sayısı sıfırdan büyük: timeout'lar hata sayıldı, Redis devresi açıldı, istekler önbelleği
-atlayıp DB'den hızlıca döndü — ölü bir bağımlılık gibi. 3. adımda Redis çağrı p99'u 1 sn'nin çok üstüne çıkar (çağrılar
-~3 sn sürüyor ve **başarıyla** bitiyor), kesilen/devre-açık sayısı sıfıra yakın (devre kesici yavaşlığı hata saymaz) ve
-tepe goroutine ile tepe in-flight 2. adımdakinden yüksek: bekleyen her çağrı bir goroutine ve bir istek tutuyor. Scriptin
-hükmü goroutine artışına bakar; Redis p99'u uzamadıysa tuzak etkili olmamıştır ve script hüküm vermez.
+**Terminalde ne görmelisin:** 2. adımda Redis çağrı p99'u 1 sn'nin altında (çağrılar 500 ms'de kesiliyor) ve
+kesilen/devre-açık sayısı sıfırdan büyük: timeout'lar hata sayıldı, devre açıldı, istekler önbelleği atlayıp DB'den
+hızlı döndü — ölü bağımlılık gibi. 3. adımda p99 ~3 sn (çağrılar başarıyla ama geç bitiyor), kesilen/devre-açık ~0 ve
+tepe goroutine ile in-flight 2. adımdakinden yüksek: bekleyen her çağrı bir goroutine ve bir istek tutuyor. Redis p99'u
+uzamadıysa tuzak etkili olmamıştır; script hüküm vermez.
 
-**Grafana'da gör:** [`01 · Pods & Resources`](http://grafana.localtest.me/d/ladder-pods?var-level=lvl10&from=now-15m&to=now&refresh=10s) ve [`11 · Resilience`](http://grafana.localtest.me/d/ladder-resilience?var-level=lvl10&from=now-15m&to=now&refresh=10s) — scripti başlatınca aç; `redis-delay-3s` altında iki faz 45'er sn, arada redirect rollout'u (giriş: admin / ladder)
-- "Goroutine sayısı" → `redirect-…` pod'larına bak: ikinci fazda (`TRAP_NO_DEP_TIMEOUT`) tepe, birinci fazdakinden yüksek. Timeout'suz her bekleyen çağrı bir goroutine tutuyor.
-- "Bağımlılık gecikmesi p99" (Resilience) → `redis` çizgisi birinci fazda ~0,5 sn'de (istemci timeout'u) düzleşir; ikinci fazda **~3 sn'ye** çıkar: çağrılar kesilmiyor, sonuna kadar bekleniyor. `postgres` çizgisi iki fazda da alçak.
-- "Devre kesici durumu (0 kapalı · 1 yarı açık · 2 açık)" (Resilience) → `redis` birinci fazda 2'ye çıkar (timeout'lar hata sayılıyor, devre açılıyor, istekler önbelleği atlayıp DB'den dönüyor); ikinci fazda **0'da kalır**: yavaş cevap hata değil.
-- "Şu an işlenen istek (pod'a göre)" (Resilience) → ikinci fazda belirgin yüksek: istekler bitmiyor, birikiyor. Birikimi sınırlayan artık yalnızca bulkhead (pod başına `DEP_MAX_CONCURRENT` eşzamanlı Redis çağrısı) ve istemcinin sabrı.
-- "Bellek kullanımı" → aynı pod'larda goroutine'lerle aynı yönde: bekleyen her çağrı yığınıyla birlikte bellekte duruyor.
+**Grafana'da gör:** [`01 · Pods & Resources`](http://grafana.localtest.me/d/ladder-pods?var-level=lvl10&from=now-15m&to=now&refresh=10s) ve [`11 · Resilience`](http://grafana.localtest.me/d/ladder-resilience?var-level=lvl10&from=now-15m&to=now&refresh=10s) — deney başlayınca aç; `redis-delay-3s` altında iki faz 45'er sn, arada redirect rollout'u
+- "Goroutine sayısı" → `redirect-…` pod'larında ikinci fazın tepesi birinciden yüksek: bekleyen her çağrı bir goroutine.
+- "Bağımlılık gecikmesi p99" → `redis` birinci fazda ~0,5 sn'de düzleşir; ikinci fazda ~3 sn'ye çıkar: çağrılar sonuna kadar bekleniyor.
+- "Devre kesici durumu (0 kapalı · 1 yarı açık · 2 açık)" → `redis` birinci fazda 2'ye çıkar; ikinci fazda 0'da kalır: yavaş cevap hata sayılmıyor.
+- "Şu an işlenen istek (pod'a göre)" → ikinci fazda belirgin yüksek: istekler bitmiyor, birikiyor.
+- "Bellek kullanımı" → goroutine'lerle aynı yönde: bekleyen her çağrı bellekte duruyor.
 
-**Kural:** Bir bağımlılığa yapılan **her** çağrının süre sınırı olmalı. *"Genelde hızlıdır" bir
-gerekçe değildir; sorun tam da "genelde" olmadığı anda başlar.*
+**Nerede çözülüyor:** Seviye içinde: bir bağımlılığa yapılan her çağrının süre sınırı var — guard'da ve istemcinin
+kendisinde. Timeout, süre sınırının uygulandığı yerdedir.
 
 ---
 
 ### P10-06 · Yük atma: kabul ettiğini hızlı tut
 
-**Belirti/Beklenti:** Shedding açıkken **kabul edilen** isteklerin p99'u korunur; kapalıyken herkes
-yavaşlar.
-**Neden:** Aşırı yüklü bir sunucu her şeyi kabul edip her şeyi yavaş servis ederse, herkes zaman
-aşımına uğrar ve kimse cevap alamaz. [Topic · Konu: Load shedding, admission control]
+**Ne deniyoruz:** Kapasite dolunca fazlasını reddetmek (yük atma), kabul edilen isteklerin hızını koruyor mu?
+**Neden:** Aşırı yüklü sunucu her şeyi kabul ederse herkes yavaşlar ve zaman aşımına uğrar. Eşiği aşan isteği hızlı
+bir 503 ile reddetmek, kabul edilenleri hızlı tutar.
 
-**Reproduce (adım adım):**
+**Reproduce (adım adım):** Otomatik: `make repro P=P10-06` (`redis-delay-200ms` altında — istekler sürsün, birikebilsin
+— `stairs` yüküyle yük atma açık (eşik 40) / kapalı, kabul edilen isteklerin p99'unu karşılaştırır; atılan 503'ler
+uygulamanın histogramına hiç girmez. Hiçbir istek atılmadıysa hüküm vermez). Elle:
 
-Otomatik: `make repro P=P10-06` — `redis-delay-200ms` altında (istekler sürsün, in-flight birikebilsin diye) `stairs`
-yüküyle shedding açık (eşik 40) / kapalı, **kabul edilen** isteklerin p99'unu karşılaştırır. Bu, uygulamanın kendi
-histogramıdır: shedder metrik katmanının önünde durduğu için attığı 503'ler oraya hiç girmez. (`code!="503"` gibi bir
-süzgeç burada hiçbir şey süzmez — histogramda `code` etiketi yok, yalnızca `route`.) Hiçbir istek atılmadıysa hüküm
-vermez (çıkış 2).
-
-Elle — sırayla yapıştır:
-
-1. Grafana'yı temizle, Redis'e 200 ms gecikme enjekte et, yük atma eşiğini pod başına 40 eşzamanlı isteğe çek (redirect
-   pod'ları yeniden başlar):
+1. Temiz başla; Redis'e 200 ms gecikme enjekte et, yük atma eşiğini pod başına 40 eşzamanlı isteğe çek (redirect pod'ları
+   yeniden başlar):
 ```bash
+cd "$LADDER/10-resilience"
 make fresh
 make chaos C=redis-delay-200ms
 make set E="SHED_ENABLED=true SHED_MAX_INFLIGHT=40" W=redirect
 ```
-2. Merdiven yükünü ver (50 → 100 → 200 → 400 istek/sn, ~3 dk), bu fazın penceresinde atılan istek sayısını ve kabul
-   edilenlerin tepe p99'unu oku:
+2. Merdiven yükünü ver (50 → 100 → 200 → 400 istek/sn, ~3 dk), atılan istek sayısını ve kabul edilenlerin tepe p99'unu
+   oku:
 ```bash
+cd "$LADDER/10-resilience"
 t0=$(date +%s)
 make load S=stairs
 sleep 20
@@ -512,6 +491,7 @@ curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode "query=ma
 ```
 3. Yük atmayı kapat (her şey kabul edilir), aynı yükü ver, aynı iki ölçümü al:
 ```bash
+cd "$LADDER/10-resilience"
 make set E="SHED_ENABLED=false" W=redirect
 t0=$(date +%s)
 make load S=stairs
@@ -520,44 +500,37 @@ w=$(( $(date +%s) - t0 ))
 curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode "query=sum(increase(load_shed_total{namespace='lvl10'}[${w}s]))" | jq -r '"atılan: " + .data.result[0].value[1]'
 curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode "query=max_over_time(histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace='lvl10'}[30s])) by (le))[${w}s:10s])" | jq -r '"kabul edilenlerin tepe p99 (sn): " + .data.result[0].value[1]'
 ```
-4. İstersen: 2. adımda `atılan: 0` çıktıysa sistem doymadı — yük atmayı yeniden aç ve merdiveni yükselt (özet
-   satırında `5xx` sıfırdan büyükse bu kez yük atıldı):
+4. İstersen: 2. adımda `atılan: 0` çıktıysa sistem doymadı — yük atmayı yeniden aç ve merdiveni yükselt:
 ```bash
+cd "$LADDER/10-resilience"
 make set E="SHED_ENABLED=true SHED_MAX_INFLIGHT=40" W=redirect
 RATES=100,200,400,800 make load S=stairs
 ```
-5. Arızayı kaldır, eşikleri manifest'teki hâline döndür:
+5. Arızayı kaldır, ayarları manifest'teki hâline döndür:
 ```bash
+cd "$LADDER/10-resilience"
 make unchaos
 make reset
 ```
 
-**Terminalde ne görmelisin:** 2. adımda `atılan` sıfırdan büyük ve yükün özet satırında `5xx` sıfırdan büyük: bunlar
-hızlı `503 {"error":"overloaded"}` cevapları. 3. adımda `atılan: 0`, özet satırında 503 yok ama kabul edilenlerin tepe
-p99'u 2. adımdakinden yüksek: her şey kabul edildiği için herkes yavaşladı. Scriptin hükmü bu: yük atma açıkken kabul
-edilenlerin p99'u ≤ kapalıyken. 2. adımda hiçbir istek atılmadıysa (Redis'in bulkhead'i doygunluğu shedder'dan önce
-karşılamış olabilir) karşılaştırma yük atma hakkında değildir — 4. adımı dene.
+**Terminalde ne görmelisin:** 2. adımda `atılan` ve k6 özetindeki `5xx` sıfırdan büyük: hızlı
+`503 {"error":"overloaded"}` cevapları. 3. adımda `atılan: 0`, 503 yok ama kabul edilenlerin tepe p99'u 2. adımdakinden
+yüksek: her şey kabul edildiği için herkes yavaşladı. Hüküm: yük atma açıkken kabul edilenlerin p99'u ≤ kapalıyken.
+2. adımda hiç istek atılmadıysa doygunluğu Redis'in bulkhead'i shedder'dan önce karşılamış olabilir — 4. adımı dene.
 
-**Grafana'da gör:** [`11 · Resilience`](http://grafana.localtest.me/d/ladder-resilience?var-level=lvl10&from=now-30m&to=now&refresh=10s) ve [`15 · k6`](http://grafana.localtest.me/d/ladder-k6?var-level=lvl10&from=now-30m&to=now&refresh=10s) — scripti başlatınca aç; `redis-delay-200ms` altında iki `stairs` fazı (~3'er dk), toplam ~8 dk (giriş: admin / ladder)
-- "Atılan yük / sn" → birinci fazda (yük atma açık, eşik 40) merdivenin üst basamaklarında sıfırdan ayrılır; ikinci fazda **düz 0**.
-- "Kabul edilen isteklerin p99 süresi" → birinci fazda merdiven boyunca alçak kalır; ikinci fazda basamaklarla birlikte **tırmanır**: her şey kabul edildiği için herkes yavaşlıyor.
-- "Şu an işlenen istek (pod'a göre)" → birinci fazda `redirect-…` pod'ları eşik (40) civarında tavan yapar; ikinci fazda sınırsız yükselir.
-- "Dönen durum kodları" (k6) → birinci fazda hızlı `503`'ler (`{"error":"overloaded"}`): atılan istekler. `02 · App RED` bu 503'leri **saymaz** — shedder uygulamanın metrik katmanının önünde duruyor; atılanları yalnızca istemci ve "Atılan yük / sn" görür. Bkz. [Grafana'yı okumak](../README.md#grafanayı-okumak).
+**Grafana'da gör:** [`11 · Resilience`](http://grafana.localtest.me/d/ladder-resilience?var-level=lvl10&from=now-30m&to=now&refresh=10s) ve [`15 · k6`](http://grafana.localtest.me/d/ladder-k6?var-level=lvl10&from=now-30m&to=now&refresh=10s) — deney başlayınca aç; `redis-delay-200ms` altında iki `stairs` fazı (~3'er dk), toplam ~8 dk
+- "Atılan yük / sn" → birinci fazda merdivenin üst basamaklarında sıfırdan ayrılır; ikinci fazda düz 0.
+- "Kabul edilen isteklerin p99 süresi" → birinci fazda alçak kalır; ikinci fazda basamaklarla birlikte tırmanır.
+- "Şu an işlenen istek (pod'a göre)" → birinci fazda eşik (40) civarında tavan yapar; ikinci fazda sınırsız yükselir.
+- "Dönen durum kodları" (k6) → birinci fazda hızlı `503`'ler: atılan istekler. `02 · App RED` bunları saymaz — shedder metrik katmanının önünde.
 
-**Dikkat — iki koruma aynı yükü paylaşıyor:** Redis kendi guard'ının arkasında. Bulkhead'i (pod
-başına `DEP_MAX_CONCURRENT` eşzamanlı Redis çağrısı) dolduğunda ya da devresi açıldığında fazla
-istekler önbelleği atlayıp DB'den hızlıca döner; doygunluğu bazen shedder'dan (eşik 40) **önce**
-bu karşılar. Hiçbir istek atılmadıysa script hüküm vermez (çıkış 2) — o durumda ölçülen şey yük
-atma değil, bulkhead'dir.
-
-**Doğru metrik:** Toplam p99'a bakarsan shedding kötü görünür (çok 503); **kabul edilenlere**
-bakarsan iyi görünür. *Hangi soruyu sorduğun, hangi cevabı alacağını belirler.*
-**Sınırı:** Yük atma bir **kalite** aracıdır, kapasite aracı değil — kapasite için ölçekleme (07).
-Sağlık uçları asla atılmaz (kodda ayrık): yük altında probe düşerse pod öldürülür (P01-07).
+**Nerede çözülüyor:** Seviye içinde (shedder). Toplam p99'a bakarsan yük atma kötü görünür, kabul edilenlere bakarsan
+iyi: doğru metrik kabul edilenlerinki. Yük atma bir kalite aracıdır, kapasite için ölçekleme gerekir (07); sağlık uçları
+asla atılmaz (P01-07).
 
 ## 7. Seviye içi alıştırmalar (TRAP_ bayrakları)
 
-> **Nasıl uygulanır:** aç `make set E="TRAP_X=true"` · ne açık? `make env` · hepsini geri al `make reset` (ortamı `deploy/`'daki hâline döndürür; `make unset E=TRAP_X` yalnızca siler). Tablodaki diğer ayarlar da aynı yolla (`make set E="CACHE_TTL=1h"`). Pod'lar yeni değerle yeniden başlar; komut hazır olunca döner. Varsayılan olarak seviyenin TÜM uygulama servislerine uygulanır (tek servis: `W=redirect`); 12'den itibaren Argo Rollout'larda da çalışır — `kubectl set env` orada çalışmaz. `make repro` scriptleri tuzağı KENDİLERİ açıp kapatır ve bitince ortamı eski hâline getirir (senin açtıkların dahil): elle alıştırma için `make set` + `make load`, otomatik ölçüm için `make repro`. Bitirince `make reset`: açık kalan bir tuzak sonraki deneyi sessizce bozar.
+> **Nasıl uygulanır:** aç `make set E="TRAP_X=true"` · ne açık? `make env` · hepsini geri al `make reset` (`make unset E=TRAP_X` yalnızca siler). Diğer ayarlar da aynı yolla (`make set E="CACHE_TTL=1h"`). Pod'lar yeni değerle yeniden başlar, komut hazır olunca döner; tek servis için `W=redirect`. `make repro` tuzakları kendisi açıp kapatır. Bitirince `make reset`: açık kalan bir tuzak sonraki deneyi sessizce bozar.
 
 | Bayrak | Ne yapar | Reproduce | Düzeltme |
 |---|---|---|---|
@@ -567,58 +540,38 @@ Sağlık uçları asla atılmaz (kodda ayrık): yük altında probe düşerse po
 | `TRAP_NO_DEP_TIMEOUT` | Bağımlılık timeout'unu kaldırır | `make repro P=P10-05` | Bayrağı kapat |
 
 Elle denemeye değer:
-- `BREAKER_OPEN=1s` + `BREAKER_THRESHOLD=2` yap ve `pg-loss-30` uygula: **flapping** üret.
-  Grafana'da "Devre kesici durumu" testere dişi olur. Sonra `BREAKER_OPEN=30s` ile karşılaştır —
-  *eşik ayarı bir tahmin değil, bir ölçüm işidir.*
-- `DEP_MAX_CONCURRENT=2` yap: bulkhead çok dar olunca sağlıklı bağımlılıkta bile reddetmeye başlar.
-  **Korumanın kendisi bir arıza kaynağı olabilir.**
-- `make chaos C=redis-kill` + `make load S=mixed`: Redis guard'ının devresi açılır ve
-  `degraded_mode{mode="no_cache"}` 1 olur (önbellek atlanır, okumalar DB'den); Redis dönünce 0.
-  Karşılığını `make chaos C=pg-loss-50` ile gör: bu kez Postgres devresi açılır ve `cache_only`
-  1 olur — isabetler cevaplanmaya devam eder, yalnızca ıskalar 503 alır. Degrade, bağımlılık
-  başınadır: hangisinin gittiğine göre farklı bir "yarım hizmet".
-- İki chaos'u birlikte uygula (`pg-delay-2s` + `redis-delay-200ms`): korumalar **birlikte**
-  çalıştığında toplam etkinin parçaların toplamından farklı olduğunu gör.
+- `BREAKER_OPEN=1s` + `BREAKER_THRESHOLD=2` ve `pg-loss-30`: flapping üret ("Devre kesici durumu" testere dişi); sonra `BREAKER_OPEN=30s` ile karşılaştır.
+- `DEP_MAX_CONCURRENT=2`: bulkhead çok dar olunca sağlıklı bağımlılıkta bile reddeder — koruma da arıza kaynağı olabilir.
+- `make chaos C=redis-kill` + `make load S=mixed`: `no_cache` 1 olur (okumalar DB'den); `make chaos C=pg-loss-50` ile `cache_only` 1 olur (yalnızca isabetler cevaplanır). Degrade bağımlılık başınadır.
+- `pg-delay-2s` + `redis-delay-200ms` birlikte: korumaların birlikte etkisi parçaların toplamından farklıdır.
 
 ## 8. Gözlemlenebilirlik: hangi paneller dolu, hangileri boş
 
 | Dashboard | Durum | Neden |
 |---|---|---|
-| [`11 · Resilience`](http://grafana.localtest.me/d/ladder-resilience?var-level=lvl10&from=now-15m&to=now) | **Dolu** ✨ | devre kesici durumu, bağımlılık gecikmesi/hatası (`postgres` ve `redis` ayrı), retry, atılan yük, in-flight, degrade modu (`cache_only` / `no_cache`) |
-| [`05 · Postgres`](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl10&from=now-15m&to=now) · [`06 · Redis`](http://grafana.localtest.me/d/ladder-redis?var-level=lvl10&from=now-15m&to=now) · [`01 · Pods`](http://grafana.localtest.me/d/ladder-pods?var-level=lvl10&from=now-15m&to=now) | Dolu | Chaos deneylerinin etkisi burada okunur. `06 · Redis` → "Uygulama → Redis gecikmesi (p99)" bu seviyede **ilk kez dolu**: Redis kendi guard'ıyla (`dep="redis"`) ölçülüyor |
+| [`11 · Resilience`](http://grafana.localtest.me/d/ladder-resilience?var-level=lvl10&from=now-15m&to=now) | **Dolu** | Devre kesici durumu, bağımlılık gecikmesi/hatası (`postgres`, `redis` ayrı), retry, atılan yük, in-flight, degrade modu |
+| [`05 · Postgres`](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl10&from=now-15m&to=now) · [`06 · Redis`](http://grafana.localtest.me/d/ladder-redis?var-level=lvl10&from=now-15m&to=now) · [`01 · Pods`](http://grafana.localtest.me/d/ladder-pods?var-level=lvl10&from=now-15m&to=now) | Dolu | Chaos'un etkisi burada; `06 · Redis` → "Uygulama → Redis gecikmesi (p99)" ilk kez dolu |
 | [`12 · SLO`](http://grafana.localtest.me/d/ladder-slo?var-level=lvl10&from=now-15m&to=now) · [`13 · Rollout`](http://grafana.localtest.me/d/ladder-rollout?var-level=lvl10&from=now-15m&to=now) | Boş | 11 ve 12'de |
 
-Bu seviyenin panel okuma kuralı: **breaker state ile dependency latency'yi birlikte oku.**
-Breaker açık ve latency düşük → koruma çalışıyor. Breaker kapalı ve latency yüksek → eşik çok tembel.
-Breaker testere dişi → eşik çok hassas. Tek başına hiçbiri bir şey söylemez.
+Okuma kuralı: devre durumu ile bağımlılık gecikmesini birlikte oku. Açık + düşük gecikme → koruma çalışıyor; kapalı +
+yüksek gecikme → eşik çok tembel; testere dişi → eşik çok hassas.
 
 ## 9. Bilerek bırakılanlar
 
-- **Kafka korumasız**: Postgres ve Redis'in (önbellek çağrıları) kendi `Guard`'ı var; Kafka üreticisi
-  zaten asenkron ve sınırlı tamponlu (P05-02), ayrı bir guard kurulmadı. Redis'e giden diğer iki
-  çağrı — hız sınırlayıcı ve yapışkan okuma işareti — da guard'sız: ikisinin de kendi kısa
-  timeout'u ve fail-open'ı var.
-- **Degrade modu sınırlı**: `cache_only` yalnızca önbellekte olanı sunar (ıska 503 alır); DB'siz
-  **yazma** yolu için bir degrade yok (create 503 döner).
-- **Adaptif shedding yok**: sabit in-flight eşiği. Gerçekte gecikmeye göre uyarlanır (CoDel, PID).
-- **`statement_timeout` hâlâ boş** (P02-06): client tarafı timeout var, sunucu tarafı yok.
-- **Chaos deneyleri elle**: otomatik chaos (sürekli, zamanlanmış) yok — game day 14'te.
-- **09'dan devreden**: nesne deposu/PITR yok, tek Redis, kimlik yok.
+- Kafka üreticisinin guard'ı yok (zaten asenkron ve sınırlı tamponlu); Redis'teki hız sınırlayıcı ve yapışkan işaret de guard'sız (kendi kısa timeout'u ve fail-open'ı var).
+- Degrade sınırlı: `cache_only` yalnızca önbellekte olanı sunar; DB'siz yazma yolu yok (create 503).
+- Adaptif yük atma yok: sabit in-flight eşiği (gerçekte gecikmeye göre uyarlanır).
+- `statement_timeout` hâlâ boş (P02-06).
+- Chaos elle; sürekli/zamanlanmış chaos yok — game day 14'te.
+- 09'dan devreden: nesne deposu/PITR yok, tek Redis, kimlik yok.
 
 ## 10. `make diff-prev` okuma rehberi
 
 `make diff-prev` 09 ile farkı gösterir:
 
-1. **`internal/resilience/breaker.go`** (yeni): tek bir `Guard` beş mekanizmayı birleştiriyor.
-   Yorumlarda her birinin **ayrı sorusu** yazıyor — birbirinin yerine geçmedikleri buradan okunur.
-2. **`internal/resilience/shed.go`**: sağlık uçlarının atlanması 5 satır. *Bir korumanın hangi
-   isteği kapsamadığını yazmak, kapsadığını yazmak kadar önemlidir.*
-3. **`internal/store/guarded.go`**: aynı `Store` arayüzünün **dördüncü** sarmalaması
-   (Cached → ReadWrite → Guarded → Postgres). Her katman diğerini bilmiyor — bu yüzden herhangi
-   birini kapatıp ne satın aldığını ölçebiliyoruz. `GuardCall` aynı korumayı Redis'e de
-   uyguluyor (`cache.Config.Guard`): her bağımlılığa kendi devresi, kendi degrade modu.
-4. **`Guarded.Get` içindeki `ErrNotFound` ayrımı**: üç satır, ama olmadan devre kesici 404'lerle
-   açılırdı.
-5. **`Guarded.Ping` devre kesiciden geçmiyor**: sağlık kontrolleri ham gerçeği görmeli.
-6. **`deploy/*-svc.yaml`**: sekiz yeni env değişkeni. Her biri bir **karar**, her karar bir takas —
-   ve hepsi `make repro` ile ölçülebilir.
+1. `internal/resilience/breaker.go` (yeni): tek `Guard` beş mekanizmayı birleştirir; yorumlar her birinin ayrı sorusunu yazar.
+2. `internal/resilience/shed.go`: sağlık uçlarının yük atmadan muaf tutulması.
+3. `internal/store/guarded.go`: `Store` arayüzünün dördüncü sarmalaması (Cached → ReadWrite → Guarded → Postgres); `GuardCall` aynı korumayı Redis'e uygular.
+4. `Guarded.Get` içindeki `ErrNotFound` ayrımı: olmasa devre kesici 404'lerle açılırdı.
+5. `Guarded.Ping` devre kesiciden geçmez: sağlık kontrolü ham gerçeği görür.
+6. `deploy/*-svc.yaml`: sekiz yeni env değişkeni — her biri `make repro` ile ölçülebilen bir takas.

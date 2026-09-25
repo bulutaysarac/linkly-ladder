@@ -1,30 +1,40 @@
 ### PNN-XX · <başlık>
-**Belirti:** Kullanıcının/operatörün gördüğü şey. Bir cümle.
-**Neden:** Kök neden. Sistem tasarımı konusuyla bağla: [Topic · Konu: …]
-**Reproduce (adım adım):**
 
-Otomatik — ölçer ve hüküm basar: `make repro P=PNN-XX` (yıkıcı adım varsa `CONFIRM=1` ile; scriptin ne yaptığı, tek cümle).
+**Ne deniyoruz:** Deneyin sorusu, tek cümle ("Pod yenilenince linkler yaşıyor mu?").
+**Neden:** Kök neden, bir-iki kısa cümle; teknik terimi ilk geçtiği yerde açıkla.
 
-Elle — sırayla yapıştır (bloklarda yorum YOK: varsayılan zsh `#`'i komutun argümanı yapar; açıklama adım metninde):
+**Reproduce (adım adım):** Otomatik: `make repro P=PNN-XX` (yıkıcı adım varsa `CONFIRM=1` ile; scriptin ne yaptığı, tek cümle). Elle:
 
-1. <adımın açıklaması>:
+1. Temiz başla; <bu adımın yaptığı / sınadığı şey, tek cümle>:
 ```bash
+cd "$LADDER/NN-<ad>"
 make fresh
 <komutlar — host açık: http://lvlNN.localtest.me; değişkenler bu sorunun bloklarında tanımlı>
 ```
-2. <açıklama; ayar/tuzak açıldıysa son adım geri alır: make reset · replika geri · make unchaos · kubectl uncordon>:
+2. <adımın yaptığı ve neden gerektiği; ayar/tuzak açıldıysa son adım geri alır: make reset · replika geri · make unchaos · kubectl uncordon>:
 ```bash
+cd "$LADDER/NN-<ad>"
 <komutlar>
 ```
 
-**Terminalde ne görmelisin:** <her adımın çıktısında görülecek somut dizeler/sayılar: HTTP kodları, `k6 lvlNN: reqs=… 5xx=… 404=… 429=… p99=…`, kubectl çıktısı>
-(tools/lint-guide.py: Otomatik + Elle + ilk komut `make fresh` + "Terminalde ne görmelisin", yorumsuz ve `bash -n`/`zsh -n` temiz bloklar)
-**Grafana'da gör:** [`<NN · dashboard>`](http://grafana.localtest.me/d/<uid>?var-level=lvlNN&from=now-15m&to=now&refresh=10s) — <ne zaman aç> (giriş: admin / ladder)
-- "<panelin TAM başlığı>" → <okuyucu ne görecek: yön/şekil/değer ve ne anlama geldiği>
+**Terminalde ne görmelisin:** <her adımın çıktısında görülecek somut dizeler/sayılar ve ne anlama geldikleri: HTTP kodları, `k6 lvlNN: reqs=… 5xx=… 404=… 429=… p99=…`, kubectl çıktısı; beklenen çıkmazsa ne yapılır>
+
+**Grafana'da gör:** [`<NN · dashboard>`](http://grafana.localtest.me/d/<uid>?var-level=lvlNN&from=now-15m&to=now&refresh=10s) — <ne zaman aç>
+- "<panelin TAM başlığı>" → <ne görülecek (yön/şekil/değer) ve ne anlama geldiği, tek cümle>
 - Explore'da: `<promql>` → <ne göreceksin>   (yalnızca hiçbir panel göstermiyorsa)
-  Grafana'da görülemiyorsa: `**Grafana'da gör:** Grafana'da görünmez — <neden>. Kanıt terminalde:` + `- \`<komut>\` → <beklenen çıktı>`
-  (tools/lint-grafana.py: dashboard ve panel adları GERÇEKTEN var olmalı)
-**Nerede çözülüyor:** Seviye NN+k (ne ile). Geçici çare varsa ve neden yetmediği.
+
+**Nerede çözülüyor:** Seviye NN+k (ne ile).
+
+<!-- Kurallar:
+  • Bloklarda yorum YOK (varsayılan zsh `#`'i komutun argümanı yapar); açıklama adım metninde. Etkileşimli komut
+    (`-w`, `| less`, `make logs`) bloğun son satırı.
+  • tools/lint-guide.py: "Reproduce (adım adım)" + Otomatik + Elle + "Terminalde ne görmelisin"; her blok
+    `cd "$LADDER/…"` ile başlar, ilk bloğun cd'den sonraki ilk komutu `make fresh`; `bash -n`/`zsh -n` temiz.
+  • tools/lint-grafana.py: dashboard ve panel adları GERÇEKTEN var olmalı. Grafana'da görülemiyorsa:
+    `**Grafana'da gör:** Grafana'da görünmez — <neden>. Kanıt terminalde:` + `- \`<komut>\` → <beklenen çıktı>`.
+  • tools/full-run-report.py dashboard linklerini "**Grafana'da gör:**" satırının KENDİSİNDEN okur.
+  • Kısa yaz: bağlam paragrafı, uzun "Ölçüm notu" yok. Bir adımın neden öyle yapıldığı (tek kullanıcı, bekleme,
+    port-forward) o adımın cümlesine yarım cümleyle girer. -->
 
 ---
 
@@ -56,7 +66,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 | `port_forward <pod> <port>` / `port_forward_stop` | Ingress'i atla: "korumayı kim veriyor?" sorusu için |
 | `wait_endpoints <n>` · `scale <n>` · `replicas_of` | Ölçek değişimi; endpoint listesi rollout'tan geriden gelir |
 
-### Ölçüm kuralları (kök README'deki tabloyla aynı, script yazarken tekrar oku)
+### Ölçüm kuralları (tam liste: [OLCUM.md](OLCUM.md); script yazarken tekrar oku)
 
 1. **Pencere**, ölçtüğün olaydan kısa olmasın; **çözünürlük** olaydan ince olsun.
 2. İki fazı **ayrı** ölç: `increase(...[3m])` bir önceki fazı da toplar. Faz başı/sonu sayaç farkı

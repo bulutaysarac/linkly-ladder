@@ -1,10 +1,10 @@
 # 09 — database-scaling · "Veritabanı darboğazı"
 
 > **Bu seviyede ne yaşayacaksın?**
-> - Postgres'in operatörle yönetilmesi: primary + 1 replika, otomatik failover, önünde PgBouncer; okumalar replikaya, yazmalar primary'ye
+> - Operatörle yönetilen Postgres: primary + 1 replika, otomatik failover, önünde PgBouncer; okumalar replikaya, yazmalar primary'ye
 > - Yeni yazılan linkin replikada henüz olmaması — read-your-writes ihlali (P09-01)
 > - Primary ölünce failover penceresi (P09-02); tuzak: transaction pooling'de prepared statement (P09-03)
-> - Replikadaki uzun okumanın WAL ile çakışması (P09-04); partition'sız silmenin pahalılığı (P09-05); replikasyonun yedek olmadığı — silinen satır replikadan da saniyeler içinde gider (P09-06)
+> - Replikadaki uzun okumanın WAL ile çakışması (P09-04), partition'sız silmenin pahalılığı (P09-05), replikasyonun yedek olmaması (P09-06)
 >
 > **Bu seviye olmasa ne olur?** Tek Postgres tek arıza noktasıdır (P02-03) ve bağlantı sayısı replika × havuz ile duvara çarpar (P02-02).
 >
@@ -12,11 +12,9 @@
 
 ## 1. Bu seviye ne?
 
-Postgres artık bir operatörle yönetiliyor: **primary + 1 replika**, otomatik failover, önünde
-**PgBouncer** (Pooler) ve arkasında partition'lı bir saklama politikası. Uygulama okumayı
-replikalara, yazmayı primary'ye gönderiyor. 02'nin iki büyük açığı kapanıyor (bağlantı duvarı ve
-tek nokta arıza) — ve yerine **ancak replikan olduğunda sahip olabileceğin** sorunlar geliyor:
-replikasyon gecikmesi, read-your-writes, failover penceresi, havuzlama tuzakları.
+Postgres artık bir operatörle (CloudNativePG) yönetiliyor: primary + 1 replika, otomatik failover, önünde PgBouncer
+ve partition'lı bir saklama tablosu. Okumalar replikaya, yazmalar primary'ye gider. 02'nin bağlantı duvarı ve tek
+nokta arızası kapanır; yerine replikasyonun kendi sorunları gelir.
 
 ## 2. Mimari
 
@@ -30,28 +28,28 @@ flowchart LR
   P -.->|failover: terfi| R1
 ```
 
-Çoğullama oranı 25:1 — 500 uygulama bağlantısı, 20 gerçek arka uç bağlantısı. `max_connections`
-**bilerek 100'de bırakıldı**: Pooler'ın neden gerektiğini aynı sayıyla görmek için. Küme iki
-instance'lık (`instances: 2`): failover (P09-02) ve replika çakışması (P09-04) tek replikayla
-ölçülür; üçüncü kopya yalnızca daha fazla yedeklilik getirir ve bu kümenin belleğine sığmaz
-(gerekçe `deploy/cnpg.yaml`'da).
+Pooler 500 uygulama bağlantısını 20 gerçek DB bağlantısına indirir (25:1); `max_connections` bilerek 100'de. Küme
+iki instance: failover ve replika çakışması tek replikayla ölçülür.
 
 ## 3. Önceki seviyeden çözülenler
 
 | ID | Sorun | Nasıl çözüldü |
 |---|---|---|
-| P02-02 | Havuz taşması: replika × pool > max_connections | PgBouncer transaction pooling: uygulama tarafı bol (500), DB tarafı az (20). Replika sayısı artık `max_connections`'ı ilgilendirmiyor |
-| P02-03 | DB tek nokta, failover yok | CNPG `Cluster{instances: 2}` + otomatik terfi. Kesinti **sıfırlanmadı**, süresi ve insan müdahalesi ortadan kalktı (P09-02 pencereyi ölçüyor) |
+| P02-02 | Havuz taşması: replika × pool > max_connections | PgBouncer transaction pooling: uygulama tarafı 500, DB tarafı 20 bağlantı |
+| P02-03 | DB tek nokta, failover yok | CNPG `instances: 2` + otomatik terfi; kesinti sıfırlanmadı, insan müdahalesi kalktı (P09-02) |
 
-Ayrıca P07-02 (ölçeklemenin darboğazı DB'ye taşıması) büyük ölçüde kapandı: redirect artık 20
-bağlantılık havuzla çalışabiliyor çünkü gerçek DB bağlantısı Pooler'da sabit.
+P07-02 (ölçeklemenin darboğazı DB'ye taşıması) da büyük ölçüde kapanır: gerçek DB bağlantısı Pooler'da sabit.
 
 ## 4. Ayağa kaldırma
 
-İlk kez mi? Önce kök README'deki [Sıfırdan başlangıç](../README.md#sıfırdan-başlangıç) — platform bir kez kurulur (`cd platform && make full`).
-Bu seviyenin platformdan istediği: **temel yığın (kind, ingress, Prometheus, Grafana) + Chaos Mesh, KEDA, CloudNativePG**. `make up` ilk adımda (profil) bunları açar ve kullanılmayanları kapatır; bir bileşen kurulu değilse hangi komutla kurulacağını söyleyip durur.
+İlk kez mi? Önce kök README'deki [Sıfırdan başlangıç](../README.md#sıfırdan-başlangıç): platform bir kez kurulur ve
+`LADDER` (repo kökü) tanımlanır. Her komut bloğu `cd "$LADDER/…"` ile başlar; olduğu gibi yapıştır.
+Bu seviyenin platformdan istediği: **temel yığın (kind, ingress, Prometheus, Grafana) + Chaos Mesh, KEDA, CloudNativePG**; `make up` açar.
+
+Hızlı başvuru (komutları tek tek kullan; satır sonu açıklamaları için zsh'da `setopt interactivecomments` gerekir):
 
 ```bash
+cd "$LADDER/09-database-scaling"
 make up            # profil → Grafana'yı temizle → build → push → deploy → rollout wait → smoke
 code=$(curl -s -XPOST http://lvl09.localtest.me/api/links -H 'Content-Type: application/json' -d '{"url":"https://example.com"}' | jq -r .code); echo "$code"
 curl -s -o /dev/null -w '%{http_code} → %{redirect_url}\n' http://lvl09.localtest.me/$code   # 302 → https://example.com
@@ -59,36 +57,50 @@ make grafana       # Ladder klasörü, level=lvl09 — giriş: admin / ladder
 make load S=mixed  # aynı senaryolar her seviyede: create redirect mixed hot-key burst abuser read-your-writes stairs scan
 make repro P=P09-01   # §6'daki bir sorunu otomatik üret → REPRODUCED / NOT-REPRODUCED
 make env           # açık ayar/tuzaklar · değiştir: make set E="KEY=değer" · hepsini geri al: make reset (§7)
-make down          # seviyeyi kaldır · kümeyi durdurmak için: make -C ../platform stop
+make down          # seviyeyi kaldır · kümeyi durdurmak için: cd "$LADDER/platform" && make stop
 ```
 
-Kümeye bakmak için:
+Postgres kümesine ve kimin primary olduğuna bakmak için (son sütun `INSTANCEROLE`: `primary` / `replica`):
 ```bash
+cd "$LADDER/09-database-scaling"
 kubectl -n lvl09 get cluster,pooler,pods -l cnpg.io/cluster=pg
-kubectl -n lvl09 get pods -l cnpg.io/cluster=pg -L cnpg.io/instanceRole   # kim primary?
+kubectl -n lvl09 get pods -l cnpg.io/cluster=pg -L cnpg.io/instanceRole
 ```
 
-**Rehber — bu seviyeyi baştan sona, sırayla.** Komut bloklarında açıklama yok; her bloğu olduğu gibi yapıştırabilirsin.
+**Rehber — bu seviyeyi baştan sona, sırayla.**
 
-1. Önceki seviye açıksa kapat (aynı anda tek seviye çalışır), bu seviyeyi kur. `make up` Grafana'yı da temizler;
-   CNPG kümesi (primary + replika) ve Pooler'lar hazır olmadan döner:
+1. Önceki seviyeyi kapat (aynı anda tek seviye), bu seviyeyi kur. `make up` Grafana'yı da temizler; CNPG kümesi ve
+   Pooler'lar hazır olunca `✔ lvl09 ayakta` yazar:
 ```bash
-make -C ../08-rate-limiting down
+cd "$LADDER/08-rate-limiting"
+make down
+cd "$LADDER/09-database-scaling"
 make up
 ```
-2. 08'in sorunlarını bu seviyede koş (08'in altı scripti sırayla). Koşarken başka komut çalıştırma: aynı pod'lara
-   dokunurlar. 09'un kapattığı sorunlar (P02-02, P02-03, bkz. §3) 08'in scriptleri arasında değil, bu yüzden
-   `BEKLENEN` sütununda `NOT-REPRODUCED` isteyen satır yok; `CONFIRM=1` isteyen P08-01 `SKIPPED` görünür:
+
+**Verileri temizleyip sıfırdan koşmak istersen** 1. adımın yerine bunu kullan: bütün seviyelerin verisi
+(linkler, veritabanı, önbellek, kuyruk) ve Grafana'nın gösterdiği metrik, trace, log silinir; küme ve kurulum
+kalır (~2-3 dk). Ardından bu seviye temiz kurulur. Yalnızca Grafana çizgilerini temizlemek için (veri kalır)
+seviye klasöründe `make fresh` yeter; her deneyin ilk komutu zaten bu.
 ```bash
+cd "$LADDER"
+make wipe CONFIRM=1
+cd "$LADDER/09-database-scaling"
+make up
+```
+2. 08'in sorunlarını burada koş (koşarken başka komut çalıştırma). 09'un kapattığı sorunlar (P02-02, P02-03) 08'in
+   scriptleri arasında değil; `BEKLENEN` sütununda `NOT-REPRODUCED` isteyen satır yok, `CONFIRM=1` isteyen P08-01
+   `SKIPPED` görünür:
+```bash
+cd "$LADDER/09-database-scaling"
 make verify-prev
 ```
-3. §6'daki sorunları sırayla yaşa (P09-01 → P09-06). Her sorunda aynı düzen:
-   **Elle** bloklarını sırayla yapıştır (ilk komut `make fresh`: Grafana bu deneye boş başlar) →
-   **Terminalde ne görmelisin** ile karşılaştır → **Grafana'da gör** linklerini aç, her madde hangi panelde neyi
-   göreceğini söyler. İstersen aynı deneyi `make repro P=…` ile otomatik koş: ölçer ve hükmünü basar.
-   P09-01 replikada WAL uygulamasını duraklatır, P09-02 primary'yi siler: ikisinde de son adımı atlama.
-4. Bitince açık kalan ayarları geri al ve seviyeyi kapat:
+3. §6'daki sorunları sırayla yaşa (P09-01 → P09-06): adımları yapıştır → **Terminalde ne görmelisin** ile
+   karşılaştır → **Grafana'da gör** linklerini aç. P09-01 replikada WAL uygulamasını duraklatır, P09-02 primary'yi
+   siler: ikisinde de son adımı atlama.
+4. Bitince ayarları geri al ve seviyeyi kapat:
 ```bash
+cd "$LADDER/09-database-scaling"
 make reset
 make down
 ```
@@ -97,12 +109,14 @@ make down
 
 Her seviyede aynı: [docs/API.md](../docs/API.md). Dışarıdan değişiklik yok.
 
-**Ama garanti değişti**: `GET /{code}` artık bir replikadan cevaplanabilir, yani **birkaç yüz
-milisaniye geçmişten** okuyor olabilir. Yazma sonrası `STICKY_WINDOW` (2 sn) boyunca okumalar
-primary'ye yapışır — bu, read-your-writes'ı yaygın durumda korur (işaret Redis'te: oluşturma
-api-svc'de, okuma redirect-svc'de olsa da görünür).
+Garanti değişti: `GET /{code}` artık replikadan cevaplanabilir, yani birkaç yüz milisaniye geçmişten okuyabilir.
+Yazmadan sonra `STICKY_WINDOW` (2 sn) boyunca okumalar primary'ye yapışır (işaret Redis'te, iki servis de görür).
 
 ## 6. Reproduce edilebilir sorunlar
+
+Her sorun aynı düzende: **Ne deniyoruz** (deneyin sorusu) → **Neden** → adımlar (her adım ne yaptığını söyler)
+→ **Terminalde ne görmelisin** → **Grafana'da gör** (giriş: admin / ladder) → **Nerede çözülüyor**.
+`make repro` hükmü: `REPRODUCED` = sorun var · `NOT-REPRODUCED` = yok · `SKIPPED` = ölçülemedi.
 
 | ID | Sorun | Reproduce | Grafana'da | Çözüm |
 |---|---|---|---|---|
@@ -117,45 +131,45 @@ api-svc'de, okuma redirect-svc'de olsa da görünür).
 
 ### P09-01 · Read-your-writes ihlali
 
-**Belirti:** Kullanıcı link oluşturur, hemen tıklar ve **kendi yarattığı link için 404** alır.
-**Neden:** Replika, primary'nin *daha önceki bir ana* ait kopyasıdır. Oraya gönderilen her okuma
-geçmişten bir okumadır. [Topic · Konu: Replikasyon gecikmesi, tutarlılık]
+**Ne deniyoruz:** Kullanıcı link oluşturup hemen tıklayınca kendi linkini buluyor mu?
+**Neden:** Replika, primary'nin biraz eski bir kopyasıdır; oraya giden her okuma geçmişten okur. Yazmadan hemen sonraki
+okuma replikaya giderse yeni link henüz orada yoktur (read-your-writes: "yazdığını okuyabilme" garantisi).
 
-**Reproduce (adım adım):**
+**Reproduce (adım adım):** Otomatik: `make repro P=P09-01` (`read-your-writes` senaryosunu iki kez koşar: önce
+yapışkan okuma açık ve replika güncel; sonra yapışkan okuma kapalı ve replikada WAL uygulaması duraklatılmış — replika
+gerçekten geride kalır; script sonunda her durumda devam ettirir). Elle — 3. adım replikayı duraklatır, 5. adımı
+(devam ettirme) atlama:
 
-Otomatik — ölçer ve hüküm basar: `make repro P=P09-01` — `read-your-writes` senaryosunu (oluştur → hemen oku) iki kez
-koşar: önce yapışkan okuma açık ve replika güncel; sonra yapışkan okuma kapalı ve replikada **WAL
-uygulaması duraklatılmış** (`pg_wal_replay_pause()`, script sonunda ne olursa olsun devam ettirir).
-WAL gelmeye devam eder ama uygulanmaz: replika gerçekten geçmişte kalır ve her saniye bir saniye
-daha geride olur.
-
-Elle — `09-database-scaling` klasöründe, sırayla yapıştır. 3. adım replikada WAL uygulamasını duraklatır;
-duraklatılmış bir replika sonraki her deneyi bozar, 5. adımı (devam ettirme) atlama:
-
-1. Grafana'yı temizle, CNPG pod'larının hazır olmasını bekle, replikayı bul, WAL uygulaması duraklatılmış mı bak:
+1. Temiz başla; CNPG pod'larını bekle, replikayı bul, WAL uygulaması duraklatılmış mı bak:
 ```bash
+cd "$LADDER/09-database-scaling"
 make fresh
 kubectl -n lvl09 wait --for=condition=Ready pod -l cnpg.io/cluster=pg,cnpg.io/instanceRole --timeout=180s
 kubectl -n lvl09 get pods -l cnpg.io/cluster=pg -L cnpg.io/instanceRole
 replica=$(kubectl -n lvl09 get pod -l cnpg.io/cluster=pg,cnpg.io/instanceRole=replica -o jsonpath='{.items[0].metadata.name}'); echo "replika: $replica"
 kubectl -n lvl09 exec "$replica" -c postgres -- psql -U postgres -d linkly -tAc 'SELECT pg_is_wal_replay_paused()'
 ```
-2. Yapışkan okuma açık (varsayılan), replika güncel: 30 sn "oluştur → hemen oku", sonra sunucunun saydığı ihlali oku:
+2. Koruma açıkken (yapışkan okuma varsayılan, replika güncel) 30 sn "oluştur → hemen oku", sonra sunucunun saydığı
+   ihlali oku:
 ```bash
+cd "$LADDER/09-database-scaling"
 make load S=read-your-writes K6_ARGS="--vus 10 --duration 30s"
 sleep 15
 curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum(increase(ryw_violations_total{namespace="lvl09"}[1m]))' | jq -r '"ihlal (sunucu): " + .data.result[0].value[1]'
 ```
-3. Yapışkan okumayı redirect ve api'de kapat (pod'lar yeniden başlar), replikada WAL uygulamasını duraklat:
+3. Korumayı kaldır: yapışkan okumayı redirect ve api'de kapat (pod'lar yeniden başlar), replikada WAL uygulamasını
+   duraklat (replika geride kalsın):
 ```bash
+cd "$LADDER/09-database-scaling"
 make set E="TRAP_NO_STICKY=true" W=redirect
 make set E="TRAP_NO_STICKY=true" W=api
 sleep 10
 kubectl -n lvl09 exec "$replica" -c postgres -- psql -U postgres -d linkly -tAc 'SELECT pg_wal_replay_pause()'
 kubectl -n lvl09 exec "$replica" -c postgres -- psql -U postgres -d linkly -tAc 'SELECT pg_is_wal_replay_paused()'
 ```
-4. Aynı yükü ver, ihlali oku, replikanın ne kadar geride kaldığına bak:
+4. Aynı yükü ver, ihlali oku, replikanın kaç saniye geride kaldığına bak:
 ```bash
+cd "$LADDER/09-database-scaling"
 make load S=read-your-writes K6_ARGS="--vus 10 --duration 30s"
 sleep 15
 curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum(increase(ryw_violations_total{namespace="lvl09"}[1m]))' | jq -r '"ihlal (sunucu): " + .data.result[0].value[1]'
@@ -163,87 +177,66 @@ kubectl -n lvl09 exec "$replica" -c postgres -- psql -U postgres -d linkly -tAc 
 ```
 5. Geri al — önce WAL uygulamasını devam ettir, sonra yapışkan okumayı aç:
 ```bash
+cd "$LADDER/09-database-scaling"
 kubectl -n lvl09 exec "$replica" -c postgres -- psql -U postgres -d linkly -tAc 'SELECT pg_wal_replay_resume()'
 kubectl -n lvl09 exec "$replica" -c postgres -- psql -U postgres -d linkly -tAc 'SELECT pg_is_wal_replay_paused()'
 make reset
 ```
 
-**Terminalde ne görmelisin:** 1. adımda `pg_is_wal_replay_paused` → `f`. 2. adımda k6 özet satırının
-(`k6 lvl09: … 404=…`) altındaki `ryw_violations=0` ve `ihlal (sunucu): 0`: yazma sonrası okumalar primary'ye yapıştı.
-3. adımda duraklatma sonrası `t`. 4. adımda `404=` ve `ryw_violations=` sıfırdan büyüktür, `ihlal (sunucu)` da:
-kullanıcı kendi az önce yarattığı link için 404 aldı. Son komut replikanın son uygulanan işlemden kaç saniye geride
-olduğunu basar — duraklatmadan beri geçen süre kadar (onlarca saniye). 5. adımda yeniden `f`. Not: bu 404'ler
-önbelleğe negatif kayıt olarak da yazılır; replika yetişse bile o linkler `CACHE_NEGATIVE_TTL` boyunca 404 dönebilir.
+**Terminalde ne görmelisin:** 1. adımda `f` (duraklatılmamış). 2. adımda k6 özetinde `ryw_violations=0` ve
+`ihlal (sunucu): 0`: yazma sonrası okumalar primary'ye yapıştı. 3. adımda `t`. 4. adımda `404=`, `ryw_violations=` ve
+`ihlal (sunucu)` sıfırdan büyük: kullanıcı kendi az önce yarattığı link için 404 aldı; son komut replikanın
+duraklatmadan beri kaç saniye geride olduğunu basar (onlarca saniye). 5. adımda yeniden `f`. Bu 404'ler önbelleğe
+negatif kayıt olarak da yazılır; replika yetişse bile o linkler `CACHE_NEGATIVE_TTL` boyunca 404 dönebilir.
 
-**Grafana'da gör:** [`03 · App Business`](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl09&from=now-15m&to=now&refresh=10s), [`15 · k6`](http://grafana.localtest.me/d/ladder-k6?var-level=lvl09&from=now-15m&to=now&refresh=10s) ve [`05 · Postgres`](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl09&from=now-15m&to=now&refresh=10s) — scripti başlatınca aç; iki faz 30'ar sn, arada rollout (giriş: admin / ladder)
-- "Read-your-writes ihlali" → birinci fazda (yapışkan okuma açık) **0'da düz**; ikinci fazda sıfırdan ayrılıp yükselir. Bu sayaç sunucu tarafında, okuma replikaya gidip az önce yazılan kodu **bulamadığında** (404) artar — replikanın hata vermesi ya da zaman aşımı ihlal sayılmaz.
-- "Senaryoya özel ölçüler" (k6) → `read-your-writes ihlali` aynı anda basamak yapar: istemcinin gözünden aynı olay — kendi yarattığı link için 404.
-- "Dönen durum kodları" (k6) → ikinci fazda `302`'lerin yerini `404` alır; bkz. [Grafana'yı okumak](../README.md#grafanayı-okumak).
-- "Replikasyon gecikmesi" → replika pod'unun çizgisi birinci fazda 0; duraklatma boyunca **doğrusal tırmanır** (alınan ama uygulanmayan WAL) ve devam ettirilince 0'a düşer. CNPG metrikleri 30 sn'de bir kazındığı için tırmanış bir-iki noktadan ibarettir; script duraklatmanın sonundaki gecikmeyi doğrudan replikadan okuyup basar.
+**Grafana'da gör:** [`03 · App Business`](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl09&from=now-15m&to=now&refresh=10s), [`15 · k6`](http://grafana.localtest.me/d/ladder-k6?var-level=lvl09&from=now-15m&to=now&refresh=10s) ve [`05 · Postgres`](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl09&from=now-15m&to=now&refresh=10s) — deney başlayınca aç; iki faz 30'ar sn, arada rollout
+- "Read-your-writes ihlali" → birinci fazda 0'da düz; ikinci fazda yükselir. Sunucu, replikaya giden okuma az önce yazılan kodu bulamadığında (404) sayar.
+- "Senaryoya özel ölçüler" (k6) → `read-your-writes ihlali` aynı anda basamak yapar: aynı olayın istemci tarafı.
+- "Dönen durum kodları" (k6) → ikinci fazda `302`'lerin yerini `404` alır.
+- "Replikasyon gecikmesi" → replika çizgisi birinci fazda 0; duraklatma boyunca doğrusal tırmanır, devam ettirilince 0'a düşer (30 sn'de bir ölçüldüğü için bir-iki nokta).
 - Explore'da: `sum(rate(db_reads_routed_total{namespace="lvl09"}[1m])) by (target)` → birinci fazda okumaların bir kısmı `primary`'ye yapışır; ikinci fazda hepsi `replica`'ya gider.
 
-**Neden `replica-delay` chaos'u değil?** `platform/chaos/replica-delay.yaml` replikanın
-**gönderdiği** paketleri geciktirir, aldığı WAL'i değil. Sonuç bayat değil **yavaş** bir replikadır:
-sorgu cevapları ~3 sn geç gelir (3 sn'lik sorgu timeout'unda `503`), WAL onayları geç gittiği için
-primary'nin gözünden gecikme ~3 sn görünür (`cnpg_pg_stat_replication_replay_lag_seconds`), ama
-replikanın kendi gecikmesi ("Replikasyon gecikmesi" paneli) ~0 kalır ve kimse 404 almaz. Sunucu
-sayacı zaman aşımlarını da ihlal saydığı için bu chaos'la deney, tek bir 404 olmadan "ihlal arttı"
-derdi. *Yavaş replika ile bayat replika farklı arızalardır; birini ölçüp diğerini raporlama.*
-
-**Çözümler ve bedelleri:**
-
-| Yaklaşım | Bedeli |
-|---|---|
-| Yapışkan okuma *(uygulanmış)* | Yazma sonrası N sn okuma ölçeklenmesinden ödün; işaret Redis'te, iki servis de görür — Redis yoksa korunmaz |
-| Senkron replikasyon | Yazma gecikmesi en yavaş replikaya bağlanır |
-| LSN takibi | En doğru, en karmaşık: client yazmanın LSN'ini taşır |
-| Yeni kaydı önbelleğe yaz | Ucuz ama yalnızca önbellek isabetinde — 03'te bunu **bilerek** yapmamıştık |
-
-*"Eventual consistency" bir kullanıcıya yapılabilecek en kötü savunmadır: 404 gördüğü an sistem
-onun için bozuktur.*
+**Nerede çözülüyor:** Seviye içinde: yazmadan sonra 2 sn okumaları primary'ye yapıştırmak (uygulanan; Redis yoksa
+korumaz). Diğer yollar: senkron replikasyon (yazma en yavaş replikayı bekler) · LSN takibi (en doğru, en karmaşık).
 
 ---
 
 ### P09-02 · Failover penceresi
 
-**Belirti:** Primary öldürüldüğünde ~10–30 saniye yazma yapılamaz, sonra sistem kendini toparlar.
-**Neden:** Terfi anlık değildir: WAL uygulaması, rol ilanı, istemcilerin yeni adrese yönlenmesi.
-[Topic · Konu: HA, failover, SLO]
+**Ne deniyoruz:** Primary çökünce yazmalar ne kadar süre durur ve sistem kendiliğinden toparlanır mı?
+**Neden:** Replikanın primary'ye terfisi (failover) anlık değildir: operatör arızayı fark eder, replikayı terfi
+ettirir, istemciler yeni adrese yönlenir.
 
-**Reproduce (adım adım):**
+**Reproduce (adım adım):** Otomatik: `CONFIRM=1 make repro P=P09-02` (karışık yük altında primary'yi zorla siler —
+kapanış yok; düzgün silinen primary'yi CNPG kapanırken devreder ve pencere görünmez —, hazır yeni primary'ye kadar
+geçen süreyi, 5xx'i ve yazma p99'unu ölçer; silinen pod replika olarak geri kurulana kadar bekler). Elle —
+**yıkıcı:** 3. adım primary'yi siler; 4. adımda iki instance da hazır olmadan sonraki soruna geçme:
 
-Otomatik — ölçer ve hüküm basar: `CONFIRM=1 make repro P=P09-02` (karışık yük altında primary'yi **çökertir** — zorla
-siler, kapanış yok —; primary rolünde hazır yeni bir pod olana kadar geçen süreyi, k6'nın 5xx'ini ve yazma yolunun —
-`POST /api/links` — pencere içi en kötü p99'unu ölçer; sonunda silinen pod replika olarak geri kurulana kadar bekler.
-Hüküm: 5xx sıfırdan büyük ya da yazma p99 ≥ 1 sn. Neden çökme: düzgün silinen bir primary'yi CNPG kapanırken replikaya
-devreder ve PgBouncer bunu istemciden gizler; pencere, operatörün arızayı fark edip terfi ettirmesi gereken çökmede
-açılır).
-
-Elle — `09-database-scaling` klasöründe, sırayla yapıştır. **Yıkıcı:** 3. adım primary Postgres pod'unu siler;
-CNPG replikayı terfi ettirir ve silinen pod'u replika olarak geri kurar. 4. adımda iki instance da hazır olmadan
-sonraki soruna geçme:
-
-1. Grafana'yı temizle, CNPG pod'larının hazır olmasını bekle, rollere bak, primary'yi not et:
+1. Temiz başla; CNPG pod'larını bekle, rollere bak, primary'yi not et:
 ```bash
+cd "$LADDER/09-database-scaling"
 make fresh
 kubectl -n lvl09 wait --for=condition=Ready pod -l cnpg.io/cluster=pg,cnpg.io/instanceRole --timeout=180s
 kubectl -n lvl09 get pods -l cnpg.io/cluster=pg -L cnpg.io/instanceRole
 primary=$(kubectl -n lvl09 get pod -l cnpg.io/cluster=pg,cnpg.io/instanceRole=primary -o jsonpath='{.items[0].metadata.name}'); echo "primary: $primary"
 ```
-2. İKİNCİ bir terminalde `09-database-scaling` klasöründe karışık yükü (100 okumaya 1 yazma) 120 sn başlat:
+2. İkinci bir terminalde karışık yükü (100 okumaya 1 yazma) 120 sn başlat:
 ```bash
+cd "$LADDER/09-database-scaling"
 make load S=mixed K6_ARGS="--vus 15 --duration 120s"
 ```
-3. Yük başladıktan ~15 sn sonra İLK terminalde primary'yi **çökert** (zorla sil: kapanış yok) ve her saniye primary
-   rolündeki pod'u ve hazır olup olmadığını bas; silinenden farklı (yeni UID'li) hazır bir primary olunca döngü durur:
+3. Yük başladıktan ~15 sn sonra ilk terminalde primary'yi zorla sil ve her saniye hazır yeni bir primary var mı bas;
+   bulununca döngü durur:
 ```bash
+cd "$LADDER/09-database-scaling"
 uid0=$(kubectl -n lvl09 get pod "$primary" -o jsonpath='{.metadata.uid}')
 kubectl -n lvl09 delete pod "$primary" --force --grace-period=0
 t0=$(date +%s); for i in $(seq 1 120); do np=$(kubectl -n lvl09 get pods -l cnpg.io/cluster=pg,cnpg.io/instanceRole=primary -o json | jq -r --arg u "$uid0" '[.items[] | select(.metadata.uid != $u) | select(any(.status.containerStatuses[]?; .ready)) | .metadata.name][0] // empty'); echo "$(( $(date +%s) - t0 )) sn: hazır yeni primary=${np:-yok}"; [ -n "$np" ] && break; sleep 1; done
 ```
-4. İkinci terminaldeki yük bitince 15 sn bekle (son kazıma yükü kapsasın), yazma yolunun son 3 dakikadaki en kötü
-   p99'unu (ms) oku, sonra rollere bak ve iki instance da hazır olana kadar bekle:
+4. Yük bitince 15 sn bekle, yazma yolunun son 3 dakikadaki en kötü p99'unu (ms) oku, iki instance da hazır olana
+   kadar bekle:
 ```bash
+cd "$LADDER/09-database-scaling"
 sleep 15
 curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=1000 * max_over_time(histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace="lvl09",route="/api/links"}[30s])) by (le))[3m:15s])' | jq -r '.data.result[0].value[1]'
 kubectl -n lvl09 wait --for=condition=Ready pod -l cnpg.io/cluster=pg,cnpg.io/instanceRole --timeout=300s
@@ -251,56 +244,50 @@ kubectl -n lvl09 get pods -l cnpg.io/cluster=pg -L cnpg.io/instanceRole
 kubectl -n lvl09 get cluster.postgresql.cnpg.io pg
 ```
 
-**Terminalde ne görmelisin:** döngü önce `hazır yeni primary=yok` basar, sonra bir pod adına döner: yazmanın yeniden
-mümkün olduğu an, pencere o satırdaki saniyedir (Belirti: ~10–30 sn). Ad ya replikanınkidir (terfi) ya da silinenle
-aynıdır (CNPG aynı adla yeni bir pod kaldırdı — UID'i farklı). Pencere iki biçimde görünür: ikinci terminaldeki k6 özet
-satırında (`k6 lvl09: reqs=… 5xx=…`) `5xx` sıfırdan büyüktür (düşen istekler), ya da 4. adımdaki yazma p99'u saniyelerle
-ölçülür (PgBouncer sorguları bekletti) — script ikisinden birini görünce REPRODUCED der. Yük bitmeden hatalar ve bekleme
-kesilir: sistem insan müdahalesi olmadan toparlandı. 4. adımda iki instance da hazırdır (silinen pod replika olarak geri
-kurulur; bu birkaç dakika sürebilir ve yazma kesintisinin parçası değildir); `get cluster` hazır instance sayısını ve
-güncel primary'yi gösterir.
+**Terminalde ne görmelisin:** döngü önce `hazır yeni primary=yok`, sonra bir pod adı basar; pencere o satırdaki
+saniyedir (~10–30 sn). Ad replikanınki (terfi) ya da silinenle aynı (CNPG aynı adla yeni pod kaldırdı) olabilir.
+Pencere iki biçimde görünür: k6 özetinde `5xx` sıfırdan büyük (düşen istekler) ya da 4. adımdaki yazma p99'u saniyelerle
+ölçülür (PgBouncer sorguları bekletti); script ikisinden birini görünce REPRODUCED der. Yük bitmeden sistem insan
+müdahalesi olmadan toparlanır. 4. adımda iki instance da hazır; silinen pod'un replika olarak geri kurulması birkaç
+dakika sürebilir.
 
-**Grafana'da gör:** [`05 · Postgres`](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl09&from=now-15m&to=now&refresh=10s) ve [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl09&from=now-15m&to=now&refresh=10s) — scripti başlatınca aç; yük 120 sn, primary 15. saniyede silinir (giriş: admin / ladder)
-- Explore'da: `max by (pod) (cnpg_pg_replication_in_recovery{namespace="lvl09"})` → roller: `0` = primary, `1` = replika. Replika terfi ederse onun çizgisi 1'den **0'a** iner ve silinen pod bir süre kaybolup **1** olarak (yeni replika) geri gelir; CNPG silinen primary'yi aynı adla yeniden başlatırsa o pod'un çizgisi kopar ve yine **0** olarak döner.
-- "Replikasyon gecikmesi" → çizgiler 0 civarında; silinen pod'un çizgisi **kopar** ve pod replika olarak geri gelince yeniden başlar. Boşluk, o pod'un yeniden kurulma süresidir.
-- "5xx (uç noktaya göre)" → primary silinince bir 5xx tepesi (başta yazma yolu `/api/links`: `503 store_error`), saniyeler sonra **kendiliğinden** 0'a döner — insan müdahalesi olmadan. Tepenin genişliği, failover penceresidir. Tepe hiç çıkmayabilir: PgBouncer sorguları yeni primary hazır olana kadar bekletir.
-- "p99 süre (uç noktaya göre)" (App RED) → o zaman pencere burada görünür: `/api/links` p99'u milisaniyelerden **saniyelere** sıçrar ve küme sağlıklı olunca geri iner; `/{code}` (okuma, önbellek ve replika) neredeyse düz kalır. Hata vermeyen bir kesinti de kesintidir: yazma o süre boyunca asılı kaldı.
-- "Bağlantılar ve üst sınır" → 09'dan itibaren CNPG'nin `cnpg_backends_total` metriğinden (postgres_exporter yok): primary silinince onun bağlantı çizgileri **kopar**, terfi eden pod'da yeniden kurulur — Pooler'lar yeni primary'ye bağlanıyor. Üst çizgi `max_connections` (100) sabit kalır.
+**Grafana'da gör:** [`05 · Postgres`](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl09&from=now-15m&to=now&refresh=10s) ve [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl09&from=now-15m&to=now&refresh=10s) — yük başlayınca aç; 120 sn, primary 15. saniyede silinir
+- Explore'da: `max by (pod) (cnpg_pg_replication_in_recovery{namespace="lvl09"})` → roller: `0` = primary, `1` = replika. Terfi eden replikanın çizgisi 1'den 0'a iner; silinen pod bir süre kaybolup geri gelir.
+- "Replikasyon gecikmesi" → 0 civarında; silinen pod'un çizgisi kopar ve replika olarak geri gelince başlar.
+- "5xx (uç noktaya göre)" → primary silinince bir 5xx tepesi (başta `/api/links`: `503 store_error`), saniyeler sonra kendiliğinden 0'a döner; genişliği failover penceresidir. PgBouncer sorguları bekletirse tepe hiç çıkmayabilir.
+- "p99 süre (uç noktaya göre)" → o zaman pencere burada: `/api/links` p99'u milisaniyelerden saniyelere sıçrar, `/{code}` neredeyse düz kalır. Hata vermeyen bekleme de kesintidir.
+- "Bağlantılar ve üst sınır" → primary silinince bağlantı çizgileri kopar ve terfi eden pod'da yeniden kurulur; üst çizgi (100) sabit.
 
-**02 ile fark:** Orada kesinti **insan müdahalesine kadar** sürüyordu. Burada saniyeler — ama sıfır
-değil ve olamaz.
-**Uygulama tarafında gereken:** yazma hatalarında retry **+ idempotency**. Retry idempotent değilse
-failover çift kayıt üretir — 06'daki `processed_events` deseninin yazma yolundaki karşılığı.
-*SLO yazarken: "failover var" cümlesi "%100 erişilebilirlik" anlamına gelmez.*
+**Nerede çözülüyor:** Kesinti insan müdahalesinden saniyelere iner ama sıfır olamaz. Uygulama tarafında yazma hatasına
+retry + idempotency gerekir (10); retry idempotent değilse failover çift kayıt üretir.
 
 ---
 
 ### P09-03 · TRAP · Prepared statement + transaction pooling
 
-**Belirti:** `prepared statement "stmtcache_..." does not exist` — **aralıklı**, yük arttıkça sıklaşan.
-**Neden:** PgBouncer transaction modunda bağlantı sana yalnızca bir işlem süresince aittir. pgx bir
-arka uç bağlantısında hazırlar, başka birinde çalıştırır. [Topic · Konu: Bağlantı çoğullama]
+**Ne deniyoruz:** Önceden hazırlanmış sorgular (prepared statement) PgBouncer arkasında çalışıyor mu?
+**Neden:** PgBouncer transaction modunda DB bağlantısı sana yalnızca bir işlem boyunca aittir. pgx sorguyu bir arka uç
+bağlantısında hazırlar, başka birinde çalıştırmaya çalışır ve orada bulamaz.
 
-**Reproduce (adım adım):**
+**Reproduce (adım adım):** Otomatik: `make repro P=P09-03` (varsayılan exec modu ile prepared modunu aynı `mixed`
+yüküyle karşılaştırır: DB hataları, 5xx ve loglardaki `prepared statement` satırları). Elle:
 
-Otomatik — ölçer ve hüküm basar: `make repro P=P09-03` (`QueryExecModeExec` (varsayılan) ve prepared modu aynı
-`mixed` yüküyle karşılaştırır: DB hata sayısı, 5xx ve redirect loglarındaki `prepared statement` satırları).
-
-Elle — `09-database-scaling` klasöründe, sırayla yapıştır:
-
-1. Grafana'yı temizle, yazma Pooler'ının modunu ve arka uç havuz boyunu gör:
+1. Temiz başla; yazma Pooler'ının modunu ve DB tarafı havuz boyunu gör:
 ```bash
+cd "$LADDER/09-database-scaling"
 make fresh
 kubectl -n lvl09 get pooler pg-pooler-rw -o jsonpath='poolMode={.spec.pgbouncer.poolMode} default_pool_size={.spec.pgbouncer.parameters.default_pool_size}{"\n"}'
 ```
 2. Varsayılan (prepared kapalı): 30 kullanıcıyla 40 sn karışık yük, sonra DB hatalarını say:
 ```bash
+cd "$LADDER/09-database-scaling"
 make load S=mixed K6_ARGS="--vus 30 --duration 40s"
 sleep 10
 curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=sum(increase(db_queries_total{namespace="lvl09",result="error"}[3m]))' | jq -r '"DB hatası: " + .data.result[0].value[1]'
 ```
-3. Tuzağı redirect'te aç (pgx prepared moduna geçer; pod'lar yeniden başlar), aynı yük, aynı sayım, sonra loglara bak:
+3. Tuzağı redirect'te aç (pgx prepared moduna geçer, pod'lar yeniden başlar); aynı yük, aynı sayım, sonra loglar:
 ```bash
+cd "$LADDER/09-database-scaling"
 make set E="TRAP_PREPARED_STATEMENTS=true" W=redirect
 sleep 10
 make load S=mixed K6_ARGS="--vus 30 --duration 40s"
@@ -311,46 +298,39 @@ kubectl -n lvl09 logs -l app.kubernetes.io/name=redirect --tail=200 | grep -i -m
 ```
 4. Tuzağı kapat:
 ```bash
+cd "$LADDER/09-database-scaling"
 make reset
 ```
 
-**Terminalde ne görmelisin:** `poolMode=transaction default_pool_size=20`. Varsayılan fazda `DB hatası: 0` ve k6 özet
-satırında (`k6 lvl09: …`) `5xx=0`. Tuzak fazında `DB hatası` sıfırdan büyük, `5xx` de (`503 store_error`) — ama her
-istekte değil: önbellek isabetleri DB'ye gitmiyor, hata yalnızca DB'ye inen okumalarda ve aralıklı. Log sayımı
-sıfırdan büyüktür ve örnek satırda `prepared statement "stmtcache_…" does not exist` geçer: pgx bir arka uç
-bağlantısında hazırladı, PgBouncer işlemi başka birine verdi.
+**Terminalde ne görmelisin:** `poolMode=transaction default_pool_size=20`. Varsayılan fazda `DB hatası: 0` ve k6
+özetinde `5xx=0`. Tuzak fazında `DB hatası` ve `5xx` (`503 store_error`) sıfırdan büyük ama aralıklı: önbellek
+isabetleri DB'ye gitmez, hata yalnızca DB'ye inen okumalarda çıkar. Log sayımı sıfırdan büyük; örnek satır
+`prepared statement "stmtcache_…" does not exist`.
 
-**Grafana'da gör:** [`03 · App Business`](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl09&from=now-15m&to=now&refresh=10s) ve [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl09&from=now-15m&to=now&refresh=10s) — scripti başlatınca aç; iki faz 40'ar sn, arada redirect rollout'u (giriş: admin / ladder)
-- "Yönlendirme sonuçları" → birinci fazda `error` serisi 0'da; ikinci fazda (prepared açık) **aralıklı** sıfırdan ayrılır. Önbellek isabetleri DB'ye gitmediği için hata her istekte değil, yalnızca DB'ye inen okumalarda çıkar.
-- "5xx (uç noktaya göre)" → aynı anda `/{code}` için düzensiz 5xx tepeleri (`503 store_error`): kullanıcı, havuzlamanın bir protokol ayrıntısını görüyor.
-- Explore'da: `sum(rate(db_queries_total{namespace="lvl09",result="error"}[1m])) by (op)` → birinci fazda 0, ikinci fazda sıfırdan ayrılır ve dalgalanır. (`05 · Postgres` → "Veritabanı sorguları (türe göre)" paneli sonuçları ayırmadan toplar; hatayı orada göremezsin.)
+**Grafana'da gör:** [`03 · App Business`](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl09&from=now-15m&to=now&refresh=10s) ve [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl09&from=now-15m&to=now&refresh=10s) — deney başlayınca aç; iki faz 40'ar sn, arada redirect rollout'u
+- "Yönlendirme sonuçları" → birinci fazda `error` serisi 0; ikinci fazda aralıklı sıfırdan ayrılır.
+- "5xx (uç noktaya göre)" → ikinci fazda `/{code}` için düzensiz 5xx tepeleri: kullanıcı havuzlamanın bir protokol ayrıntısını görüyor.
+- Explore'da: `sum(rate(db_queries_total{namespace="lvl09",result="error"}[1m])) by (op)` → birinci fazda 0, ikinci fazda dalgalanır (`05 · Postgres` sorgu paneli sonuçları ayırmaz).
 
-**Genel ders:** *Bağlantıları çoğullayan bir proxy, "bağlantı"nın ne demek olduğunu değiştirir.*
-Bağlantı kimliğine dayanan her özellik yeniden gözden geçirilmeli: prepared statement · oturum
-değişkenleri (`SET`) · `LISTEN/NOTIFY` · geçici tablolar · advisory lock.
-**Seçenekler:** client tarafı exec modu *(uygulanmış)* · PgBouncer'da `max_prepared_statements>0` ·
-session pooling (çoğullama oranını, yani Pooler'ı almanın sebebini kaybedersin).
+**Nerede çözülüyor:** Seviye içinde: istemci tarafı exec modu (uygulanan, `QueryExecModeExec`). Diğer yollar:
+PgBouncer'da `max_prepared_statements>0` · session pooling (çoğullamayı kaybettirir). Bağlantı kimliğine dayanan her
+özellik (`SET`, `LISTEN/NOTIFY`, geçici tablo, advisory lock) aynı riski taşır.
 
 ---
 
 ### P09-04 · Replikada uzun okuma ↔ WAL çakışması
 
-**Belirti:** `canceling statement due to conflict with recovery` — ya da `hot_standby_feedback=on`
-ile: çakışma yok, ama primary'de vacuum gecikir ve şişme artar.
-**Neden:** Replika WAL'i uygulamak zorundadır; uzun bir okuma, silinmesi gereken satırları tutar.
-[Topic · Konu: Replika çakışmaları, vacuum]
+**Ne deniyoruz:** Replikadaki uzun bir okuma primary'yi etkiler mi?
+**Neden:** Replika primary'den gelen değişiklikleri (WAL) uygulamak zorundadır; uzun bir okuma silinmesi gereken
+satırları tutar. `hot_standby_feedback=on` iken okuma iptal edilmez, bunun yerine primary o satırları temizleyemez
+(vacuum gecikir, tablo şişer).
 
-**Reproduce (adım adım):**
+**Reproduce (adım adım):** Otomatik: `make repro P=P09-04` (replikada 45 sn'lik sorgu başlatır, primary'de 50 bin
+satır yazıp siler ve VACUUM eder; ölü satırları taban → rehinli → serbest diye üç kez sayar, çakışmaları okur). Elle:
 
-Otomatik — ölçer ve hüküm basar: `make repro P=P09-04` (replikada 45 sn'lik uzun bir sorgu başlatıp primary'de
-50 bin satırlık yazma + silme + VACUUM yapar; ölü satırları taban → rehinli → serbest diye üç kez sayar,
-`pg_stat_database_conflicts`'i okur).
-
-Elle — `09-database-scaling` klasöründe, sırayla yapıştır:
-
-1. Grafana'yı temizle, CNPG pod'larının hazır olmasını bekle, primary ile replikayı bul, replikanın
-   `hot_standby_feedback` ayarına bak:
+1. Temiz başla; CNPG pod'larını bekle, primary ile replikayı bul, replikanın `hot_standby_feedback` ayarına bak:
 ```bash
+cd "$LADDER/09-database-scaling"
 make fresh
 kubectl -n lvl09 wait --for=condition=Ready pod -l cnpg.io/cluster=pg,cnpg.io/instanceRole --timeout=180s
 prim=$(kubectl -n lvl09 get pod -l cnpg.io/cluster=pg,cnpg.io/instanceRole=primary -o jsonpath='{.items[0].metadata.name}'); replica=$(kubectl -n lvl09 get pod -l cnpg.io/cluster=pg,cnpg.io/instanceRole=replica -o jsonpath='{.items[0].metadata.name}'); echo "primary: $prim replika: $replica"
@@ -358,17 +338,18 @@ kubectl -n lvl09 exec "$replica" -c postgres -- psql -U postgres -d linkly -tAc 
 ```
 2. Taban: primary'de `links`'i VACUUM et, ölü satır sayısını oku:
 ```bash
+cd "$LADDER/09-database-scaling"
 kubectl -n lvl09 exec "$prim" -c postgres -- psql -U postgres -d linkly -tAc 'VACUUM (ANALYZE) links'
 kubectl -n lvl09 exec "$prim" -c postgres -- psql -U postgres -d linkly -tAc "SELECT n_dead_tup FROM pg_stat_user_tables WHERE relname='links'"
 ```
-3. İKİNCİ bir terminalde `09-database-scaling` klasöründe replikada 45 sn süren bir okuma başlat (primary'nin
-   vacuum'unu rehin alır):
+3. İkinci bir terminalde replikada 45 sn süren bir okuma başlat (primary'nin vacuum'unu rehin alır):
 ```bash
+cd "$LADDER/09-database-scaling"
 replica=$(kubectl -n lvl09 get pod -l cnpg.io/cluster=pg,cnpg.io/instanceRole=replica -o jsonpath='{.items[0].metadata.name}'); kubectl -n lvl09 exec "$replica" -c postgres -- psql -U postgres -d linkly -tAc 'SELECT count(*) FROM links, pg_sleep(45)'
 ```
-4. Hemen ardından (45 sn dolmadan) İLK terminalde: replikanın rehin aldığı xmin'in yaşı, sonra 50 bin satır çöp üret,
-   VACUUM et, ölü satırları say:
+4. 45 sn dolmadan ilk terminalde: rehin alınan xmin'in yaşı, sonra 50 bin satır çöp üret, VACUUM et, ölü satırları say:
 ```bash
+cd "$LADDER/09-database-scaling"
 kubectl -n lvl09 exec "$prim" -c postgres -- psql -U postgres -d linkly -tAc 'SELECT coalesce(max(age(backend_xmin)),0) FROM pg_stat_replication WHERE backend_xmin IS NOT NULL'
 kubectl -n lvl09 exec "$prim" -c postgres -- psql -U postgres -d linkly -tAc "INSERT INTO links (code, url, tenant) SELECT substr(md5(random()::text),1,7)||i, 'https://e/'||i, 'vac' FROM generate_series(1,50000) i ON CONFLICT DO NOTHING"
 kubectl -n lvl09 exec "$prim" -c postgres -- psql -U postgres -d linkly -tAc "DELETE FROM links WHERE tenant='vac'"
@@ -378,50 +359,43 @@ kubectl -n lvl09 exec "$prim" -c postgres -- psql -U postgres -d linkly -tAc "SE
 5. İkinci terminaldeki sorgu sonucunu basınca (rehin kalktı) tekrar VACUUM et, ölü satırları ve replikadaki
    çakışmaları say:
 ```bash
+cd "$LADDER/09-database-scaling"
 sleep 5
 kubectl -n lvl09 exec "$prim" -c postgres -- psql -U postgres -d linkly -tAc 'VACUUM links'
 kubectl -n lvl09 exec "$prim" -c postgres -- psql -U postgres -d linkly -tAc "SELECT n_dead_tup FROM pg_stat_user_tables WHERE relname='links'"
 kubectl -n lvl09 exec "$replica" -c postgres -- psql -U postgres -d linkly -tAc "SELECT confl_snapshot + confl_bufferpin + confl_deadlock + confl_lock + confl_tablespace FROM pg_stat_database_conflicts WHERE datname='linkly'"
 ```
 
-**Terminalde ne görmelisin:** `hot_standby_feedback` → `on`. Tabanda ölü satır ~0. Rehin alınan xmin'in yaşı yük yokken
-küçük bir sayıdır (o ana kadar işlenen yazma işlemi kadar); asıl kanıt ölü satırlardır: `DELETE`'ten sonraki VACUUM
-onları **temizleyemez**, sayı ~50 bin kalır. İkinci terminal 45 sn
-sonra `links`'in satır sayısını basar — sorgu iptal edilmedi. Rehin kalkınca aynı VACUUM ölü satırları temizler
-(sayı tabana iner) ve replikadaki çakışma sayısı `0`'dır: `hot_standby_feedback=on` iptali önledi, bedeli primary'deki
-şişmede ödendi. Script ölü satır sayısı rehinliyken hem tabandan hem serbest hâlden büyükse REPRODUCED der. Deney
-kendi çöpünü siler; geri alınacak bir şey yok.
+**Terminalde ne görmelisin:** `hot_standby_feedback` → `on`. Tabanda ölü satır ~0. Rehin varken `DELETE` sonrası
+VACUUM ölü satırları temizleyemez: sayı ~50 bin kalır. İkinci terminal 45 sn sonra satır sayısını basar — sorgu iptal
+edilmedi. Rehin kalkınca aynı VACUUM temizler (sayı tabana iner) ve çakışma sayısı `0`: iptal önlendi, bedeli
+primary'deki şişmede ödendi. Deney kendi çöpünü siler.
 
-**Grafana'da gör:** [`05 · Postgres`](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl09&from=now-15m&to=now&refresh=10s) — scripti başlatınca aç; replikadaki uzun sorgu 45 sn sürer, yük yok (giriş: admin / ladder)
-- Explore'da: `max by (application_name) (cnpg_pg_stat_replication_backend_xmin_age{namespace="lvl09"})` → primary'nin gözünden replikanın **rehin tuttuğu xmin'in yaşı**: uzun sorgu sürerken geri inmez, sorgu bitince düşer. Artış, o sürede primary'de işlenen işlem sayısı kadardır — yük yoksa küçük bir basamak.
-- Explore'da: `sum(increase(cnpg_pg_stat_database_tup_deleted{namespace="lvl09",datname="linkly"}[1m]))` → script'in 50 bin satırlık `DELETE`'i bir tepe olarak görünür: vacuum'un temizleyemediği çöp bu.
-- Explore'da: `sum(cnpg_pg_stat_database_conflicts{namespace="lvl09",datname="linkly"})` → **düz** kalır: `hot_standby_feedback=on` olduğu için replikada iptal yok — bedel primary'deki şişmede ödeniyor.
-- Ölü satırlar (vacuum bekleyen) paneline bakma — bu seviyede **boştur**: postgres_exporter'ın tablo başına metriğini okur, CNPG bunu yayınlamaz. Ölü satır sayılarını (taban → rehinli → serbest) script terminalde basar; asıl kanıt o üç sayıdır.
+**Grafana'da gör:** [`05 · Postgres`](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl09&from=now-15m&to=now&refresh=10s) — deney başlayınca aç; uzun sorgu 45 sn sürer, yük yok
+- Explore'da: `max by (application_name) (cnpg_pg_stat_replication_backend_xmin_age{namespace="lvl09"})` → replikanın rehin tuttuğu xmin'in yaşı: sorgu sürerken inmez, bitince düşer.
+- Explore'da: `sum(increase(cnpg_pg_stat_database_tup_deleted{namespace="lvl09",datname="linkly"}[1m]))` → 50 bin satırlık `DELETE` bir tepe çizer: vacuum'un temizleyemediği çöp.
+- Explore'da: `sum(cnpg_pg_stat_database_conflicts{namespace="lvl09",datname="linkly"})` → düz kalır: replikada iptal yok.
+- "Ölü satırlar (vacuum bekleyen)" → bu seviyede boş (CNPG bu metriği yayınlamaz); ölü satır sayılarını script terminalde basar.
 
-**Ders:** *Bir replika "ücretsiz okuma kapasitesi" değildir.* Primary ile arasında bir pazarlık
-vardır (`hot_standby_feedback`) ve pazarlığın hangi tarafını seçtiğini bilmezsen, seni o taraf bulur.
+**Nerede çözülüyor:** Çözülmez, seçilir: `hot_standby_feedback` ya replikada sorgu iptalini ya da primary'de şişmeyi
+seçer. Replika "bedava okuma kapasitesi" değildir.
 
 ---
 
 ### P09-05 · Silme pahalı: partition'sız retention
 
-**Belirti:** 500 bin satırlık `DELETE` uzun sürer, ölü satır bırakır ve **tablo küçülmez**.
-Bir partition'ı `DROP` etmek milisaniyeler sürer ve borç bırakmaz.
-**Neden:** MVCC'de silinen satır "ölü" olarak kalır; yeri vacuum sonrası kullanılabilir, diske geri
-vermek `VACUUM FULL` (tam kilit) ister. [Topic · Konu: Partition, retention, MVCC]
+**Ne deniyoruz:** Eski kayıtları silmek `DELETE` ile mi, partition düşürerek mi ucuz?
+**Neden:** Postgres'te silinen satır "ölü" olarak kalır; yeri ancak vacuum'la yeniden kullanılır, diske geri vermek
+tam kilit ister. Tabloyu zamana göre bölümlersen (partition) eski bölümü tek hamlede atarsın.
 
-**Reproduce (adım adım):**
+**Reproduce (adım adım):** Otomatik: `make repro P=P09-05` (düz `processed_events`'e 500 bin satır ekler — `ROWS` ile
+değişir —, 1 saatten eskileri `DELETE` ile siler, ölü satır ve boyutu ölçer; sonra partition'lı `processed_events_p`'nin
+en eski bölümünü `DROP` eder ve iki süreyi karşılaştırır). Elle — 3. adım `processed_events`'teki 1 saatten eski
+bütün satırları, 4. adım en eski partition'ı kalıcı siler (9 partition var; biterse `make down` + `make up`):
 
-Otomatik — ölçer ve hüküm basar: `make repro P=P09-05` (düz `processed_events` tablosuna 500 bin satır ekler —
-`ROWS` ile değişir —, 1 saatten eski satırları `DELETE` ile siler, ölü satır ve boyutu ölçer; ardından partition'lı
-`processed_events_p`'nin en eski partition'ını `DROP` eder ve iki süreyi karşılaştırır).
-
-Elle — `09-database-scaling` klasöründe, sırayla yapıştır. Dikkat: 3. adım `processed_events`'teki 1 saatten eski
-**bütün** satırları siler (tüketicinin tekilleştirme kayıtları), 4. adım `processed_events_p`'nin en eski partition'ını
-kalıcı olarak düşürür. Migration 005 dokuz günlük partition açar; hepsi tükenirse `make down` + `make up` yeniden kurar:
-
-1. Grafana'yı temizle, primary'yi bul, partition'lı tablonun kaç partition'ı olduğuna bak:
+1. Temiz başla; primary'yi bul, partition'lı tablonun kaç bölümü olduğuna bak:
 ```bash
+cd "$LADDER/09-database-scaling"
 make fresh
 kubectl -n lvl09 wait --for=condition=Ready pod -l cnpg.io/cluster=pg,cnpg.io/instanceRole=primary --timeout=180s
 prim=$(kubectl -n lvl09 get pod -l cnpg.io/cluster=pg,cnpg.io/instanceRole=primary -o jsonpath='{.items[0].metadata.name}'); echo "primary: $prim"
@@ -429,55 +403,55 @@ kubectl -n lvl09 exec "$prim" -c postgres -- psql -U postgres -d linkly -tAc "SE
 ```
 2. Düz tabloya 500 bin satır ekle (her biri bir saniye daha eski), boyutuna bak:
 ```bash
+cd "$LADDER/09-database-scaling"
 kubectl -n lvl09 exec "$prim" -c postgres -- psql -U postgres -d linkly -tAc "INSERT INTO processed_events (event_id, processed_at) SELECT 'bulk-'||i, now() - (i||' seconds')::interval FROM generate_series(1,500000) i ON CONFLICT DO NOTHING"
 kubectl -n lvl09 exec "$prim" -c postgres -- psql -U postgres -d linkly -tAc 'ANALYZE processed_events'
 kubectl -n lvl09 exec "$prim" -c postgres -- psql -U postgres -d linkly -tAc "SELECT pg_size_pretty(pg_total_relation_size('processed_events'))"
 ```
-3. Saklama süresini `DELETE` ile uygula (süreyi psql ölçer), ölü satırları ve boyutu tekrar oku:
+3. Saklama süresini `DELETE` ile uygula (psql süreyi ölçer), ölü satırları ve boyutu tekrar oku:
 ```bash
+cd "$LADDER/09-database-scaling"
 kubectl -n lvl09 exec "$prim" -c postgres -- psql -U postgres -d linkly -c '\timing on' -c "DELETE FROM processed_events WHERE processed_at < now() - interval '1 hour'"
 kubectl -n lvl09 exec "$prim" -c postgres -- psql -U postgres -d linkly -tAc "SELECT n_dead_tup FROM pg_stat_user_tables WHERE relname='processed_events'"
 kubectl -n lvl09 exec "$prim" -c postgres -- psql -U postgres -d linkly -tAc "SELECT pg_size_pretty(pg_total_relation_size('processed_events'))"
 ```
-4. Aynı temizliği partition'lı tabloda yap: en eski partition'ı düşür:
+4. Aynı temizliği partition'lı tabloda yap: en eski bölümü düşür:
 ```bash
+cd "$LADDER/09-database-scaling"
 oldpart=$(kubectl -n lvl09 exec "$prim" -c postgres -- psql -U postgres -d linkly -tAc "SELECT c.relname FROM pg_inherits i JOIN pg_class c ON c.oid=i.inhrelid WHERE i.inhparent='processed_events_p'::regclass ORDER BY c.relname LIMIT 1"); echo "en eski partition: $oldpart"
 kubectl -n lvl09 exec "$prim" -c postgres -- psql -U postgres -d linkly -c '\timing on' -c "DROP TABLE $oldpart"
 ```
 
-**Terminalde ne görmelisin:** 1. adımda partition sayısı (ilk koşuda 9). 2. adımda tablo boyutu onlarca MB'a çıkar.
-3. adımda `DELETE ~496000` (ilk saatin 3600 satırı kalır; önceden var olan eski kayıtlar da silinir) ve `Time:`
-satırında yüzlerce milisaniyeden saniyelere varan bir süre; `n_dead_tup` yüz binlerle ölçülür ve boyut **aynı kalır**: satırlar ölü
-olarak duruyor, yer diske geri verilmedi. 4. adımda `DROP TABLE` ve `Time:` birkaç milisaniye: partition düşürmek
-satır satır silmez, dosyayı atar — ölü satır da vacuum borcu da bırakmaz.
+**Terminalde ne görmelisin:** 1. adımda bölüm sayısı (ilk koşuda 9). 2. adımda tablo onlarca MB. 3. adımda
+`DELETE ~496000` ve `Time:` yüzlerce ms'den saniyelere; `n_dead_tup` yüz binlerce ve boyut **aynı kalır**: satırlar ölü
+duruyor, yer diske dönmedi. 4. adımda `DROP TABLE` birkaç ms: bölüm düşürmek dosyayı atar, ölü satır ve vacuum borcu
+bırakmaz.
 
-**Grafana'da gör:** [`05 · Postgres`](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl09&from=now-15m&to=now&refresh=10s) — scripti başlatınca aç; 500 bin satır ekler, siler, sonra bir partition düşürür; yük yok (giriş: admin / ladder)
-- "Veritabanı CPU" → `pg-…` primary pod'unda iki tepe: 500 bin satırlık `INSERT` ve ardından `DELETE`. Partition `DROP`'u bu panelde **görünmez** — satır satır silmiyor, dosyayı atıyor.
-- "İşlem / sn" → **kıpırdamaz**: 500 bin satırlık `DELETE` tek bir işlemdir. Maliyeti işlem sayısında değil, dokunduğu satır sayısında ve bıraktığı çöptedir — işlem/sn'ye bakan biri onu hiç görmez.
-- Explore'da: `max(cnpg_pg_database_size_bytes{namespace="lvl09",datname="linkly"})` → ekleme sırasında basamakla yükselir ve `DELETE`'ten sonra **inmez**: silinen satırların yeri diske geri verilmiyor.
-- Explore'da: `sum(increase(cnpg_pg_stat_database_tup_deleted{namespace="lvl09",datname="linkly"}[1m]))` → `DELETE` yüz binlerce satırlık bir tepe çizer; partition `DROP`'u bu sayaçta **hiç** görünmez.
-- "Ölü satırlar (vacuum bekleyen)" → bu seviyede **boştur**: panel postgres_exporter'ın tablo başına metriğini okur, CNPG bunu yayınlamaz. `DELETE`'in bıraktığı ölü satır sayısını ve tablo boyutunu (önce → sonra) script terminalde basar.
+**Grafana'da gör:** [`05 · Postgres`](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl09&from=now-15m&to=now&refresh=10s) — deney başlayınca aç; yük yok
+- "Veritabanı CPU" → primary pod'unda iki tepe: 500 bin satırlık `INSERT` ve `DELETE`. Partition `DROP`'u görünmez.
+- "İşlem / sn" → kıpırdamaz: 500 bin satırlık `DELETE` tek bir işlemdir; maliyeti işlem sayısında değil, dokunduğu satırlarda.
+- Explore'da: `max(cnpg_pg_database_size_bytes{namespace="lvl09",datname="linkly"})` → eklemede yükselir, `DELETE`'ten sonra inmez: yer diske geri verilmiyor.
+- Explore'da: `sum(increase(cnpg_pg_stat_database_tup_deleted{namespace="lvl09",datname="linkly"}[1m]))` → `DELETE` yüz binlerce satırlık tepe çizer; `DROP` hiç görünmez.
+- "Ölü satırlar (vacuum bekleyen)" → bu seviyede boş (CNPG bu metriği yayınlamaz); ölü satır ve boyutu script basar.
 
-**Ders:** *Saklama süresi bir şema kararıdır, bir zamanlanmış iş değil.* Tabloyu zamana göre
-bölersen silmek ücretsizleşir; bölmezsen her gece koşan bir `DELETE` cron'uyla ve onun vacuum
-borcuyla yaşarsın.
+**Nerede çözülüyor:** Seviye içinde: zamana göre partition (migration 005). Saklama süresi bir zamanlanmış iş değil,
+şema kararıdır.
 
 ---
 
 ### P09-06 · Replikasyon yedek değildir
 
-**Belirti:** Bir satır silindiğinde replikada da **saniyeler içinde** yok olur.
-**Neden:** Replikasyon hatayı da kopyalar. [Topic · Konu: Yedekleme, PITR]
+**Ne deniyoruz:** Yanlışlıkla silinen bir satır replikada kurtarılabilir mi?
+**Neden:** Replikasyon hatayı da kopyalar: silme saniyeler içinde replikaya ulaşır. Geri dönüş için yedek ve zamanda
+geri gidebilme (PITR) gerekir; bu seviyede yok.
 
-**Reproduce (adım adım):**
+**Reproduce (adım adım):** Otomatik: `CONFIRM=1 make repro P=P09-06` (yedekleme ayarına bakar, bir test linki
+oluşturur, primary'de siler ve replikada da kaybolduğunu gösterir). Elle — silinen tek satır bu deneyin kendi test
+linkidir:
 
-Otomatik — ölçer ve hüküm basar: `CONFIRM=1 make repro P=P09-06` (yedekleme yapılandırmasına bakar, bir test linki
-oluşturur, primary'de siler ve replikada da kaybolduğunu gösterir).
-
-Elle — `09-database-scaling` klasöründe, sırayla yapıştır. Silinen tek satır, bu deneyin kendi oluşturduğu test linkidir:
-
-1. Grafana'yı temizle, primary ile replikayı bul, yedekleme yapılandırmasına ve WAL konumuna bak:
+1. Temiz başla; primary ile replikayı bul, yedekleme ayarına ve WAL konumuna bak:
 ```bash
+cd "$LADDER/09-database-scaling"
 make fresh
 kubectl -n lvl09 wait --for=condition=Ready pod -l cnpg.io/cluster=pg,cnpg.io/instanceRole --timeout=180s
 prim=$(kubectl -n lvl09 get pod -l cnpg.io/cluster=pg,cnpg.io/instanceRole=primary -o jsonpath='{.items[0].metadata.name}'); repl=$(kubectl -n lvl09 get pod -l cnpg.io/cluster=pg,cnpg.io/instanceRole=replica -o jsonpath='{.items[0].metadata.name}'); echo "primary: $prim replika: $repl"
@@ -487,34 +461,31 @@ kubectl -n lvl09 exec "$prim" -c postgres -- psql -U postgres -d linkly -tAc 'SH
 ```
 2. Bir test linki oluştur, replikaya ulaşsın diye 3 sn bekle, replikada say:
 ```bash
+cd "$LADDER/09-database-scaling"
 code=$(curl -s -XPOST http://lvl09.localtest.me/api/links -H 'Content-Type: application/json' -d '{"url":"https://example.com/oops"}' | jq -r .code); echo "kod: $code"
 sleep 3
 kubectl -n lvl09 exec "$repl" -c postgres -- psql -U postgres -d linkly -tAc "SELECT count(*) FROM links WHERE code='$code'"
 ```
 3. "Yanlışlıkla" primary'de sil, 3 sn bekle, replikada tekrar say:
 ```bash
+cd "$LADDER/09-database-scaling"
 kubectl -n lvl09 exec "$prim" -c postgres -- psql -U postgres -d linkly -tAc "DELETE FROM links WHERE code='$code'"
 sleep 3
 kubectl -n lvl09 exec "$repl" -c postgres -- psql -U postgres -d linkly -tAc "SELECT count(*) FROM links WHERE code='$code'"
 ```
 
-**Terminalde ne görmelisin:** `spec.backup` satırı **boş**: bu seviyede nesne deposu bilerek yapılandırılmadı. WAL
-konumu (`0/…` biçiminde bir LSN) ve `wal_keep_size` basılır. Silmeden önce replikada `1`, silmeden 3 sn sonra `0`:
-replika hatayı da saniyeler içinde kopyaladı — geri dönülecek bir kopya yok.
+**Terminalde ne görmelisin:** `spec.backup` satırı boş: nesne deposu yapılandırılmamış. WAL konumu (`0/…` biçiminde)
+ve `wal_keep_size` basılır. Silmeden önce replikada `1`, 3 sn sonra `0`: replika hatayı da kopyaladı, dönülecek kopya yok.
 
-**Grafana'da gör:** [`05 · Postgres`](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl09&from=now-15m&to=now&refresh=10s) — script bittikten sonra aç (giriş: admin / ladder)
-- "Replikasyon gecikmesi" → her pod için 0 civarında düz çizgi: replika primary'yi saniyeler içinde yakalıyor — yanlış `DELETE`'i de aynı hızla kopyalıyor. Düşük gecikme burada iyi haber değil, hatanın yayılma hızıdır.
-- Tek satırlık silmenin kendisi hiçbir panelde görünmez; kanıt script çıktısındaki `silme öncesi replikada: 1 satır · silme sonrası: 0 satır` satırıdır.
+**Grafana'da gör:** [`05 · Postgres`](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl09&from=now-15m&to=now&refresh=10s) — deneyden sonra aç
+- "Replikasyon gecikmesi" → 0 civarında düz: replika primary'yi saniyeler içinde yakalıyor — yanlış `DELETE`'i de. Düşük gecikme burada hatanın yayılma hızıdır.
 
-**Ders:** *Yedek, zamanda geri gitme yeteneğidir; replika ise zamanda ileri gitmenin kopyasıdır.*
-Gerçek koruma üç ayaklıdır: (1) sürekli WAL arşivleme, (2) periyodik temel yedek, (3) **düzenli
-geri yükleme tatbikatı**. Üçüncüsü olmadan ilk ikisi bir temennidir — bu yüzden bu seviyede nesne
-deposu **bilerek yapılandırılmadı**: yedeklemeyi "açmak" bir YAML bloğu; asıl mesele tatbikat, ve
-tatbikat bu merdivenin kapsamı dışında kalır (14 §9, "yolun devamı").
+**Nerede çözülüyor:** Kapsam dışı (14 §9, yolun devamı): sürekli WAL arşivleme + periyodik yedek + düzenli geri
+yükleme tatbikatı. Replika zamanda ileri gider; yedek zamanda geri gitmeyi sağlar.
 
 ## 7. Seviye içi alıştırmalar (TRAP_ bayrakları)
 
-> **Nasıl uygulanır:** aç `make set E="TRAP_X=true"` · ne açık? `make env` · hepsini geri al `make reset` (ortamı `deploy/`'daki hâline döndürür; `make unset E=TRAP_X` yalnızca siler). Tablodaki diğer ayarlar da aynı yolla (`make set E="CACHE_TTL=1h"`). Pod'lar yeni değerle yeniden başlar; komut hazır olunca döner. Varsayılan olarak seviyenin TÜM uygulama servislerine uygulanır (tek servis: `W=redirect`); 12'den itibaren Argo Rollout'larda da çalışır — `kubectl set env` orada çalışmaz. `make repro` scriptleri tuzağı KENDİLERİ açıp kapatır ve bitince ortamı eski hâline getirir (senin açtıkların dahil): elle alıştırma için `make set` + `make load`, otomatik ölçüm için `make repro`. Bitirince `make reset`: açık kalan bir tuzak sonraki deneyi sessizce bozar.
+> **Nasıl uygulanır:** aç `make set E="TRAP_X=true"` · ne açık? `make env` · hepsini geri al `make reset` (`make unset E=TRAP_X` yalnızca siler). Diğer ayarlar da aynı yolla (`make set E="CACHE_TTL=1h"`). Pod'lar yeni değerle yeniden başlar, komut hazır olunca döner; tek servis için `W=redirect`. `make repro` tuzakları kendisi açıp kapatır. Bitirince `make reset`: açık kalan bir tuzak sonraki deneyi sessizce bozar.
 
 | Bayrak | Ne yapar | Reproduce | Düzeltme |
 |---|---|---|---|
@@ -523,54 +494,38 @@ tatbikat bu merdivenin kapsamı dışında kalır (14 §9, "yolun devamı").
 | `TRAP_GLOBAL_LIMIT` · `TRAP_IGNORE_XFF` · `TRAP_TRUST_ANY_XFF` | (08'den devam) | 08'de | — |
 
 Elle denemeye değer:
-- `DATABASE_URL_RO`'yu boşalt: okuma/yazma ayrımı kapanır, 09'un **tüm yeni sorunları kaybolur** —
-  ve okuma ölçeklenmesi de. *Tek bir env değişkeni, bir mimari kararın tamamını geri alıyor;
-  takasın bu kadar görünür olması iyi bir tasarım işaretidir.*
-- `default_pool_size`'ı 2'ye düşür: çoğullama oranı artar, ama işlemler PgBouncer'da kuyruğa girer.
-  P02-06'nın aynısını bu kez **proxy'de** görürsün. *Kuyruğu bir katman aşağı itmek, yok etmek değildir.*
-- `kubectl -n lvl09 cnpg promote pg pg-2` (plugin varsa) ile planlı bir failover yap: plansız
-  olanla süresini karşılaştır.
-- `STICKY_WINDOW=30s` yap ve `make load S=mixed` koş: RYW ihlali biter, ama okumaların büyük kısmı
-  primary'ye gider — replika boşta kalır. **Tutarlılık ile ölçeklenme arasındaki düğme budur.**
+- `DATABASE_URL_RO`'yu boşalt: okuma/yazma ayrımı kapanır, 09'un yeni sorunları da okuma ölçeklenmesi de kaybolur.
+- `default_pool_size`'ı 2'ye düşür: işlemler PgBouncer'da kuyruğa girer — P02-06'nın aynısı bu kez proxy'de.
+- `kubectl -n lvl09 cnpg promote pg pg-2` (plugin varsa): planlı failover'ın süresini plansızla karşılaştır.
+- `STICKY_WINDOW=30s` + `make load S=mixed`: RYW ihlali biter ama okumaların çoğu primary'ye gider, replika boşta kalır.
 
 ## 8. Gözlemlenebilirlik: hangi paneller dolu, hangileri boş
 
 | Dashboard | Durum | Neden |
 |---|---|---|
-| [`05 · Postgres`](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl09&from=now-15m&to=now) | **Zenginleşti** ✨ — kısmen | CNPG PodMonitor: replikasyon gecikmesi, roller, WAL; bağlantı / üst sınır / işlem/sn / bellekten okuma oranı panelleri CNPG metriklerine düşüyor. postgres_exporter olmadığı için **tablo tarama, kilitler ve ölü satırlar boş**. Ayrıca `db_reads_routed_total` |
-| [`03 · App Business`](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl09&from=now-15m&to=now) | Dolu — **RYW ihlali artık gerçek** | 09'a kadar bu sayaç hep 0 idi |
+| [`05 · Postgres`](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl09&from=now-15m&to=now) | Kısmen | CNPG metrikleri: replikasyon gecikmesi, roller, bağlantı, işlem/sn. postgres_exporter yok: tablo tarama, kilitler, ölü satırlar boş |
+| [`03 · App Business`](http://grafana.localtest.me/d/ladder-app-business?var-level=lvl09&from=now-15m&to=now) | Dolu | "Read-your-writes ihlali" ilk kez sıfırdan farklı olabilir |
 | [`10 · Rate limit`](http://grafana.localtest.me/d/ladder-ratelimit?var-level=lvl09&from=now-15m&to=now) · [`09 · Autoscaling`](http://grafana.localtest.me/d/ladder-autoscaling?var-level=lvl09&from=now-15m&to=now) · [`08 · Stream`](http://grafana.localtest.me/d/ladder-stream?var-level=lvl09&from=now-15m&to=now) · [`04 · Cache`](http://grafana.localtest.me/d/ladder-cache?var-level=lvl09&from=now-15m&to=now) · [`06 · Redis`](http://grafana.localtest.me/d/ladder-redis?var-level=lvl09&from=now-15m&to=now) | Dolu | — |
-| [`11 · Resilience`](http://grafana.localtest.me/d/ladder-resilience?var-level=lvl09&from=now-15m&to=now) · [`12 · SLO`](http://grafana.localtest.me/d/ladder-slo?var-level=lvl09&from=now-15m&to=now) · [`13 · Rollout`](http://grafana.localtest.me/d/ladder-rollout?var-level=lvl09&from=now-15m&to=now) | Boş | — |
+| [`11 · Resilience`](http://grafana.localtest.me/d/ladder-resilience?var-level=lvl09&from=now-15m&to=now) · [`12 · SLO`](http://grafana.localtest.me/d/ladder-slo?var-level=lvl09&from=now-15m&to=now) · [`13 · Rollout`](http://grafana.localtest.me/d/ladder-rollout?var-level=lvl09&from=now-15m&to=now) | Boş | Bu seviyede o bileşenler yok |
 
-Yeni okuma alışkanlığı: `db_reads_routed_total{target}`. Okumaların ne kadarı replikaya gidiyor?
-Oran beklenenden düşükse ya sticky pencere çok uzun ya da replika sağlıksız — ve ikisi de
-"DB yavaş" diye rapor edilir.
+Yeni metrik: `db_reads_routed_total{target}` — okumaların ne kadarı replikaya gidiyor.
 
 ## 9. Bilerek bırakılanlar
 
-- **Nesne deposu / PITR yapılandırılmadı** (P09-06; yedek + geri yükleme tatbikatı 14 §9'da "yolun devamı").
-- **`max_connections` hâlâ 100** — Pooler olmasa duvar aynı yerde; sayıyı değiştirmemek bilinçli.
-- **Yapışkan işaret Redis'te ve fail-open**: Redis yoksa işaret okunamaz, okuma replikaya gider (bkz. `store/recent.go`) — tazelik, yazma yolunu Redis'e bağlamaktan ucuz bir kayıp sayıldı.
-- **Partition'lar elle oluşturuluyor** (migration 005, 9 günlük). Üretimde `pg_partman` ya da bir
-  operatör gerekir — *"partition'lar kendiliğinden oluşmaz" dersi görünür kalsın diye elle.*
-- **`clicks_daily` partition'sız**: satır sayısı kod×gün ile sınırlı olduğu için gerekmedi.
-- **Okuma replikası coğrafi değil**: aynı kümede, aynı bölgede. Çok bölgeli okuma kapsam dışı (14 §9, "yolun devamı").
-- **08'den devreden**: tek Redis (hem önbellek hem limiter), kimlik yok, tek partition.
+- Nesne deposu / PITR yok (P09-06; 14 §9).
+- `max_connections` 100: Pooler olmasa duvar aynı yerde.
+- Yapışkan işaret Redis'te ve fail-open: Redis yoksa okuma replikaya gider.
+- Partition'lar elle (migration 005, 9 gün); üretimde `pg_partman` gibi bir araç gerekir.
+- `clicks_daily` partition'sız: satır sayısı kod × gün ile sınırlı.
+- Okuma replikası aynı bölgede; çok bölgeli okuma kapsam dışı (14 §9).
+- 08'den devreden: tek Redis, kimlik yok, tek partition.
 
 ## 10. `make diff-prev` okuma rehberi
 
 `make diff-prev` 08 ile farkı gösterir:
 
-1. **`internal/store/readwrite.go`** (yeni): `Store` arayüzünü **üçüncü kez** sarmaladık
-   (02: Postgres, 03/04: Cached, 09: ReadWrite). Aynı arayüz, üç farklı mimari karar — 01'de
-   `CreateUnique`'i koşullu ekleme olarak tasarlamanın faturası burada da kesilmiyor.
-2. **`internal/store/recent.go`** (yeni): yapışkan okumanın işareti. Redis'te, çünkü 07'den beri
-   oluşturma api-svc'de, okuma redirect-svc'de: süreç içi bir işaret servisler arası hiç eşleşmez.
-   Yorumu, bunun neden sessizce fark edilmeden kalacağını anlatıyor.
-3. **`deploy/cnpg.yaml`**: `deploy/postgres.yaml`'ın yerini aldı. Karşılaştırmalı oku —
-   birkaç satırlık `instances: 2` + `Pooler`, 02'deki 90 satırlık StatefulSet'in yapamadığı her şeyi
-   yapıyor. **Operatörün değeri budur; ve tam da bu yüzden 02'de kullanmadık.**
-4. **`internal/store/postgres.go` → `OpenWithMode`**: tek satırlık `QueryExecModeExec`, P09-03'ün
-   tamamı. Bir proxy eklemek, client kütüphanesinin varsayımlarını geçersiz kılabilir.
-5. **`migrations/005`**: `PARTITION BY RANGE` + `NO TRANSACTION`. Partition'lamanın sebebi sorgu
-   hızı değil, **silmeyi ucuzlatmak**.
+1. `internal/store/readwrite.go` (yeni): `Store` arayüzünün üçüncü sarmalayıcısı; okuma replikaya, yazma primary'ye.
+2. `internal/store/recent.go` (yeni): yapışkan okumanın işareti; Redis'te, çünkü oluşturma api-svc'de, okuma redirect-svc'de.
+3. `deploy/cnpg.yaml`: `postgres.yaml`'ın yerine `instances: 2` + `Pooler` — operatörün yaptığı iş.
+4. `internal/store/postgres.go` → `OpenWithMode`: tek satırlık `QueryExecModeExec`, P09-03'ün çözümü.
+5. `migrations/005`: `PARTITION BY RANGE`; amaç sorgu hızı değil, silmeyi ucuzlatmak.

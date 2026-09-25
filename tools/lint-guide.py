@@ -5,8 +5,12 @@ Her seviye README'si iki yerde yapıştırılacak komut taşır: §4'teki "Rehbe
 "Elle" adımları. Bu kural şunları zorunlu tutar:
   • §4'te "**Rehber —" bloğu var.
   • Her "### PNN-XX" bölümünde "**Reproduce (adım adım):**", "Otomatik", "Elle" ve
-    "**Terminalde ne görmelisin:**" var; en az bir ```bash bloğu var ve İLK bloğun ilk komutu
-    `make fresh` (Grafana her deneye boş başlar, çizgiler önceki deneylere karışmaz).
+    "**Terminalde ne görmelisin:**" var; en az bir ```bash bloğu var ve İLK bloğun `cd`'den sonraki
+    ilk komutu `make fresh` (Grafana her deneye boş başlar, çizgiler önceki deneylere karışmaz).
+  • README'deki HER ```bash bloğu `cd "$LADDER/<klasör>"` ile başlar ve klasör repoda vardır: blok,
+    hangi terminalde ve hangi klasörde yapıştırılırsa yapıştırılsın doğru yerde çalışır (LADDER repo
+    kökü; kök README → Sıfırdan başlangıç'ta bir kez tanımlanır). Blok içinde `make -C ../…` yok —
+    başka bir klasöre geçiş de `cd "$LADDER/…"` ile yazılır.
   • Rehber ve Elle bloklarında yorum YOK: macOS'un varsayılan zsh'ında `interactivecomments` kapalıdır;
     yapıştırılan `komut  # açıklama` satırında `#` ve sonrası komutun argümanı olur ve komut hata verir.
     Açıklama bloğun dışında, adımın metninde durur.
@@ -52,9 +56,26 @@ def check_block(where, code, errs):
         if r.returncode != 0:
             errs.append(f"{where}: {sh} -n sözdizimi hatası: {r.stderr.strip()[:120]}")
 
+CD = re.compile(r'^cd "\$LADDER(?:/([A-Za-z0-9._-]+))?"$')
+
+def check_locations(d, readme, errs):
+    root = d.resolve().parent
+    for i, b in enumerate(blocks(readme), 1):
+        lines = [l.strip() for l in b.splitlines() if l.strip()]
+        m = CD.match(lines[0]) if lines else None
+        if not m:
+            errs.append(f"blok {i}: ilk satır 'cd \"$LADDER/<klasör>\"' değil ({(lines[0] if lines else '')[:50]})")
+        for l in lines:
+            c = CD.match(l)
+            if c and c.group(1) and not (root / c.group(1)).is_dir():
+                errs.append(f"blok {i}: var olmayan klasöre cd: {c.group(1)}")
+            if l.startswith("make -C ../"):
+                errs.append(f"blok {i}: 'make -C ../…' yerine cd \"$LADDER/…\" + make: {l[:50]}")
+
 def main(level_dir):
     d = pathlib.Path(level_dir); readme = (d / "README.md").read_text()
     errs = []
+    check_locations(d, readme, errs)
     s4 = re.search(r"^## 4\..*?(?=^## 5\.)", readme, flags=re.S | re.M)
     if not s4 or "**Rehber —" not in s4.group(0):
         errs.append("§4: '**Rehber —' bloğu yok")
@@ -69,9 +90,9 @@ def main(level_dir):
         bs = blocks(body)
         if not bs:
             errs.append(f"{pid}: yapıştırılacak ```bash bloğu yok"); continue
-        first = next((l.strip() for l in bs[0].splitlines() if l.strip()), "")
+        first = next((l.strip() for l in bs[0].splitlines() if l.strip() and not CD.match(l.strip())), "")
         if first != "make fresh":
-            errs.append(f"{pid}: ilk komut 'make fresh' değil ({first[:40]})")
+            errs.append(f"{pid}: cd'den sonraki ilk komut 'make fresh' değil ({first[:40]})")
         for i, b in enumerate(bs, 1): check_block(f"{pid} blok {i}", b, errs)
     for e in errs: print(f"  ✘ {d.name}: {e}")
     return 1 if errs else 0

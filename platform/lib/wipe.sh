@@ -118,4 +118,4 @@ if [[ "$left" != 0 ]]; then
   exit 1
 fi
 kubectl -n "$MON" rollout status statefulset prometheus-kps-prometheus --timeout=300s >/dev/null
-echo "✔ veriler silindi — Grafana boş. Bir seviyeyi yeniden kurmak için: cd 00-naive && make up"
+echo "✔ veriler silindi — Grafana boş. Bir seviyeyi yeniden kurmak için: cd \"\$LADDER/00-naive\" && make up"

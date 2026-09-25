@@ -189,7 +189,7 @@ Merdiven bir laptop VM'inde koşar; platform, bu ortamın kendine has davranış
 | `container_cpu_cfs_throttled_*` metriği yok | Throttling paneli boş | Ortam sınırı olarak işaretli; P07-04 throttling'i dolaylı ölçer (aynı yükte limitli/limitsiz p99 farkı) |
 | 6 çekirdeği dört düğüm paylaşır | Lease yazması 25 sn'ye çıkar; varsayılan kirayla controller'lar kirayı kaybedip yeniden başlar | `kind/cluster.yaml` ve operatörlerde lider kirası 60/45 sn |
 | Tek VM'de her operatör birden | ~5.6/6 çekirdek boşta; swap, NotReady düğümler | `make up`'ın ilk adımı profil: seviyenin kullanmadığı bileşenler kapanır (§2.2) |
-| Docker Desktop yeniden başlatması | Tüm pod'lar `Unknown`, kubelet yeniden senkronize olana kadar | `make -C platform start` API sunucusunu ve düğümleri bekler; `make up` tekrar koşulabilir |
+| Docker Desktop yeniden başlatması | Tüm pod'lar `Unknown`, kubelet yeniden senkronize olana kadar | `cd "$LADDER/platform" && make start` API sunucusunu ve düğümleri bekler; `make up` tekrar koşulabilir |
 
 ### 2.2 Kurulum hedefleri ve profil (16 GB Mac gerçeği)
 
