@@ -515,9 +515,13 @@ Bir milyon anahtarda bu, saniyelerce tam durma demektir. [Topic · Konu: Bloklay
 
 **Reproduce (adım adım):**
 
-Otomatik — ölçer ve hüküm basar: `make repro P=P04-07` (tuzağı açar, 4000 anahtar doldurur, aynı yükü iki kez 45'er sn
-verir — biri temiz, biri ortasında üç `/debug/keys` çağrısıyla — ve iki fazın pencere içi tepe p99'unu karşılaştırır.
-Hüküm: KEYS fazının tepesi tabanın 1,5 katından büyük).
+Otomatik — ölçer ve hüküm basar: `make repro P=P04-07` (tuzağı açar, Redis'e üretim boyutunda 300 bin anahtar yazar —
+sayı `FILL=` ile değişir —, aynı yükü iki kez 45'er sn verir — biri temiz, biri ortasında `/debug/keys` 20 sn boyunca
+aralıksız çağrılarak (süre `KEYS_SECS=` ile değişir) — ve iki fazın pencere içi tepe p99'unu karşılaştırır; bitince doldurma
+anahtarlarını siler. Hüküm: KEYS fazının tepesi tabanın 1,5 katından büyük. Neden aralıksız: 300 bin anahtarda tek bir
+KEYS onlarca milisaniye sürer ve birkaç çağrı p99'a yansımaz; milyonlarca anahtarlık bir üretim önbelleğinde tek çağrı
+saniyeler sürer ama bu laboratuvarın 64 MB'lık Redis'i o boyuta çıkamaz. Aynı kuyruklanmayı sıklık üretir — durmadan
+"kaç anahtar var?" diye soran bir izleme betiği ya da debug paneli gibi).
 
 Elle — iki terminal gerekir; ikisi de `04-redis-cache` klasöründe. Sırayla yapıştır:
 
@@ -526,11 +530,14 @@ Elle — iki terminal gerekir; ikisi de `04-redis-cache` klasöründe. Sırayla 
 make fresh
 make set E="TRAP_DEBUG_KEYS=true"
 ```
-2. Önbelleği 4000 anahtarla doldur (oluştur + bir kez oku, 20 paralel; anahtar ne kadar çoksa kilit o kadar uzun) ve
-   Redis'teki anahtar sayısına bak:
+2. Redis'i üretim boyutuna getir ve anahtar sayısına bak. Bu kümenin trafiği önbellekte yalnızca birkaç bin anahtar
+   tutar ve anahtarlar 60 sn'de dolar; o boyutta `KEYS` milisaniyenin altında biter. `KEYS`'in bedelini gösteren,
+   üretim önbelleğinin boyutudur: Redis'in içinde tek bir Lua komutuyla 300 bin süresiz anahtar yaz (~20 MB, 64 MB'lık
+   sınırın altında; birkaç saniye sürer), sonra 200 gerçek link oluştur ve bir kez oku:
 ```bash
 rpod=$(kubectl -n lvl04 get pod -l app.kubernetes.io/name=redis -o json | jq -r '[.items[] | select(.metadata.deletionTimestamp == null) | select(any(.status.containerStatuses[]?; .ready)) | .metadata.name][0]'); echo "redis pod: $rpod"
-seq 1 4000 | xargs -P 20 -n 1 sh -c 'c=$(curl -s -XPOST http://lvl04.localtest.me/api/links -H "Content-Type: application/json" -d "{\"url\":\"https://example.com/k/$1\"}" | jq -r .code); curl -s -o /dev/null http://lvl04.localtest.me/$c' _
+kubectl -n lvl04 exec "$rpod" -c redis -- redis-cli EVAL "for i=1,tonumber(ARGV[1]) do redis.call('SET','fill:'..i,'x') end return 1" 0 300000
+seq 1 200 | xargs -P 20 -n 1 sh -c 'c=$(curl -s -XPOST http://lvl04.localtest.me/api/links -H "Content-Type: application/json" -d "{\"url\":\"https://example.com/k/$1\"}" | jq -r .code); curl -s -o /dev/null http://lvl04.localtest.me/$c' _
 kubectl -n lvl04 exec "$rpod" -c redis -- redis-cli DBSIZE
 ```
 3. Taban: 45 sn yük ver, 20 sn bekle (son kazıma yükü kapsasın), pencere içi tepe redirect p99'unu (ms) oku:
@@ -543,24 +550,26 @@ curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=10
 ```bash
 make load S=redirect K6_ARGS="--vus 20 --duration 45s"
 ```
-   Yük başladıktan ~15 sn sonra İLK terminalde `/debug/keys`'i üç kez çağır; yük bitip 20 sn geçince (~50 sn) aynı
-   tepe p99'u oku:
+   Yük başladıktan ~15 sn sonra İLK terminalde `/debug/keys`'i 20 sn boyunca aralıksız çağır (durmadan soran bir
+   izleme betiği gibi; her satır o çağrıda Redis'in kilitli kaldığı milisaniye); yük bitip 20 sn geçince aynı tepe
+   p99'u oku:
 ```bash
-for i in 1 2 3; do curl -s --max-time 30 http://lvl04.localtest.me/debug/keys; echo; done
-sleep 50
+end=$((SECONDS + 20)); while [ $SECONDS -lt $end ]; do curl -s --max-time 30 http://lvl04.localtest.me/debug/keys | jq -r .took_ms; done
+sleep 30
 curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=1000 * max_over_time(histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace="lvl04",route="/{code}"}[30s])) by (le))[70s:15s])' | jq -r '.data.result[0].value[1]'
 ```
-5. Tuzağı kapat:
+5. Doldurma anahtarlarını sil ve tuzağı kapat:
 ```bash
+kubectl -n lvl04 exec "$rpod" -c redis -- redis-cli EVAL "for i=1,tonumber(ARGV[1]) do redis.call('DEL','fill:'..i) end return 1" 0 300000
 make reset
 ```
 
-**Terminalde ne görmelisin:** 2. adımda `DBSIZE` binlerle ölçülür. 4. adımdaki her çağrı
-`{"count":…,"took_ms":…,"warning":"KEYS Redis'i bloklar; üretimde SCAN kullan"}` döner: `count` taranan
-`linkly:link:*` anahtarı — `DBSIZE`'dan küçük olabilir, çünkü anahtarların ömrü 60 sn ve taban fazı sürerken çoğunun
-süresi doluyor —, `took_ms` Redis'in o süre boyunca başka hiçbir komut çalıştırmadığı süre (anahtar sayısıyla doğru
-orantılı: birkaç bin anahtarda milisaniyeler, bir milyonda saniyeler). Son tepe p99, 3. adımdaki tabanın üstünde
-(scriptin hükmü için 1,5 katından fazla): tek iş parçacıklı Redis, `KEYS` sürerken GET'leri sıraya aldı.
+**Terminalde ne görmelisin:** 2. adımda `EVAL` `(integer) 1` döner, `DBSIZE` 300 binin biraz üstündedir. 4. adımdaki
+döngü her çağrıda `took_ms`'i basar — Redis'in o süre boyunca başka hiçbir komut çalıştırmadığı süre: onlarca
+milisaniye. Uç yalnızca `linkly:link:*` desenine uyanları döndürür (yüzlerce; anahtarların ömrü 60 sn), ama `KEYS`
+desene uyanları değil **bütün** anahtar uzayını tarar: süre 300 bin anahtarın bedelidir (bir milyonda saniyeler).
+Aralıksız çağrılar Redis'i 20 saniyenin büyük kısmında KEYS'le meşgul eder. Son tepe p99, 3. adımdaki tabanın üstünde (scriptin hükmü için 1,5 katından
+fazla): tek iş parçacıklı Redis, `KEYS` sürerken GET'leri sıraya aldı.
 
 **Grafana'da gör:** [`06 · Redis`](http://grafana.localtest.me/d/ladder-redis?var-level=lvl04&from=now-15m&to=now&refresh=10s) ve [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl04&from=now-15m&to=now&refresh=10s) — script iki fazı (temiz, sonra ortasında `KEYS *`) 45'er sn koşar; bitince aç (giriş: admin / ladder)
 - "Komutlar (türe göre)" → `keys` serisi yalnızca ikinci fazda belirir. Hızı çok küçük (üç çağrı), `get`'in yanında çizgi görünmez; lejantta `keys`'e tıklayıp yalnız onu göster. Bu seri üretimde hiç var olmamalı — görünmesi alarmdır.

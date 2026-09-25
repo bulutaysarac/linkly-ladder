@@ -278,7 +278,8 @@ pod'larla verir. Değişen tek şey yazıcının veritabanı işi: A fazında du
 `ANALYTICS_BATCH_SIZE=100000000` — tıklamalar yine kuyruğa girip toplanıyor, yalnızca yazılmıyor), B fazında
 varsayılan. Hüküm: B'de `write_clicks` uygulama pod'larından çıkıyor mu, A'da sıfırlanıyor mu (A'da yazma sürüyorsa
 script hüküm vermez, exit 2). İki fazın redirect p99'unu ve havuz bekleme p99'unu da yan yana basar — bedel, hükme bağlı
-değil. Ölçüyü her fazın taze pod'larıyla sınırlar).
+değil. Yükü, hazır pod'ların hepsi fazın ayarına geçmeden başlatmaz — rollout sürerken eski ayarla çalışan pod'lar da
+hazırdır — ve ölçüyü o fazın ayarıyla çalışan pod'larla sınırlar).
 
 Elle — sırayla yapıştır:
 
@@ -473,8 +474,9 @@ seviyede farklı zarar**: artık tıklamaları ciddi ciddi sayıyoruz ve sayamı
 **Reproduce (adım adım):**
 
 Otomatik — ölçer ve hüküm basar: `make repro P=P05-06` (302 modunda aynı istemciden 50 tıklamanın sayıldığını ölçer,
-sonra tuzağı açıp iki moddaki durum kodunu ve `Cache-Control` başlığını karşılaştırır; tarayıcı adımını — asıl ikna
-edici olanı — sana bırakır).
+sonra tuzağı açar, art arda üç 301 görene kadar bekler — kapanmakta olan eski pod birkaç saniye daha 302 döner — ve
+iki moddaki durum kodunu ve `Cache-Control` başlığını karşılaştırır; tarayıcı adımını — asıl ikna edici olanı — sana
+bırakır).
 
 Elle — sırayla yapıştır:
 

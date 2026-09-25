@@ -12,7 +12,7 @@ before=$(promq 'prometheus_tsdb_head_series')
 note "Prometheus toplam seri (öncesi): ${before%%.*}"
 step "TRAP_TENANT_LABEL aç ve $N farklı kiracıdan istek gönder"
 setenv "$(wl redirect)" TRAP_TENANT_LABEL=true >/dev/null
-kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=180s >/dev/null 2>&1 || true
+settle_rollout "$(wl redirect)"   # 12+'da Rollout: canary bitene kadar bekler
 for _ in $(seq 1 20); do serving && break; sleep 2; done
 code=$(create_link "https://example.com/card")
 for i in $(seq 1 "$N"); do

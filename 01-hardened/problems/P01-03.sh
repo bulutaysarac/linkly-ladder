@@ -57,8 +57,9 @@ note "drain çıkış kodu: $drain_rc → $([[ $blocked == true ]] && echo 'BLOK
 step "UÇ (b): operatörün gerçekte yaptığı şey — zorla"
 # YALNIZCA drain edilmek istenen node'daki pod'u zorla. Hepsini silmek, çok replikalı bir seviyede
 # (02+) yapay bir kesinti üretir ve "yedeklilik işe yaramadı" gibi YANLIŞ bir sonuç verirdi.
+# Normal drain pod'u zaten tahliye ettiyse node'da uygulama pod'u kalmaz; boş listede `.items[0]` hata verir.
 victim=$(kubectl -n "$NS" get pods -l "$APP_SELECTOR" --field-selector "spec.nodeName=$node" \
-           -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+           -o jsonpath='{.items[*].metadata.name}' 2>/dev/null | awk '{print $1}') || true
 if [[ -n "$victim" ]]; then
   note "zorla silinen pod: $victim (node $node)"
   kubectl -n "$NS" delete pod "$victim" --force --grace-period=0 >/dev/null 2>&1 || true

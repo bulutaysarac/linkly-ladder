@@ -138,7 +138,9 @@ stable); (2) analiz canary'yi ayrı ölçmez, **namespace'in bütün `/{code}` t
 
 Otomatik — ölçer ve hüküm basar: `make repro P=P12-01` (yük altında `BAD_VERSION_ERROR_PCT=25` ile dağıtır; rollout
 fazını, sürüm etiketinden ölçülen canary payını, canary'nin kendi hata oranını ve toplam oranı basar; analizin metrikle
-mi yoksa altyapı hatasıyla mı durduğunu rollout mesajından ayırır, sonunda kötü sürümü geri alır).
+mi yoksa altyapı hatasıyla mı durduğunu rollout mesajından ayırır, sonunda kötü sürümü geri alır). "Tamamlandı" ancak canary
+pod'u görüldükten sonra okunan bir `Healthy`dir: ayar yazıldığı an okunan `Healthy` eski sürümündür. Durdurma, faz
+`Degraded` ya da mesaj `RolloutAborted` olarak okunur.
 
 Elle — `12-delivery` klasöründe, sırayla yapıştır:
 
@@ -181,11 +183,11 @@ anlamına gelmez (script bunu ayırır). Toplam 5xx oranının tepesi ~`0.06` (%
 oranı bundan da düşük, çünkü kötü sürüm yalnızca abort'a kadar trafikteydi. 5. adımdan sonra faz `Healthy`.
 
 **Grafana'da gör:** [`13 · Rollout`](http://grafana.localtest.me/d/ladder-rollout?var-level=lvl12&from=now-30m&to=now&refresh=10s) ve [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl12&from=now-30m&to=now&refresh=10s) — `make repro`'yu başlatınca aç; kötü sürüm ~15 sn sonra dağıtılır, analiz 30–60 sn içinde karar verir (giriş: admin / ladder)
-- "İstek / sn (sürüme göre)" → çizgi başına bir **pod şablonu hash'i** (`rollouts_pod_template_hash`): canary başlayınca yeni bir hash belirir ve toplamın ~1/4'ünü alır, abort'tan sonra kaybolur. Hangisi stable? `kubectl -n lvl12 get rollout redirect -o jsonpath='{.status.stableRS}'` stable hash'i verir, diğeri canary'dir (canary sürerken `{.status.currentPodHash}` onu verir). Etiketsiz çizgi api-svc'dir: Deployment olduğu için sürüm etiketi yok.
+- "İstek / sn (sürüme göre)" → çizgi başına bir **pod şablonu hash'i** (`rollouts_pod_template_hash`): canary başlayınca yeni bir hash belirir ve toplamın ~1/4'ünü alır, abort'tan sonra kaybolur. Hangisi stable? `kubectl -n lvl12 get rollout redirect -o jsonpath='{.status.stableRS}'` stable hash'i verir, diğeri canary'dir (canary sürerken `{.status.currentPodHash}` onu verir). api-svc bir Deployment'tır, sürüm etiketi yok; bu panellerde görünmez.
 - "Hata oranı (sürüme göre)" → canary hash'inin çizgisi ~%25'e çıkar (kötü sürümün kendi oranı), stable hash'i 0'da kalır. Analizin karar verdiği sayı bu çizgi değil, toplamdır ↓
 - "Sunucu hatası oranı (5xx)" → canary süresince ~%6 (%25 × 1/4) ve abort'la sıfıra döner: analizin %2 eşiğiyle karşılaştırdığı namespace geneli oran budur.
 - "p99 süre (sürüme göre)" → iki hash birbirine yakın: kötü sürüm hızlı hata veriyor, gecikme analizi (≤ 300 ms) geçer; abort'u hata oranı tetikler.
-- "Dağıtım aşaması (Argo Rollouts)" → `redirect: Progressing`, abort'tan sonra `redirect: Degraded`; `istenen replika` 3'te sabit kalır (canary pod'u bunun üstüne eklenir). Panel boşsa Argo Rollouts metrikleri kazınmıyor (`make -C ../platform argo`); faz her durumda terminalde: `kubectl -n lvl12 get rollout redirect -o jsonpath='{.status.phase}'` → `Degraded`, `kubectl -n lvl12 get analysisrun` → en yeni koşu `Failed`.
+- "Hazır pod (sürüme göre)" → canary başlayınca yeni hash 1 pod'la belirir, stable hash 3'te kalır (canary pod'u onun üstüne eklenir); abort'tan sonra yeni hash'in çizgisi kaybolur. Faz terminalde: `kubectl -n lvl12 get rollout redirect -o jsonpath='{.status.phase}'` → `Degraded`, `kubectl -n lvl12 get analysisrun` → en yeni koşu `Failed`.
 - "İstek / saniye (durum koduna göre)" → `302`'nin yanında kısa ömürlü bir `500` çizgisi: kötü sürümün `BAD_VERSION_ERROR_PCT` ile ürettiği hata.
 
 **Bedeli:** dağıtım 30 saniye yerine birkaç dakika sürer. **Bu, sigorta primidir.**
@@ -301,7 +303,7 @@ karşılaştıran kimse yok), ardından `3` ve `3`. 3. adımdan sonra küme `5` 
 izlemede `DESIRED` 3 → 5 olur. 4. adımdan sonra yine `3` ve izlemede `DESIRED` 5 → 3: elle yapılan değişiklik de, geri
 alınması da hiçbir yerde kayıt bırakmadı.
 
-**Grafana'da gör:** Grafana'da görünmez — drift bir metrik değil, iki kaynağın (manifest ↔ küme) farkıdır ve bu seviyede o farkı ölçen hiçbir şey yok. `13 · Rollout` → "Git ile uyumsuz uygulamalar (Argo CD)" **boş** kalır: Argo CD'nin metrikleri kazınıyor ama lvl12 için Application tanımlı değil — boş panel burada "her şey Git'teki gibi" değil, "karşılaştıran kimse yok" demektir. "Dağıtım aşaması (Argo Rollouts)" → `istenen replika` çizgisi script drift'i tutarken (~65 sn) 3 → 5 → 3 basamağı çizer: değişikliğin kendisi görünür, ama manifest'ten bir sapma olduğu, kimin yaptığı ve sessizce geri alındığı görünmez. Argo CD arayüzü (http://argocd.localtest.me, kullanıcı `admin`, şifre: `kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d`) da lvl12 için bir uygulama göstermez — ölçülen eksik tam olarak bu görünürlük. Kanıt terminalde:
+**Grafana'da gör:** Grafana'da görünmez — drift bir metrik değil, iki kaynağın (manifest ↔ küme) farkıdır ve bu seviyede o farkı ölçen hiçbir şey yok: Argo CD kurulu ama lvl12 için Application tanımlı değil — karşılaştıran kimse yok. `13 · Rollout` → "Hazır pod (sürüme göre)" → stable hash'in çizgisi script drift'i tutarken (~65 sn) 3 → 5 → 3 basamağı çizer: değişikliğin kendisi görünür, ama manifest'ten bir sapma olduğu, kimin yaptığı ve sessizce geri alındığı görünmez. Argo CD arayüzü (http://argocd.localtest.me, kullanıcı `admin`, şifre: `kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d`) da lvl12 için bir uygulama göstermez — ölçülen eksik tam olarak bu görünürlük. Kanıt terminalde:
 - `kubectl -n lvl12 get rollout redirect -w` (script koşarken, ikinci terminalde) → `DESIRED` 3 → 5 → 3: elle yapılan değişiklik ve sessizce geri alınması; hiçbir yerde kaydı kalmaz.
 - `kubectl -n argocd get applications` → `No resources found`: kümeyi manifest'le sürekli karşılaştıran bir şey yok.
 
@@ -349,7 +351,7 @@ ortam değişkeniyle (`BAD_VERSION_ERROR_PCT`) ayrılıyordu — pod şablonu ha
 `:latest` olsaydı bütün satırlar aynı etiketi gösterirdi ve bir geri alma hiçbir şeyi değiştirmezdi.
 
 **Grafana'da gör:** [`13 · Rollout`](http://grafana.localtest.me/d/ladder-rollout?var-level=lvl12&from=now-15m&to=now&refresh=10s) — istediğin an aç; bu sorun bir yük değil, bir durum (giriş: admin / ladder)
-- "İstek / sn (sürüme göre)" → redirect için **tek bir hash çizgisi** (bir de api-svc'nin etiketsiz çizgisi): şu an tek ReplicaSet çalışıyor. Hash pod şablonunun özetidir ve imaj etiketini içerir; yeni bir etiketle dağıtımda geçiş boyunca iki hash görünür. `:latest` ile yeni imaj itilseydi şablon DEĞİŞMEZDİ: yeni hash yok, rollout yok — "deploy ettim değişmedi"nin panel hâli. Hangi imajın çalıştığını ise panel değil imaj etiketi söyler ↓
+- "İstek / sn (sürüme göre)" → redirect için **tek bir hash çizgisi**: şu an tek ReplicaSet çalışıyor. Hash pod şablonunun özetidir ve imaj etiketini içerir; yeni bir etiketle dağıtımda geçiş boyunca iki hash görünür. `:latest` ile yeni imaj itilseydi şablon DEĞİŞMEZDİ: yeni hash yok, rollout yok — "deploy ettim değişmedi"nin panel hâli. Hangi imajın çalıştığını ise panel değil imaj etiketi söyler ↓
 - Explore'da: `count by (image) (kube_pod_container_info{namespace="lvl12",container="redirect"})` → tek satır, etiket `…/12-redirect-svc:<git-sha>-<kaynak-hash>` biçiminde; `:latest` yok (bu yüzden script NOT-REPRODUCED der). Yeni bir imajla dağıtım sırasında aynı sorgu geçiş boyunca iki satır gösterir.
 - Geri dönülebilirlik terminalde: `kubectl -n lvl12 get rs -l app.kubernetes.io/name=redirect -o 'custom-columns=RS:.metadata.name,IMAGE:.spec.template.spec.containers[0].image'` → önceki ReplicaSet'ler ve imajları; `:latest` olsaydı hepsi aynı etiketi gösterirdi ve `undo` hiçbir şey değiştirmezdi.
 
@@ -438,7 +440,7 @@ değil. 2. adımda her dosyanın Down bloğu dolu; sayım `001_links.sql`, `003_
 `002_tenant_index.sql` için `0` (indeks türetilmiş veridir, yeniden kurulur). Script aynı sayımı
 `6 migration · geri alma bloğu olmayan: 0 · geri alması veri kaybettiren: 5` diye basar.
 
-**Grafana'da gör:** Grafana'da görünmez — şema sürümü ile uygulama sürümü hiçbir metrikte yan yana durmuyor; sorunun kendisi de bu: ikisini bağlayan bir kayıt yok. (`13 · Rollout` → "Dağıtım aşaması (Argo Rollouts)" uygulamanın fazını gösterir, şemanınkini değil.) Kanıt terminalde:
+**Grafana'da gör:** Grafana'da görünmez — şema sürümü ile uygulama sürümü hiçbir metrikte yan yana durmuyor; sorunun kendisi de bu: ikisini bağlayan bir kayıt yok. (`13 · Rollout` → "Hazır pod (sürüme göre)" uygulamanın sürümlerini gösterir, şemanınkini değil.) Kanıt terminalde:
 - `kubectl -n lvl12 exec $(kubectl -n lvl12 get pod -l cnpg.io/cluster=pg,cnpg.io/instanceRole=primary -o name) -c postgres -- psql -U postgres -d linkly -tAc 'SELECT max(version_id) FROM goose_db_version'` → şema sürümü: tek bir sayı.
 - `kubectl -n lvl12 get rollout redirect -o jsonpath='{.spec.template.spec.containers[0].image}'` → uygulama etiketi `<git-sha>-<kaynak-hash>`: şema sürümüyle hiçbir bağı yok.
 - `grep -A2 '+goose Down' internal/store/migrations/*.sql` → Down bloklarında `DROP TABLE` / `DROP COLUMN`: "geri alma", Up'tan bu yana yazılan veriyi siler.
@@ -474,7 +476,7 @@ Elle denemeye değer:
 
 | Dashboard | Durum | Neden |
 |---|---|---|
-| [`13 · Rollout`](http://grafana.localtest.me/d/ladder-rollout?var-level=lvl12&from=now-15m&to=now) | **Dolu** ✨ | "İstek / sn", "Hata oranı", "p99 süre" (sürüme göre): redirect'in ServiceMonitor'ü pod'un `rollouts-pod-template-hash` etiketini her seriye taşıyor (`podTargetLabels`), stable ve canary ayrı çizgi. Stable hash: `kubectl -n lvl12 get rollout redirect -o jsonpath='{.status.stableRS}'`, diğeri canary; etiketsiz çizgi api-svc. "Dağıtım aşaması (Argo Rollouts)" Argo'nun kendi metriğinden (`rollout_info`). "Git ile uyumsuz uygulamalar (Argo CD)" **boş**: Application tanımlı değil (P12-03) |
+| [`13 · Rollout`](http://grafana.localtest.me/d/ladder-rollout?var-level=lvl12&from=now-15m&to=now) | **Dolu** ✨ | "İstek / sn", "Hata oranı", "p99 süre" (sürüme göre): redirect'in ServiceMonitor'ü pod'un `rollouts-pod-template-hash` etiketini her seriye taşıyor (`podTargetLabels`), stable ve canary ayrı çizgi. Stable hash: `kubectl -n lvl12 get rollout redirect -o jsonpath='{.status.stableRS}'`, diğeri canary; sürümsüz api-svc bu panellerde yok. "Hazır pod (sürüme göre)" kube-state-metrics'in ReplicaSet sayılarından: canary pod'u ve elle ölçekleme (P12-03) burada görünür |
 | [`12 · SLO`](http://grafana.localtest.me/d/ladder-slo?var-level=lvl12&from=now-15m&to=now) | Dolu | Canary hatası burn-rate'e de yansır — *iki mekanizma aynı olayı farklı zaman ölçeğinde görür* |
 | [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl12&from=now-15m&to=now) | Dolu | Sürüme göre **kırılmaz** (uygulama metriklerinde `version` etiketi yok); sürüm ayrımı `13 · Rollout`'ta, pod şablonu hash'iyle |
 | [`06 · Redis`](http://grafana.localtest.me/d/ladder-redis?var-level=lvl12&from=now-15m&to=now) · [`11 · Resilience`](http://grafana.localtest.me/d/ladder-resilience?var-level=lvl12&from=now-15m&to=now) | Dolu | Önbelleğin Redis çağrıları Redis'in kendi guard'ından geçer (`dep="redis"`): "Uygulama → Redis gecikmesi (p99)" dolu, "Bağımlılık gecikmesi p99" `postgres` ve `redis`'i ayrı çizer; Redis kesintisinde "Azaltılmış mod (degrade)" `no_cache` gösterir, Postgres'inkinde `cache_only` |

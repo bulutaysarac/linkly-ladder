@@ -26,7 +26,7 @@ sleep 5
 # its own window. On top of that the two phases push very different request volumes, so
 # absolute counts are not comparable — the ratio is: of every 100 requests, how many REACHED the
 # broken dependency?
-PH_REACH=0; PH_OPEN=0; PH_REQS=0; PH_P99=0
+PH_REACH=0; PH_OPEN=0; PH_REQS=0; PH_P99=0; PH_P50=0
 run_phase() {
   local t0 dur all open
   t0=$(date +%s)
@@ -40,20 +40,26 @@ run_phase() {
   PH_REQS=$(promq "sum(increase(http_requests_total{namespace=\"$NS\"}[${dur}s]))")
   PH_REQS=${PH_REQS%%.*}
   PH_P99=$(promq "max_over_time(histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\"}[30s])) by (le))[${dur}s:15s])")
+  # TİPİK İSTEK. p99 iki fazda da handler'ın süre sınırında (5 sn) tavan yapar: devre açılmadan önceki
+  # istekler ve yarı açık denemeler her iki fazda da en yavaş %1'i doldurur. Devre kesicinin "istemci
+  # hızlı cevap alır" iddiası tipik isteğe dairdir — p50.
+  # EN: p99 saturates at the handler timeout in both phases; the "clients get a fast answer" claim is
+  #     about the typical request, so p50 is compared.
+  PH_P50=$(promq "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\"}[${dur}s])) by (le))")
 }
 step "(1) Devre kesici AÇIK (varsayılan)"
 run_phase
-reach_on=$PH_REACH; open_rej=$PH_OPEN; reqs_on=$PH_REQS; p99_on=$PH_P99
+reach_on=$PH_REACH; open_rej=$PH_OPEN; reqs_on=$PH_REQS; p99_on=$PH_P99; p50_on=$PH_P50
 state_max=$(promq "max_over_time(max(breaker_state{namespace=\"$NS\",dep=\"postgres\"})[4m:15s])")
-note "breaker açık: bağımlılığa ULAŞAN çağrı=$reach_on (devre-açık reddi=$open_rej) · istek=$reqs_on · tepe durum=${state_max%%.*} (2=açık) · p99=$(awk -v v="$p99_on" 'BEGIN{printf "%.0f", v*1000}') ms"
+note "breaker açık: bağımlılığa ULAŞAN çağrı=$reach_on (devre-açık reddi=$open_rej) · istek=$reqs_on · tepe durum=${state_max%%.*} (2=açık) · p50=$(awk -v v="$p50_on" 'BEGIN{printf "%.0f", v*1000}') ms · p99=$(awk -v v="$p99_on" 'BEGIN{printf "%.0f", v*1000}') ms"
 step "(2) TRAP_NO_BREAKER: devre kesici yok, her istek bozuk bağımlılığa gidiyor"
 setenv "$(wl redirect)" TRAP_NO_BREAKER=true >/dev/null
 kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=180s >/dev/null 2>&1 || true
 for _ in $(seq 1 20); do serving && break; sleep 2; done
 run_phase
-reach_off=$PH_REACH; reqs_off=$PH_REQS; p99_off=$PH_P99
+reach_off=$PH_REACH; reqs_off=$PH_REQS; p99_off=$PH_P99; p50_off=$PH_P50
 grafana_hint "11 · Resilience → 'Devre kesici durumu (0 kapalı · 1 yarı açık · 2 açık)' + 'Azaltılmış mod (degrade)' · 02 · App RED → 'Gecikme (p50 / p95 / p99)'"
-note "breaker yok: bağımlılığa ULAŞAN çağrı=$reach_off · istek=$reqs_off · p99=$(awk -v v="$p99_off" 'BEGIN{printf "%.0f", v*1000}') ms"
+note "breaker yok: bağımlılığa ULAŞAN çağrı=$reach_off · istek=$reqs_off · p50=$(awk -v v="$p50_off" 'BEGIN{printf "%.0f", v*1000}') ms · p99=$(awk -v v="$p99_off" 'BEGIN{printf "%.0f", v*1000}') ms"
 note "Oran: breaker açıkken her 100 istekten $(awk -v r="$reach_on" -v q="$reqs_on" 'BEGIN{printf "%.1f", (q>0? r*100/q : 0)}') tanesi bozuk bağımlılığa ulaştı; breaker yokken $(awk -v r="$reach_off" -v q="$reqs_off" 'BEGIN{printf "%.1f", (q>0? r*100/q : 0)}') tanesi."
 note "Devre açıkken istek, bağımlılığa GİTMEDEN hızlıca reddedilir (ya da degrade moda düşer):"
 note "hem bağımlılık nefes alır hem client hızlı cevap alır. Yavaş hata, hızlı hatadan KÖTÜDÜR."
@@ -61,7 +67,14 @@ note "Ayar riski: OpenDuration çok kısa + HalfOpenProbes çok az → flapping.
 note "paneli testere dişi görünüyorsa eşikler yanlış demektir. Bu deneyde tepe durum ${state_max%%.*} idi."
 note "Kritik ayrıntı (kodda): ErrNotFound devre kesiciyi TETİKLEMEZ. 404'ler hata değildir; bunu"
 note "ayırt etmemek, çok sayıda 404'ün sağlıklı bir bağımlılığı 'bozuk' ilan etmesine yol açar."
-awk -v ra="$reach_on" -v qa="$reqs_on" -v rb="$reach_off" -v qb="$reqs_off" -v pa="$p99_on" -v pb="$p99_off" \
+# FAZLARDAN BİRİNDE HİÇ İSTEK TAMAMLANMADIYSA ÖLÇÜ YOK: karşılaştırılacak oran da süre de yoktur.
+# (Paket kaybı Postgres pod'larının bütün trafiğine uygulandığında operatörün kendi yoklamaları da
+# etkilenir; yeni pod'lar bazen hiç istek bitiremez — bu, devre kesici hakkında değil ortam hakkında.)
+if [[ "${reqs_on:-0}" == 0 || "${reqs_off:-0}" == 0 ]]; then
+  warn "ölçüm yapılamadı: fazlardan birinde tamamlanan istek yok (breaker açık: ${reqs_on:-0}, breaker yok: ${reqs_off:-0})"
+  exit 2
+fi
+awk -v ra="$reach_on" -v qa="$reqs_on" -v rb="$reach_off" -v qb="$reqs_off" -v pa="$p50_on" -v pb="$p50_off" \
   'BEGIN{exit !(qa > 0 && qb > 0 && (ra/qa) < (rb/qb) && pa < pb)}' \
-  && reproduced "devre kesici bozuk bağımlılığa ulaşan istek oranını %$(awk -v r="$reach_off" -v q="$reqs_off" 'BEGIN{printf "%.0f", (q>0? r*100/q : 0)}') → %$(awk -v r="$reach_on" -v q="$reqs_on" 'BEGIN{printf "%.0f", (q>0? r*100/q : 0)}') düşürdü ve p99 $(awk -v v="$p99_off" 'BEGIN{printf "%.0f", v*1000}') → $(awk -v v="$p99_on" 'BEGIN{printf "%.0f", v*1000}') ms oldu (açık-devre reddi $open_rej, tepe durum ${state_max%%.*})"
-not_reproduced "devre kesici etkisi ölçülemedi (ulaşan/istek: $reach_on/$reqs_on vs $reach_off/$reqs_off · p99 $(awk -v v="$p99_on" 'BEGIN{printf "%.0f", v*1000}')/$(awk -v v="$p99_off" 'BEGIN{printf "%.0f", v*1000}') ms) — arıza yeterince ağır mı?"
+  && reproduced "devre kesici bozuk bağımlılığa ulaşan istek oranını %$(awk -v r="$reach_off" -v q="$reqs_off" 'BEGIN{printf "%.0f", (q>0? r*100/q : 0)}') → %$(awk -v r="$reach_on" -v q="$reqs_on" 'BEGIN{printf "%.0f", (q>0? r*100/q : 0)}') düşürdü ve tipik istek (p50) $(awk -v v="$p50_off" 'BEGIN{printf "%.0f", v*1000}') → $(awk -v v="$p50_on" 'BEGIN{printf "%.0f", v*1000}') ms oldu (açık-devre reddi $open_rej, tepe durum ${state_max%%.*})"
+not_reproduced "devre kesici etkisi ölçülemedi (ulaşan/istek: $reach_on/$reqs_on vs $reach_off/$reqs_off · p50 $(awk -v v="$p50_on" 'BEGIN{printf "%.0f", v*1000}')/$(awk -v v="$p50_off" 'BEGIN{printf "%.0f", v*1000}') ms) — arıza yeterince ağır mı?"

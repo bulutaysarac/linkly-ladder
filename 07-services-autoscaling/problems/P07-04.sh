@@ -75,7 +75,7 @@ k6run redirect --vus 120 --duration 60s >/dev/null 2>&1 || true
 sleep 15
 free_p99=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[1m])) by (le))")
 free_cpu=$(promq "sum(rate(container_cpu_usage_seconds_total{namespace=\"$NS\",pod=~\"redirect.*\",image!=\"\",image!~\".*pause.*\"}[1m]))")
-grafana_hint "01 · Pods & Resources → 'CPU kısıtlama (throttling)' (bu ortamda BOŞ) + 'CPU kullanımı (bir çekirdeğin %'si)' · 02 · App RED → 'p99 süre (uç noktaya göre)'"
+grafana_hint "01 · Pods & Resources → 'CPU: sınırın yüzde kaçı' (dar kotada %100'e yapışır) + 'CPU kullanımı (bir çekirdeğin %'si)' · 02 · App RED → 'p99 süre (uç noktaya göre)'"
 note "limitsiz: p99=$(awk -v v="$free_p99" 'BEGIN{printf "%.0f", v*1000}') ms · CPU=$(awk -v v="$free_cpu" 'BEGIN{printf "%.2f", v}') çekirdek"
 note "Limit kalkınca CPU kullanımı arttı ve p99 düştüyse, aradaki fark THROTTLING'dir."
 note "Kural: CPU limiti koymadan önce 'bu servis dilim içinde ne kadar patlıyor?' sorusunu sor."

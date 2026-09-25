@@ -24,8 +24,11 @@ code2=$(create_link "https://example.com/uncounted")
 # özelliği suçlayan YANLIŞ bir cümledir. Değişimi bekle; olmazsa ölçemediğini söyle.
 # EN: setting the flag is not the same as the new pod serving traffic. If the measurement lands on
 # the old pod the result reads as "the trap has no effect" — a false statement about the feature.
-for _ in $(seq 1 30); do
-  [[ "$(status_of "$code2")" == 301 ]] && break
+# Tek bir 301 yetmez: 3 replikada ingress istekleri dağıtır ve kapanmakta olan eski pod birkaç saniye
+# daha 302 döner. ÜÇ ARDIŞIK 301, trafiğin tamamının yeni pod'larda olduğunu gösterir.
+ok=0
+for _ in $(seq 1 45); do
+  if [[ "$(status_of "$code2")" == 301 ]]; then ok=$((ok + 1)); (( ok >= 3 )) && break; else ok=0; fi
   sleep 2
 done
 st301=$(status_of "$code2"); cc2=$(header_of "$code2" Cache-Control)

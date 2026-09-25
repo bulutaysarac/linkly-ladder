@@ -77,12 +77,12 @@ spec:
           expr: vector(0.001)
           labels: { sloth_slo: redirect-availability, namespace: lvl11 }
         # Kalan bütçe (30 günlük pencere) — panelde yüzde olarak gösterilir.
-        # DİKKAT: bu kurulumda Prometheus yalnızca 6 SAAT saklıyor (platform/helm/kube-prometheus-stack
-        # .values.yaml → retention: 6h). `[30d]` penceresi elinde olan veriyle yetinir: "30 günlük
-        # bütçe" burada fiilen SON 6 SAATİN trafiğidir. Az trafikli bir laboratuvarda tek bir sıçrama
-        # bütçeyi büyük ölçüde — hatta sıfırın altına kadar — yiyebilir; üretimde bu pencere 30 gün
-        # veriyle dolar ve aynı sıçrama bütçenin küçük bir kırıntısıdır.
-        # EN: Prometheus keeps 6 h here, so the 30 d window is effectively the last 6 h of traffic.
+        # DİKKAT: bu kurulumda Prometheus yalnızca 48 SAAT saklıyor (platform/helm/kube-prometheus-stack
+        # .values.yaml → retention: 48h). `[30d]` penceresi elinde olan veriyle yetinir: "30 günlük
+        # bütçe" burada fiilen seviyenin bu kümedeki trafiğidir (en çok son 48 saat). Az trafikli bir
+        # laboratuvarda tek bir sıçrama bütçeyi büyük ölçüde — hatta sıfırın altına kadar — yiyebilir;
+        # üretimde bu pencere 30 gün veriyle dolar ve aynı sıçrama bütçenin küçük bir kırıntısıdır.
+        # EN: Prometheus keeps 48 h here, so the 30 d window is effectively the level's traffic so far.
         - record: slo:period_error_budget_remaining:ratio
           expr: |
             1 - (

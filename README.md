@@ -80,7 +80,7 @@ bir araç andığında karşılığı burada.
 
 | Araç | Ne işe yarar | Bu projede | İlk |
 |---|---|---|---|
-| **Prometheus** | Metrikleri **toplar ve saklar**: hedeflerin `/metrics` ucunu periyodik okur (*scrape*) | Uygulama 10 sn, küme 30 sn aralıkla; 6 saat saklar; k6 sonuçları da buraya yazılır | kurulum |
+| **Prometheus** | Metrikleri **toplar ve saklar**: hedeflerin `/metrics` ucunu periyodik okur (*scrape*) | Uygulama 10 sn, küme 30 sn aralıkla; 48 saat saklar; k6 sonuçları da buraya yazılır | kurulum |
 | **PromQL** | Prometheus'un sorgu dili | Her panel ve her `make repro` ölçümü bir PromQL sorgusu | 00 |
 | **Grafana** | Metrik, log ve trace'i panellerde **gösterir**; veri tutmaz, sorgular | 16 dashboard, `Ladder` klasörü — http://grafana.localtest.me (admin / ladder) | kurulum |
 | **prometheus-operator** | Prometheus'u Kubernetes nesneleriyle yapılandırır: *ServiceMonitor* (neyi kazı), *PrometheusRule* (kayıt ve alarm kuralları) | Her seviyenin `servicemonitor.yaml`'ı; 11+ `slo.yaml` | 01 |
@@ -476,7 +476,7 @@ Her şeyi kaldırmak (küme dahil): `make -C platform destroy`.
 | `port is already allocated` (80/443/5001) | Portu başka bir şey tutuyor (başka bir kind kümesi, yerel bir web sunucusu) | `lsof -i :80` ile bul ve kapat; başka bir kind kümesiyse `kind get clusters` → `kind delete cluster --name <ad>` |
 | 13+'da POST `401` | Yönetim uçları API anahtarı ister | README §4'teki `Authorization: Bearer …` başlıklı komutu kullan |
 | Script `SKIPPED` dedi | Ölçüm yapılamadı (ortam hazır değil) — sahte hüküm vermek yerine durdu | Script çıktısındaki sarı uyarıyı oku; genelde `make up` ile düzelir |
-| Grafana'da eski deneylerin çizgileri yenisine karışıyor | Prometheus 6 saat saklar; önceki koşular aynı panellerde | `make fresh` (seviye klasöründe): geçmiş çizgiler saniyeler içinde silinir. Her şeyi baştan: `make wipe CONFIRM=1` |
+| Grafana'da eski deneylerin çizgileri yenisine karışıyor | Prometheus 48 saat saklar; önceki koşular aynı panellerde | `make fresh` (seviye klasöründe): geçmiş çizgiler saniyeler içinde silinir. Her şeyi baştan: `make wipe CONFIRM=1` |
 | `bad pattern` / `No rule to make target '#'` / `command not found: #` | zsh `#`'i yorum saymıyor | Bir kez: `echo 'setopt interactivecomments' >> ~/.zshrc`, yeni terminal |
 | Her şey tuhaf | — | `make status` (seviye), `make -C platform status` (platform), `make logs` |
 
@@ -586,7 +586,15 @@ make verify-prev  # önceki seviyenin sorunları burada çözülmüş mü?
 ```
 
 Kök klasörde: `make wipe CONFIRM=1` (bütün verileri sil, kurulumu koru) · `make verify` (kümesiz
-doğrulama: gofmt, vet, lint, test) · `make help` (hepsi).
+doğrulama: gofmt, vet, lint, test) · `make full-run` (tam tur, aşağıda) · `make help` (hepsi).
+
+**Tam tur ve rapor.** `make full-run` 00'dan 14'e her seviyeyi rehberin sırasıyla kendisi koşar: kur
+(`FRESH=0 make up` — Grafana temizlenmez), önceki seviyenin sorunları, kendi sorunları (`CONFIRM=1`), kapat.
+Veri yalnızca başta silinir; bütün tur tek zaman ekseninde kalır. 8-12 saat sürer, Mac uyumasın diye
+`caffeinate` altında koşar; bu sürede kümede başka iş yapma. Çıktı `reports/tam-tur-<zaman>/RAPOR.md`: her
+adımın saati, sonucu, scriptin hükmü, tam log'u ve **saat aralığı hazır** Grafana linkleri. Tur sürerken de
+`python3 tools/full-run-report.py reports/tam-tur-<zaman>` o ana kadarki raporu üretir. Birkaç seviye:
+`tools/full-run.sh 05-async-analytics 06-event-stream`.
 
 ## Ortamın kendisi de ölçülür
 
@@ -597,7 +605,7 @@ uygulamanın değil kümenin gecikmesidir. Platform bu yüzden aşağıdaki kura
 | Kural | Neden | Nerede |
 |---|---|---|
 | Seviye yalnızca kendi bileşenlerini açık tutar | Bütün operatörler ve tam gözlem yığını boşta 6 çekirdeğin ~5.6'sını yer; VM swap'e girer, kubelet NotReady olur ve ölçüm uygulamayı değil ölmekte olan kümeyi ölçer | `platform/lib/profile.sh` (`make up`'ın ilk adımı) |
-| Prometheus kısa saklar, ölçülü kazır (6 saat · uygulama 10 sn · küme 30 sn) | Merdiven kısa deneyler koşar; uzun saklama ve sık kazıma, gözlenen sistemle aynı CPU/bellek bütçesinden yer | `platform/helm/kube-prometheus-stack.values.yaml` |
+| Prometheus ölçülü kazır, sınırlı saklar (uygulama 10 sn · küme 30 sn · 48 saat, en çok 6 GB) | Sık kazıma gözlenen sistemle aynı CPU bütçesinden yer; bellek aktif seri sayısına bağlıdır, saklama süresi diske yansır. 48 saat, 8-12 saatlik tam turun (`tools/full-run.sh`) sonradan incelenebilmesi için | `platform/helm/kube-prometheus-stack.values.yaml` |
 | Bellek limiti kararlı duruma değil kurtarma yoluna göre seçilir | Sert bir yeniden başlamadan sonra Prometheus WAL'ı oynatır ve kararlı durumdan çok daha fazla bellek ister; limit dar olursa oynatma ortasında OOM olur ve döngüye girer | aynı dosya (`limits.memory: 3Gi`) |
 | Grafana'nın bellek limiti çalışma kümesinin rahat üstünde | Chart, Go çöp toplayıcısının hedefini (GOMEMLIMIT) limitin %90'ına koyar; hedef çalışma kümesine yakınsa GC durmadan çalışır, paneller saniyelerce bekler ve probe'lar düşer | aynı dosya (`grafana.resources`) |
 | Lider kiraları uzun (60 / 45 / 5 sn) | Doygun bir VM'de kira yazması onlarca saniye sürebilir; kısa kira controller'ları durmadan yeniden başlatır | `platform/kind/cluster.yaml`, `platform/Makefile` |

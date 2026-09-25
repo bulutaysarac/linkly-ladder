@@ -12,3 +12,6 @@ platform/dashboards/out/
 */redirect-svc
 */api-svc
 */analytics-consumer
+
+# Tam tur çıktıları (tools/full-run.sh): yerel ölçüm kaydı ve loglar
+reports/

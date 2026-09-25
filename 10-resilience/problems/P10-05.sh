@@ -19,15 +19,23 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
 on_cleanup "setenv "$(wl redirect)" TRAP_NO_DEP_TIMEOUT-"
-step "Redis'e 3 sn gecikme enjekte et (ölmedi, YAVAŞLADI)"
-chaos_apply redis-delay-3s
-sleep 5
+# GECİKME HER FAZIN POD'LARINA AYRICA UYGULANIR. redis-delay-3s yalnızca Redis'ten uygulama pod'larına
+# giden paketleri yavaşlatır ve Chaos Mesh hedef pod'ları enjeksiyon anında sabitler: tuzak açılınca
+# yeniden başlayan pod'lar eski enjeksiyonun hedefinde değildir. Bu yüzden gecikme, fazın pod'ları
+# kalktıktan sonra yeniden uygulanır.
+# EN: the delay targets application pods and Chaos Mesh fixes its targets at injection time, so it is
+#     re-applied after the trap phase's pods are up.
 
 # Faz başına pencere: sabit [3m] ikinci fazda birincinin tepesini de okur.
 run_phase() {
   local t0 dur
   t0=$(date +%s)
-  k6run redirect --vus 30 --duration 45s >/dev/null 2>&1 || true
+  # SABİT GELİŞ HIZI (steady, açık model). Kapalı döngüde (N sanal kullanıcı) her kullanıcı cevabı
+  # bekler: servis yavaşlayınca istek de yavaşlar ve eşzamanlı istek N'i hiç geçemez — birikim
+  # ölçülemez. Gerçek trafik sen yavaşladın diye yavaşlamaz: eşzamanlı istek ≈ geliş hızı × gecikme.
+  # EN: a closed model caps concurrency at N VUs; real traffic keeps arriving, so in-flight grows
+  #     as rate × latency — that growth is the failure mode measured here.
+  RATE=${RATE:-60} k6run steady --duration 45s >/dev/null 2>&1 || true
   sleep 15                                   # uygulama metrikleri 10 sn'de bir kazınıyor
   dur=$(( $(date +%s) - t0 ))
   PH_G=$(promq "max_over_time(sum(go_goroutines{namespace=\"$NS\",pod=~\"redirect.*\"})[${dur}s:10s])")
@@ -39,15 +47,20 @@ run_phase() {
 }
 ms() { awk -v v="$1" 'BEGIN{printf "%.0f", v*1000}'; }
 
-step "(1) Timeout VAR (varsayılan): Redis çağrısı 500 ms'de kesilir"
+step "(1) Timeout VAR (varsayılan): Redis çağrısı 500 ms'de kesilir — Redis'e 3 sn gecikme (ölmedi, YAVAŞLADI)"
+chaos_apply redis-delay-3s
+sleep 5
 run_phase
 g_on=${PH_G%%.*}; m_on=$PH_M; inf_on=${PH_INF%%.*}; p99_on=$PH_P99; r99_on=$PH_R99; cut_on=${PH_CUT%%.*}
 note "timeout var: tepe goroutine=$g_on · tepe bellek=${m_on}MB · tepe in-flight=$inf_on · redirect p99=$(ms "$p99_on") ms"
 note "  Redis çağrısı p99=$(ms "$r99_on") ms · kesilen/devre-açık Redis çağrısı=$cut_on"
 
 step "(2) TRAP_NO_DEP_TIMEOUT: guard'da VE Redis istemcisinde süre sınırı yok"
+chaos_cleanup redis-delay-3s
 setenv "$(wl redirect)" TRAP_NO_DEP_TIMEOUT=true >/dev/null
 settle_rollout "$(wl redirect)"
+chaos_apply redis-delay-3s
+sleep 5
 run_phase
 g_off=${PH_G%%.*}; m_off=$PH_M; inf_off=${PH_INF%%.*}; p99_off=$PH_P99; r99_off=$PH_R99; cut_off=${PH_CUT%%.*}
 restarts=$(restarts)
@@ -78,5 +91,5 @@ fi
 # EN: ">=" is not enough either — at equality nothing grew, yet the verdict says it did.
 #     Assert growth only if you measured growth.
 awk -v a="$g_on" -v b="$g_off" 'BEGIN{exit !(a > 0 && b > 0 && b > a)}' \
-  && reproduced "timeout'suz yavaş bağımlılık goroutine'leri $g_on → $g_off, in-flight'ı $inf_on → $inf_off ve belleği ${m_on} → ${m_off}MB büyüttü (Redis çağrısı p99 $(ms "$r99_on") → $(ms "$r99_off") ms)"
+  && reproduced "timeout'suz yavaş bağımlılık goroutine'leri $g_on → $g_off ve in-flight'ı $inf_on → $inf_off büyüttü (Redis çağrısı p99 $(ms "$r99_on") → $(ms "$r99_off") ms · tepe bellek ${m_on} → ${m_off} MB)"
 not_reproduced "goroutine birikimi ölçülemedi ($g_on → $g_off) — Redis çağrıları uzadı ama istekler birikmedi"

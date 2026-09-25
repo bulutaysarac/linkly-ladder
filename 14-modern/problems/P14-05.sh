@@ -8,9 +8,11 @@ APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
 need_confirm "game day: Redis gecikmesi + DB paket kaybı + pod öldürme ÜST ÜSTE uygulanacak"
 step "Taban: her şey sağlıklıyken"
+# Taban kendi penceresinden okunur: sabit [2m], önceki deneyin kuyruğunu tabana katar.
+tb=$(date +%s)
 RATE=${GAMEDAY_RATE:-300} k6run steady --duration 30s >/dev/null 2>&1 || true
 sleep 10
-base_p99=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le))")
+base_p99=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[$(( $(date +%s) - tb ))s])) by (le))")
 note "taban p99=$(awk -v v="$base_p99" 'BEGIN{printf "%.0f", v*1000}') ms"
 # Korumalar game day'den ÖNCE dinlenmede mi? Trafik almayan bir pod'un breaker'ı, açıldığı andaki
 # durumda donar (yarı açığa geçmek için istek gerekir): Postgres'ten önce kalkan api pod'ları

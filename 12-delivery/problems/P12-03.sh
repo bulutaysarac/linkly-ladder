@@ -15,14 +15,14 @@ if [[ -z "$app" ]]; then
   note "yerine, sapmanın KENDİSİNİ ölçüp neyin eksik olduğunu göstermeyi seçtik."
 fi
 step "Manifest'te ne yazıyor, cluster'da ne var?"
-want=$(kubectl kustomize "$(dirname "$0")/../deploy" 2>/dev/null | awk '/^kind: Rollout$/{r=1} r&&/^  replicas:/{print $2; exit}') || true
+want=$(kubectl kustomize "$(level_deploy_dir)" 2>/dev/null | awk '/^kind: Rollout$/{r=1} r&&/^  replicas:/{print $2; exit}') || true
 have=$(kubectl -n "$NS" get "$(wl redirect)" -o jsonpath='{.spec.replicas}' 2>/dev/null) || true
 note "manifest: ${want:-?} replika · cluster: ${have:-?} replika"
 step "DRIFT üret: kubectl ile elle değiştir"
 kubectl -n "$NS" scale "$(wl redirect)" --replicas=5 >/dev/null 2>&1 || kubectl -n "$NS" patch "$(wl redirect)" --type=merge -p '{"spec":{"replicas":5}}' >/dev/null
-# Drift'i en az İKİ kazıma aralığı tut: Argo Rollouts denetleyicisi 30 sn'de bir kazınıyor; 5 sn'lik
-# bir sapma "Dağıtım aşaması (Argo Rollouts)" panelinin `istenen replika` çizgisine çoğu zaman hiç
-# düşmez — panel, o kadar kısa bir olayı gösteremeyecek kadar kaba örnekler.
+# Drift'i en az İKİ kazıma aralığı tut: kube-state-metrics 30 sn'de bir kazınıyor; 5 sn'lik bir sapma
+# "Hazır pod (sürüme göre)" panelinin basamağına çoğu zaman hiç düşmez — panel, o kadar kısa bir olayı
+# gösteremeyecek kadar kaba örnekler.
 # EN: hold the drift for at least two scrape intervals (30s) or the panel usually misses it.
 sleep "${DRIFT_HOLD:-65}"
 drifted=$(kubectl -n "$NS" get "$(wl redirect)" -o jsonpath='{.spec.replicas}' 2>/dev/null) || true
@@ -43,9 +43,9 @@ kubectl -n "$NS" patch "$(wl redirect)" --type=merge -p "{\"spec\":{\"replicas\"
 sleep 8
 after=$(kubectl -n "$NS" get "$(wl redirect)" -o jsonpath='{.spec.replicas}' 2>/dev/null) || true
 note "yeniden uygulamadan sonra: ${after:-?} replika"
-note "Grafana'da drift'in KENDİSİ görünmez: 13 · Rollout → 'Git ile uyumsuz uygulamalar (Argo CD)' boş, çünkü"
-note "lvl12 için Application yok (karşılaştıran kimse yok); 'Dağıtım aşaması (Argo Rollouts)' → 'istenen replika'"
-note "3 → 5 → 3 basamağını gösterir ama bunun bir sapma olduğunu, kimin yaptığını ve geri alındığını söylemez."
+note "Grafana'da drift'in KENDİSİ görünmez: Argo CD kurulu ama lvl12 için Application yok (karşılaştıran"
+note "kimse yok); 13 · Rollout → 'Hazır pod (sürüme göre)' stable sürümün 3 → 5 → 3 basamağını gösterir ama"
+note "bunun bir sapma olduğunu, kimin yaptığını ve geri alındığını söylemez."
 note "Bu merdivende manifest'ler git'te ve 'make up' onları uyguluyor — yani ELDE bir GitOps var."
 note "Argo CD'nin eklediği üç şey: (1) SÜREKLİ karşılaştırma (sen uygulamasan da), (2) otomatik"
 note "self-heal (drift'i kendisi geri alır), (3) görünürlük (hangi kaynak neden farklı)."

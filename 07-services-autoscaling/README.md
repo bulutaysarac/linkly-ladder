@@ -345,10 +345,11 @@ yeniden 2'ye çekebilir; iki faz aynı koşulda koştuğu için karşılaştırm
 > (kind + Docker Desktop, cgroup v1). Throttling'i doğrudan okuyamıyoruz; bu yüzden script dolaylı
 > kanıt kullanıyor: limitli/limitsiz p99 farkı. *Ölçemediğin şeyi, ölçebildiğin bir şeyle kuşatmak
 > gözlemlenebilirliğin sık kullanılan bir tekniğidir* — ve bunu README'de yazmak, sessizce boş bir
-> panele bakmaktan iyidir.
+> panele bakmaktan iyidir. Grafana'da kısılmanın görünen yüzü "CPU: sınırın yüzde kaçı" panelidir:
+> %100'e yapışıp düz giden pod kısılıyordur.
 
 **Grafana'da gör:** [`01 · Pods & Resources`](http://grafana.localtest.me/d/ladder-pods?var-level=lvl07&from=now-15m&to=now&refresh=10s) ve [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl07&from=now-15m&to=now&refresh=10s) — iki faz var (dar kota, sonra kotasız), her biri 60 sn yük; tek `redirect` pod'u her fazda yeniden başlar (giriş: admin / ladder)
-- "CPU kısıtlama (throttling)" → bu kurulumda büyük olasılıkla **boş** (yukarıdaki ortam sınırı). Doluysa: dar kota fazında `redirect-…` çizgisi yükselir, kotasız fazda 0'a yakın kalır.
+- "CPU: sınırın yüzde kaçı" → dar kota fazında tek `redirect-…` pod'u **%100'e yapışır** ve düz gider: kotası her 100 ms'lik dilimde bitiyor, dilimin kalanında bekletiliyor — kısılmanın (throttling) görünen yüzü bu. Kotasız fazda (yeni pod adıyla, sınır 4 çekirdek) çizgi yere iner: kullanım arttığı hâlde sınırın küçük bir kısmı.
 - "CPU kullanımı (bir çekirdeğin %'si)" → dar kota fazında tek `redirect-…` pod'u kotasında (`TIGHT`, varsayılan 50m = bir çekirdeğin %5'i) **%5'te** düz bir tavana yapışır; kotasız fazda (yeni pod adıyla) belirgin biçimde yükselir.
 - "p99 süre (uç noktaya göre)" → `/{code}` dar kota fazında yüksek, kotasız fazda düşük: aradaki fark kotanın bedeli — throttling'i göremediğimiz yerde onu kuşatan dolaylı kanıt bu.
 
@@ -616,7 +617,7 @@ sayılır. Fark çıkmayabilir: Kubernetes sonlanan pod'u readiness'tan bağıms
 durumda script de NOT-REPRODUCED der ve nedenini yazar; probe'un değeri P01-07 ve P10-02'de ölçülüyor.
 
 **Grafana'da gör:** [`01 · Pods & Resources`](http://grafana.localtest.me/d/ladder-pods?var-level=lvl07&from=now-15m&to=now&refresh=10s) ve [`15 · k6`](http://grafana.localtest.me/d/ladder-k6?var-level=lvl07&from=now-15m&to=now&refresh=10s) — iki rollout var (varsayılan, sonra tuzaklı); scripti başlatınca aç (giriş: admin / ladder)
-- "Hazır pod adresi (endpoint) sayısı" → her rollout'ta `redirect-…` çizgisi kısa bir tepe/çukur çizer (yeni pod'lar girer, eskiler çıkar). Tuzak fazında yeni pod'lar süreç açılır açılmaz hazır sayılır; iki rollout'un şeklini yan yana karşılaştır.
+- "Hazır pod adresi (endpoint) sayısı" → her rollout'ta `redirect` çizgisi kısa bir tepe/çukur çizer (yeni pod'lar girer, eskiler çıkar). Tuzak fazında yeni pod'lar süreç açılır açılmaz hazır sayılır; iki rollout'un şeklini yan yana karşılaştır.
 - "Dönen durum kodları" (k6) → rollout anlarında 5xx (`502`/`503`) kıvılcımları; tuzaklı rollout'takileri varsayılandakilerle karşılaştır. Bu hatalar ingress'ten gelir, `02 · App RED` onları görmez. Fark çıkmayabilir: Kubernetes sonlanan pod'u readiness'tan bağımsız olarak Endpoints'ten düşürüyor — scriptin sonundaki nota bak.
 
 **Aynı kökten üç hata:** readiness'ı TCP kontrolüne indirgemek · `/healthz`'i readiness olarak
@@ -650,7 +651,7 @@ Elle denemeye değer:
 | [`09 · Autoscaling`](http://grafana.localtest.me/d/ladder-autoscaling?var-level=lvl07&from=now-15m&to=now) | **Dolu** ✨ | HPA desired/current, Pending pod, node kapasitesi, KEDA scaler değeri |
 | [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl07&from=now-15m&to=now) | Dolu — **servis bazında** | Artık `redirect` ve `api` ayrı pod'lar; panelleri `pod` kırılımıyla oku |
 | [`08 · Stream`](http://grafana.localtest.me/d/ladder-stream?var-level=lvl07&from=now-15m&to=now) · [`05 · Postgres`](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl07&from=now-15m&to=now) · [`06 · Redis`](http://grafana.localtest.me/d/ladder-redis?var-level=lvl07&from=now-15m&to=now) · [`04 · Cache`](http://grafana.localtest.me/d/ladder-cache?var-level=lvl07&from=now-15m&to=now) | Dolu | — |
-| [`01 · Pods`](http://grafana.localtest.me/d/ladder-pods?var-level=lvl07&from=now-15m&to=now) → "CPU kısıtlama (throttling)" | **Boş (ortam sınırı)** | cAdvisor bu kurulumda metriği yayınlamıyor — P07-04'teki nota bak |
+| [`01 · Pods`](http://grafana.localtest.me/d/ladder-pods?var-level=lvl07&from=now-15m&to=now) → "CPU: sınırın yüzde kaçı" | Dolu — yalnızca CPU sınırı olan pod'lar | Kısılma süresinin kendisi (`container_cpu_cfs_throttled_*`) bu kurulumda yayınlanmıyor; kısılmayı kullanımın sınıra oranından oku — P07-04'teki nota bak |
 | [`11 · Resilience`](http://grafana.localtest.me/d/ladder-resilience?var-level=lvl07&from=now-15m&to=now) · [`12 · SLO`](http://grafana.localtest.me/d/ladder-slo?var-level=lvl07&from=now-15m&to=now) · [`13 · Rollout`](http://grafana.localtest.me/d/ladder-rollout?var-level=lvl07&from=now-15m&to=now) | Boş | — |
 
 Bu seviyede dashboard okuma alışkanlığı değişiyor: tek bir "uygulama" yok artık. `app-red`'e

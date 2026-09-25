@@ -251,7 +251,7 @@ trafik almaya devam etti. Tuzaklı fazda döngü birkaç saniye içinde `0` basm
 **aynı anda** eski değerine çıkar.
 
 **Grafana'da gör:** [`11 · Resilience`](http://grafana.localtest.me/d/ladder-resilience?var-level=lvl10&from=now-15m&to=now&refresh=10s) ve [`15 · k6`](http://grafana.localtest.me/d/ladder-k6?var-level=lvl10&from=now-15m&to=now&refresh=10s) — scripti başlatınca aç; iki faz 90'ar sn, Redis her fazda ~40 sn durur (giriş: admin / ladder)
-- "Hazır pod adresi (endpoint) sayısı" → `redirect-…` çizgisine bak. Birinci fazda Redis dururken **düz** kalır; ikinci fazda (`TRAP_READY_CHECKS_REDIS`) **0'a** iner ve Redis dönünce bütün pod'larla **aynı anda** geri gelir. (Aynı metrik `01 · Pods & Resources` → "Hazır pod adresi (endpoint) sayısı" panelinde de var.)
+- "Hazır pod adresi (endpoint) sayısı" → `redirect` çizgisine bak. Birinci fazda Redis dururken **düz** kalır; ikinci fazda (`TRAP_READY_CHECKS_REDIS`) **0'a** iner ve Redis dönünce bütün pod'larla **aynı anda** geri gelir. (Aynı metrik `01 · Pods & Resources` → "Hazır pod adresi (endpoint) sayısı" panelinde de var.)
 - "Azaltılmış mod (degrade)" → birinci fazda Redis durunca `no_cache` **1'e çıkar**: Redis guard'ının devresi açıldı, önbellek atlanıyor ve okumalar DB'den cevaplanıyor. Redis dönünce ilk başarılı çağrıyla 0'a iner. Bağımlılığın durumu burada, bir METRİKTE görünüyor — pod ise trafik almaya devam ediyor. İkinci fazda da kısa bir süre 1 olabilir; ama pod'lar zaten trafikten düşmüştür.
 - "Dönen durum kodları" (k6) → birinci fazda `302` kesintisiz sürer; ikinci fazda Redis kesintisi boyunca `503` (ingress: gönderilecek hazır pod yok). Bkz. [Grafana'yı okumak](../README.md#grafanayı-okumak).
 
@@ -332,7 +332,9 @@ p99 tavan yapar; açıkken istekler hızlıca reddedilir.
 
 Otomatik: `make repro P=P10-04` — `pg-loss-50` altında aynı yükü önce devre kesiciyle, sonra `TRAP_NO_BREAKER` ile verir;
 her fazın kendi zaman penceresinde bozuk bağımlılığa **ulaşan** çağrıyı (toplam − devre-açık reddi), istek sayısını ve
-p99'u ölçer, oranları karşılaştırır ve tepe devre durumunu basar.
+tipik isteğin süresini (p50) ölçer, oranları karşılaştırır ve tepe devre durumunu basar. p99 değil p50: iki fazda da en
+yavaş %1 (devre açılmadan önceki istekler, yarı açık denemeler) handler'ın 5 sn'lik sınırına dayanır; devre kesicinin
+"istemci hızlı cevap alır" iddiası tipik isteğe dairdir.
 
 Elle — sırayla yapıştır:
 
@@ -343,7 +345,7 @@ make chaos C=pg-loss-50
 sleep 5
 ```
 2. Devre kesici açıkken (varsayılan) 50 sn yük ver; bu fazın penceresinde Postgres çağrılarını sonuca göre, tepe devre
-   durumunu ve tepe p99'u oku:
+   durumunu ve tipik isteğin süresini (p50) oku:
 ```bash
 t0=$(date +%s)
 make load S=mixed K6_ARGS="--vus 25 --duration 50s"
@@ -351,7 +353,7 @@ sleep 20
 w=$(( $(date +%s) - t0 ))
 curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode "query=sum by (result) (increase(dependency_requests_total{namespace='lvl10',dep='postgres'}[${w}s]))" | jq -r '.data.result[] | "\(.metric.result): \(.value[1])"'
 curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode "query=max_over_time(max(breaker_state{namespace='lvl10',dep='postgres'})[${w}s:15s])" | jq -r '"tepe devre durumu: " + .data.result[0].value[1]'
-curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode "query=max_over_time(histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace='lvl10'}[30s])) by (le))[${w}s:15s])" | jq -r '"tepe p99 (sn): " + .data.result[0].value[1]'
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode "query=histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{namespace='lvl10'}[${w}s])) by (le))" | jq -r '"tipik istek, p50 (sn): " + .data.result[0].value[1]'
 ```
 3. Devre kesiciyi kapat (redirect pod'ları yeniden başlar), aynı yükü ver, aynı üç ölçümü al:
 ```bash
@@ -362,7 +364,7 @@ sleep 20
 w=$(( $(date +%s) - t0 ))
 curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode "query=sum by (result) (increase(dependency_requests_total{namespace='lvl10',dep='postgres'}[${w}s]))" | jq -r '.data.result[] | "\(.metric.result): \(.value[1])"'
 curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode "query=max_over_time(max(breaker_state{namespace='lvl10',dep='postgres'})[${w}s:15s])" | jq -r '"tepe devre durumu: " + .data.result[0].value[1]'
-curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode "query=max_over_time(histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace='lvl10'}[30s])) by (le))[${w}s:15s])" | jq -r '"tepe p99 (sn): " + .data.result[0].value[1]'
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode "query=histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{namespace='lvl10'}[${w}s])) by (le))" | jq -r '"tipik istek, p50 (sn): " + .data.result[0].value[1]'
 ```
 4. Arızayı kaldır, devre kesiciyi geri aç:
 ```bash
@@ -373,8 +375,8 @@ make reset
 **Terminalde ne görmelisin:** sonuç satırları `ok`, `error`, `timeout`, `bulkhead`, `open`. 2. adımda `open` büyüktür:
 bağımlılığa **hiç gitmeden** hızlıca reddedilen çağrılar; `tepe devre durumu: 2` (açık). Bozuk bağımlılığa ulaşan çağrı
 = `open` dışındakilerin toplamı; bunu yükün özet satırındaki `reqs=` ile oranla. 3. adımda `open` `0`, `tepe devre durumu:
-0`: her istek bozuk bağımlılığa gidiyor, ulaşan/istek oranı 2. adımdakinden büyük ve tepe p99 belirgin yüksek — yavaş
-hata, hızlı hatadan kötü. Scriptin hükmü bu iki farka bakar.
+0`: her istek bozuk bağımlılığa gidiyor, ulaşan/istek oranı 2. adımdakinden büyük ve tipik istek (p50) milisaniyelerden
+saniyelere çıkar — yavaş hata, hızlı hatadan kötü. Scriptin hükmü bu iki farka bakar.
 
 **Grafana'da gör:** [`11 · Resilience`](http://grafana.localtest.me/d/ladder-resilience?var-level=lvl10&from=now-15m&to=now&refresh=10s) ve [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl10&from=now-15m&to=now&refresh=10s) — scripti başlatınca aç; `pg-loss-50` altında iki faz ~70'er sn, arada redirect rollout'u (giriş: admin / ladder)
 - "Devre kesici durumu (0 kapalı · 1 yarı açık · 2 açık)" → birinci fazda `postgres` 0'dan **2'ye** çıkar ve 2 / 1 / 0 arasında gidip gelir (5 sn açık → yarı açık deneme → yine açık): testere dişi = flapping. Uygulama metrikleri 10 sn'de bir kazındığı için 5 sn'lik dişler düzensiz görünür. İkinci fazda (`TRAP_NO_BREAKER`) **düz 0**: devre hiç açılmıyor.
@@ -401,11 +403,17 @@ kördür: 3 sn'de gelen bir cevap **başarılıdır**, hata sayılmaz.
 
 **Reproduce (adım adım):**
 
-Otomatik: `make repro P=P10-05` — `redis-delay-3s` altında timeout'lu/timeout'suz goroutine,
-in-flight, bellek ve Redis çağrı süresini karşılaştırır. `TRAP_NO_DEP_TIMEOUT` hem guard'ların
+Otomatik: `make repro P=P10-05` — `redis-delay-3s` altında, sabit geliş hızlı yükle (saniyede 60 istek; `RATE=` ile
+değişir) timeout'lu/timeout'suz goroutine, in-flight, bellek ve Redis çağrı süresini karşılaştırır. Yük açık modeldir:
+kapalı döngüde (N sanal kullanıcı) her kullanıcı cevabı beklediği için eşzamanlı istek N'i geçemez ve birikim
+görünmez; gerçek trafik servis yavaşladı diye yavaşlamaz — eşzamanlı istek ≈ geliş hızı × gecikme. `TRAP_NO_DEP_TIMEOUT` hem guard'ların
 timeout'unu hem de **Redis istemcisinin kendi** 500 ms'lik soket süre sınırlarını kaldırır.
 (Yalnızca guard'ınkini kaldırmak yetmez: istemcinin 500 ms'si her çağrıyı iki fazda da keser ve
-"timeout'suz" yol hiç sınanmaz. Timeout, süre sınırının **uygulandığı** yerdedir.)
+"timeout'suz" yol hiç sınanmaz. Timeout, süre sınırının **uygulandığı** yerdedir.) Gecikme yalnızca Redis'ten
+uygulama pod'larına giden paketlere uygulanır — Redis pod'unun tamamı yavaşlasaydı kubelet'in yoklamaları da gecikir,
+pod hazır olmaz ve headless `redis` Service'i DNS'ten düşerdi: deney yavaş bir bağımlılığı değil bulunamayan bir
+bağımlılığı ölçerdi. Chaos Mesh hedef pod'ları uygulandığı anda sabitlediği için gecikme, tuzak fazının yeniden
+başlayan pod'larına ayrıca uygulanır.
 
 Elle — sırayla yapıştır:
 
@@ -415,11 +423,11 @@ make fresh
 make chaos C=redis-delay-3s
 sleep 5
 ```
-2. Timeout varken (varsayılan) 45 sn yük ver; bu fazın penceresinde tepe goroutine, tepe in-flight, Redis çağrı p99'u
+2. Timeout varken (varsayılan) 45 sn sabit geliş hızlı yük ver (saniyede 60 istek); bu fazın penceresinde tepe goroutine, tepe in-flight, Redis çağrı p99'u
    ve kesilen/devre-açık Redis çağrısı sayısını oku:
 ```bash
 t0=$(date +%s)
-make load S=redirect K6_ARGS="--vus 30 --duration 45s"
+RATE=60 make load S=steady K6_ARGS="--duration 45s"
 sleep 15
 w=$(( $(date +%s) - t0 ))
 curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode "query=max_over_time(sum(go_goroutines{namespace='lvl10',pod=~'redirect.*'})[${w}s:10s])" | jq -r '"tepe goroutine: " + .data.result[0].value[1]'
@@ -427,12 +435,15 @@ curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode "query=ma
 curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode "query=histogram_quantile(0.99, sum(rate(dependency_request_duration_seconds_bucket{namespace='lvl10',dep='redis'}[${w}s])) by (le))" | jq -r '"redis çağrı p99 (sn): " + .data.result[0].value[1]'
 curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode "query=sum(increase(dependency_requests_total{namespace='lvl10',dep='redis',result=~'timeout|open'}[${w}s]))" | jq -r '"kesilen/devre-açık redis çağrısı: " + .data.result[0].value[1]'
 ```
-3. Süre sınırlarını kaldır (guard'ınki ve Redis istemcisininki; redirect pod'ları yeniden başlar), aynı yükü ver, aynı
-   dört ölçümü al:
+3. Süre sınırlarını kaldır (guard'ınki ve Redis istemcisininki; redirect pod'ları yeniden başlar), gecikmeyi yeni
+   pod'lar için yeniden uygula (arıza hedef pod'ları uygulandığı anda sabitler), aynı yükü ver, aynı dört ölçümü al:
 ```bash
 make set E="TRAP_NO_DEP_TIMEOUT=true" W=redirect
+make unchaos
+make chaos C=redis-delay-3s
+sleep 5
 t0=$(date +%s)
-make load S=redirect K6_ARGS="--vus 30 --duration 45s"
+RATE=60 make load S=steady K6_ARGS="--duration 45s"
 sleep 15
 w=$(( $(date +%s) - t0 ))
 curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode "query=max_over_time(sum(go_goroutines{namespace='lvl10',pod=~'redirect.*'})[${w}s:10s])" | jq -r '"tepe goroutine: " + .data.result[0].value[1]'

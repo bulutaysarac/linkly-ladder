@@ -7,3 +7,14 @@ spec:
   mode: all
   selector: { namespaces: ["${NS}"], labelSelectors: { app.kubernetes.io/name: redis } }
   delay: { latency: "3s", jitter: "300ms" }
+  # YALNIZCA UYGULAMA POD'LARINA GİDEN PAKETLER. Gecikme pod'un bütün çıkışına uygulansaydı kubelet'in
+  # yoklamaları da 3 sn gecikir ve exporter'ın 1 sn'lik hazırlık yoklaması düşerdi: pod hazır olmayınca
+  # headless `redis` Service'i DNS'ten kaybolur, yeni bağlantı kurulamaz ve deney yavaş bir bağımlılığı
+  # değil BULUNAMAYAN bir bağımlılığı ölçer.
+  # EN: delay only packets towards application pods; delaying all egress also delays kubelet probes,
+  #     the exporter's 1 s readiness probe fails, the headless Service drops out of DNS and the
+  #     experiment measures an unreachable dependency instead of a slow one.
+  direction: to
+  target:
+    mode: all
+    selector: { namespaces: ["${NS}"], labelSelectors: { app.kubernetes.io/part-of: linkly-ladder } }

@@ -212,8 +212,12 @@ onun için bozuktur.*
 
 **Reproduce (adım adım):**
 
-Otomatik — ölçer ve hüküm basar: `CONFIRM=1 make repro P=P09-02` (yük altında primary'yi siler, terfi süresini ve
-5xx'i ölçer).
+Otomatik — ölçer ve hüküm basar: `CONFIRM=1 make repro P=P09-02` (karışık yük altında primary'yi **çökertir** — zorla
+siler, kapanış yok —; primary rolünde hazır yeni bir pod olana kadar geçen süreyi, k6'nın 5xx'ini ve yazma yolunun —
+`POST /api/links` — pencere içi en kötü p99'unu ölçer; sonunda silinen pod replika olarak geri kurulana kadar bekler.
+Hüküm: 5xx sıfırdan büyük ya da yazma p99 ≥ 1 sn. Neden çökme: düzgün silinen bir primary'yi CNPG kapanırken replikaya
+devreder ve PgBouncer bunu istemciden gizler; pencere, operatörün arızayı fark edip terfi ettirmesi gereken çökmede
+açılır).
 
 Elle — `09-database-scaling` klasöründe, sırayla yapıştır. **Yıkıcı:** 3. adım primary Postgres pod'unu siler;
 CNPG replikayı terfi ettirir ve silinen pod'u replika olarak geri kurar. 4. adımda iki instance da hazır olmadan
@@ -230,29 +234,37 @@ primary=$(kubectl -n lvl09 get pod -l cnpg.io/cluster=pg,cnpg.io/instanceRole=pr
 ```bash
 make load S=mixed K6_ARGS="--vus 15 --duration 120s"
 ```
-3. Yük başladıktan ~15 sn sonra İLK terminalde primary'yi sil ve yeni primary ilan edilene kadar her 2 sn'de rolü bas:
+3. Yük başladıktan ~15 sn sonra İLK terminalde primary'yi **çökert** (zorla sil: kapanış yok) ve her saniye primary
+   rolündeki pod'u ve hazır olup olmadığını bas; silinenden farklı (yeni UID'li) hazır bir primary olunca döngü durur:
 ```bash
-kubectl -n lvl09 delete pod "$primary" --wait=false
-for i in $(seq 1 60); do newp=$(kubectl -n lvl09 get pods -l cnpg.io/cluster=pg,cnpg.io/instanceRole=primary -o jsonpath='{.items[0].metadata.name}' 2>/dev/null); echo "$((i*2)) sn: primary=${newp:-yok}"; case "$newp" in ""|"$primary") sleep 2 ;; *) break ;; esac; done
+uid0=$(kubectl -n lvl09 get pod "$primary" -o jsonpath='{.metadata.uid}')
+kubectl -n lvl09 delete pod "$primary" --force --grace-period=0
+t0=$(date +%s); for i in $(seq 1 120); do np=$(kubectl -n lvl09 get pods -l cnpg.io/cluster=pg,cnpg.io/instanceRole=primary -o json | jq -r --arg u "$uid0" '[.items[] | select(.metadata.uid != $u) | select(any(.status.containerStatuses[]?; .ready)) | .metadata.name][0] // empty'); echo "$(( $(date +%s) - t0 )) sn: hazır yeni primary=${np:-yok}"; [ -n "$np" ] && break; sleep 1; done
 ```
-4. İkinci terminaldeki yük bitince rollere ve kümenin durumuna bak; iki instance da hazır olana kadar bekle:
+4. İkinci terminaldeki yük bitince 15 sn bekle (son kazıma yükü kapsasın), yazma yolunun son 3 dakikadaki en kötü
+   p99'unu (ms) oku, sonra rollere bak ve iki instance da hazır olana kadar bekle:
 ```bash
+sleep 15
+curl -s 'http://prometheus.localtest.me/api/v1/query' --data-urlencode 'query=1000 * max_over_time(histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace="lvl09",route="/api/links"}[30s])) by (le))[3m:15s])' | jq -r '.data.result[0].value[1]'
 kubectl -n lvl09 wait --for=condition=Ready pod -l cnpg.io/cluster=pg,cnpg.io/instanceRole --timeout=300s
 kubectl -n lvl09 get pods -l cnpg.io/cluster=pg -L cnpg.io/instanceRole
-kubectl -n lvl09 get cluster pg
+kubectl -n lvl09 get cluster.postgresql.cnpg.io pg
 ```
 
-**Terminalde ne görmelisin:** döngü önce eski primary'nin adını (ya da `primary=yok`) basar, sonra replikanın adına
-döner: terfi süresi o satırdaki saniyedir (Belirti: ~10–30 sn). İkinci terminaldeki k6 özet satırında
-(`k6 lvl09: reqs=… 5xx=…`) `5xx` sıfırdan büyüktür — failover penceresinde düşen istekler (script bunu arar) — ve
-yük bitmeden hatalar kesilir: sistem insan müdahalesi olmadan toparlandı. 4. adımda roller yer değiştirmiştir: eski replika `primary`,
-silinen pod aynı adla `replica` olarak geri gelmiştir; `kubectl get cluster pg` hazır instance sayısını ve yeni
-primary'yi gösterir.
+**Terminalde ne görmelisin:** döngü önce `hazır yeni primary=yok` basar, sonra bir pod adına döner: yazmanın yeniden
+mümkün olduğu an, pencere o satırdaki saniyedir (Belirti: ~10–30 sn). Ad ya replikanınkidir (terfi) ya da silinenle
+aynıdır (CNPG aynı adla yeni bir pod kaldırdı — UID'i farklı). Pencere iki biçimde görünür: ikinci terminaldeki k6 özet
+satırında (`k6 lvl09: reqs=… 5xx=…`) `5xx` sıfırdan büyüktür (düşen istekler), ya da 4. adımdaki yazma p99'u saniyelerle
+ölçülür (PgBouncer sorguları bekletti) — script ikisinden birini görünce REPRODUCED der. Yük bitmeden hatalar ve bekleme
+kesilir: sistem insan müdahalesi olmadan toparlandı. 4. adımda iki instance da hazırdır (silinen pod replika olarak geri
+kurulur; bu birkaç dakika sürebilir ve yazma kesintisinin parçası değildir); `get cluster` hazır instance sayısını ve
+güncel primary'yi gösterir.
 
 **Grafana'da gör:** [`05 · Postgres`](http://grafana.localtest.me/d/ladder-postgres?var-level=lvl09&from=now-15m&to=now&refresh=10s) ve [`02 · App RED`](http://grafana.localtest.me/d/ladder-app-red?var-level=lvl09&from=now-15m&to=now&refresh=10s) — scripti başlatınca aç; yük 120 sn, primary 15. saniyede silinir (giriş: admin / ladder)
-- Explore'da: `max by (pod) (cnpg_pg_replication_in_recovery{namespace="lvl09"})` → roller: `0` = primary, `1` = replika. Primary silinince replikanın çizgisi 1'den **0'a** iner (terfi); silinen pod bir süre kaybolur ve **1** olarak (yeni replika) geri gelir.
+- Explore'da: `max by (pod) (cnpg_pg_replication_in_recovery{namespace="lvl09"})` → roller: `0` = primary, `1` = replika. Replika terfi ederse onun çizgisi 1'den **0'a** iner ve silinen pod bir süre kaybolup **1** olarak (yeni replika) geri gelir; CNPG silinen primary'yi aynı adla yeniden başlatırsa o pod'un çizgisi kopar ve yine **0** olarak döner.
 - "Replikasyon gecikmesi" → çizgiler 0 civarında; silinen pod'un çizgisi **kopar** ve pod replika olarak geri gelince yeniden başlar. Boşluk, o pod'un yeniden kurulma süresidir.
-- "5xx (uç noktaya göre)" → primary silinince bir 5xx tepesi (başta yazma yolu `/api/links`: `503 store_error`), saniyeler sonra **kendiliğinden** 0'a döner — insan müdahalesi olmadan. Tepenin genişliği, failover penceresidir.
+- "5xx (uç noktaya göre)" → primary silinince bir 5xx tepesi (başta yazma yolu `/api/links`: `503 store_error`), saniyeler sonra **kendiliğinden** 0'a döner — insan müdahalesi olmadan. Tepenin genişliği, failover penceresidir. Tepe hiç çıkmayabilir: PgBouncer sorguları yeni primary hazır olana kadar bekletir.
+- "p99 süre (uç noktaya göre)" (App RED) → o zaman pencere burada görünür: `/api/links` p99'u milisaniyelerden **saniyelere** sıçrar ve küme sağlıklı olunca geri iner; `/{code}` (okuma, önbellek ve replika) neredeyse düz kalır. Hata vermeyen bir kesinti de kesintidir: yazma o süre boyunca asılı kaldı.
 - "Bağlantılar ve üst sınır" → 09'dan itibaren CNPG'nin `cnpg_backends_total` metriğinden (postgres_exporter yok): primary silinince onun bağlantı çizgileri **kopar**, terfi eden pod'da yeniden kurulur — Pooler'lar yeni primary'ye bağlanıyor. Üst çizgi `max_connections` (100) sabit kalır.
 
 **02 ile fark:** Orada kesinti **insan müdahalesine kadar** sürüyordu. Burada saniyeler — ama sıfır

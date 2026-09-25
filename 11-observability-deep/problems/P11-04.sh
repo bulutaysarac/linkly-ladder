@@ -20,8 +20,10 @@ curl -sG "$PROM_URL/api/v1/rules" 2>/dev/null \
 # only the SLOW burn rule goes pending, so the claim cannot be tested. 90s is still short
 # relative to the 1h/6h burn windows, so the narrative holds.
 step "Kısa bir hata sıçraması üret (~90 sn)"
+ts0=$(date +%s)
 chaos_apply pg-loss-50
 ( k6run mixed --vus 20 --duration "${SPIKE:-90}s" >/dev/null 2>&1 || true )
+ts1=$(date +%s)
 "$LADDER_ROOT/platform/lib/chaos.sh" delete pg-loss-50 >/dev/null 2>&1 || true
 note "sıçrama bitti, alarmlar değerlendiriliyor..."
 sleep 75
@@ -38,7 +40,7 @@ grafana_hint "12 · SLO → 'Hata oranı (son 5 dk)' + 'Bütçe yanma hızı (1 
 note "naive eşik alarmı: ${naive%%.*} · hızlı burn-rate alarmı: ${fast%%.*}"
 note "kalan hata bütçesi: $(awk -v v="$budget" 'BEGIN{printf "%.2f%%", v*100}')"
 note "Okuma: kısa bir sıçrama, 30 GÜNLÜK bütçenin küçük bir kısmını harcar — uyandırmayı hak etmez."
-note "Ama bu kümede Prometheus yalnızca 6 SAAT saklıyor: 'kalan bütçe' fiilen son 6 saatin hesabı."
+note "Ama bu kümede Prometheus en çok 48 saat saklıyor: 'kalan bütçe' fiilen seviyenin buradaki trafiğinin hesabı."
 note "Az trafikli bir laboratuvarda aynı sıçrama onu büyük ölçüde yiyebilir, sıfırın altına bile inebilir."
 note "Burn-rate alarmının iki penceresi de aynı anda aşılmalı: uzun pencere 'yeterince büyük mü?',"
 note "kısa pencere 'HÂLÂ oluyor mu?' diye sorar. Biri olmadan diğeri ya geç çalar ya geç susar."
@@ -63,6 +65,22 @@ if awk -v n="${naive%%.*}" -v f="${fast%%.*}" 'BEGIN{exit !(n+0==0 && f+0==0)}';
   warn "Bu bir hüküm değil, EKSİK ÖLÇÜMdür."
   exit 2
 fi
+# UZUN PENCERE SEYRELTEMELİ. Hızlı burn kuralı 1 saatlik hata oranının da bütçenin 14,4 katını (%1,44)
+# aşmasını ister. Sıçramanın 5xx'leri, o penceredeki TÜM isteklere bölündüğünde tek başına bu eşiği
+# aşıyorsa (seviye yeni kurulmuş, pencerede başka trafik az), bütçe gerçekten o hızla yanmıştır ve
+# burn-rate'in ateşlemesi DOĞRUDUR — "naive kadar gürültülü" diye okunamaz. Kısa sıçrama iddiası
+# ancak uzun pencerede sıçramayı seyreltecek bir trafik geçmişi varken sınanabilir.
+# EN: if the spike's 5xx alone, divided by all requests in the 1h window, exceed 14.4x the budget,
+#     the budget really burned that fast (fresh level, thin history) and firing is correct.
+if (( ${fast%%.*} > 0 )); then
+  contrib=$(promq "sum(increase(http_requests_total{namespace=\"$NS\",route=\"/{code}\",code=~\"5..\"}[$(( ts1 - ts0 + 60 ))s] @ $ts1)) / clamp_min(sum(increase(http_requests_total{namespace=\"$NS\",route=\"/{code}\"}[1h] @ $ts1)), 1)")
+  note "sıçramanın 5xx'leri 1 saatlik hata oranına tek başına $(awk -v v="$contrib" 'BEGIN{printf "%.2f%%", v*100}') katıyor (hızlı burn eşiği %1,44)"
+  if awk -v v="$contrib" 'BEGIN{exit !(v > 0.0144)}'; then
+    warn "ölçüm yapılamadı: 1 saatlik pencerede sıçramayı seyreltecek trafik yok — sıçrama bütçeyi gerçekten"
+    warn "14,4 kat hızla yaktı, hızlı burn-rate'in ateşlemesi burada doğru. Seviye bir süre trafik aldıktan sonra tekrar koş."
+    exit 2
+  fi
+fi
 { awk -v n="${naive%%.*}" -v f="${fast%%.*}" 'BEGIN{exit !(n > 0 && n > f)}'; } \
   && reproduced "kısa sıçramada naive eşik (${naive%%.*}) burn-rate'ten (${fast%%.*}) daha gürültülü — alarm yorgunluğunun kaynağı"
-not_reproduced "alarm farkı ölçülemedi (kurallar yüklendi mi? kubectl -n $NS get prometheusrule)"
+not_reproduced "naive eşik (${naive%%.*}) burn-rate'ten (${fast%%.*}) gürültülü değil — kurallar yüklü mü? kubectl -n $NS get prometheusrule"

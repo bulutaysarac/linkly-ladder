@@ -50,7 +50,7 @@ note "yetkisiz pod'dan sonuç:"; echo "${logs:-<log alınamadı>}" | sed 's/^/  
 step "Yetkili bir pod (redirect) aynı şeyi yapabiliyor mu?"
 rp=$(dep_pod app.kubernetes.io/name=redirect) || exit 2   # bağımlılık hazır değilse ölçüm anlamsız
 note "redirect pod'u zaten DB'ye bağlı (uygulama çalışıyor) → izin listesi doğru"
-note "Grafana'da görünmez: paket CNI'da düşer, uygulama hiçbir şey görmez; 'Ağ politikası hataları (Calico)' paneli boş (felix kazınmıyor)."
+note "Grafana'da görünmez: paket CNI'da düşer, uygulama hiçbir şey görmez; Calico'nun (felix) metrikleri de kazınmıyor."
 note "Varsayılan-reddet, soruyu değiştirir: 'neyi engellemeliyim?' (sonsuz, hep birini kaçırırsın)"
 note "yerine 'ne neyle konuşmalı?' (sonlu, gözden geçirilebilir ve mimariyi BELGELER)."
 note "Dikkat: NetworkPolicy yalnızca CNI destekliyorsa çalışır — bu cluster Calico kullanıyor."

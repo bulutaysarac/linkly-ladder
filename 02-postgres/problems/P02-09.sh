@@ -5,7 +5,7 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # ayrı bir ayardır ve varsayılan değildir. Üstelik bu dosya git'te düz metin duruyor.
 ensure_healthy
 step "1) Git deposunda düz metin var mı?"
-if grep -rn 'POSTGRES_PASSWORD\|linkly:linkly@' "$(dirname "$0")/../deploy/" 2>/dev/null | head -3 | sed 's/^/    /' | grep -q .; then
+if grep -rn 'POSTGRES_PASSWORD\|linkly:linkly@' "$(level_deploy_dir)/" 2>/dev/null | head -3 | sed 's/^/    /' | grep -q .; then
   warn "parola manifest dosyasında düz metin — repoyu klonlayan herkes görüyor"
   ingit=1
 else

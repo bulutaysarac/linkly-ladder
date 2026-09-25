@@ -8,7 +8,6 @@ APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
 on_cleanup "setenv "$(wl redirect)" TRACE_SAMPLE_PCT=5"
 measure() {
-  kubectl -n "$NS" rollout status "$(wl redirect)" --timeout=180s >/dev/null 2>&1 || true
   for _ in $(seq 1 20); do serving && break; sleep 2; done
   k6run redirect --vus 30 --duration 40s >/dev/null 2>&1 || true
   sleep 15
@@ -27,10 +26,12 @@ measure() {
   echo "$cpu $mem $spans"
 }
 step "(1) %5 sampling (varsayılan)"
+settle_rollout "$(wl redirect)"   # measure bir $( ) içinde koşar: bekleme (notu ve exit 2'si) DIŞARIDA
 read -r c5 m5 s5 <<< "$(measure)"
 note "%5: kabul edilen span=${s5%%.*} · Alloy CPU tepe=$(awk -v v="$c5" 'BEGIN{printf "%.2f", v}') çekirdek · bellek tepe=$(( ${m5%%.*} / 1024 / 1024 )) MB"
 step "(2) %100 sampling"
 setenv "$(wl redirect)" TRACE_SAMPLE_PCT=100 >/dev/null
+settle_rollout "$(wl redirect)"   # measure bir $( ) içinde koşar: bekleme (notu ve exit 2'si) DIŞARIDA
 read -r c100 m100 s100 <<< "$(measure)"
 note "%100: kabul edilen span=${s100%%.*} · Alloy CPU tepe=$(awk -v v="$c100" 'BEGIN{printf "%.2f", v}') çekirdek · bellek tepe=$(( ${m100%%.*} / 1024 / 1024 )) MB"
 grafana_hint "15 · k6 → 'Gönderilen istek / sn' (iki eşit faz) · Explore → otelcol_receiver_accepted_spans_total (Alloy 'monitoring' namespace'inde; 01 · Pods & Resources onu gösteremez)"
@@ -42,6 +43,13 @@ note "hata saniyede birden azsa hiçbirini görmeyebilirsin."
 note "Çözüm tail sampling: karar trace BİTTİKTEN sonra verilir (yavaşsa/hatalıysa sakla). Bedeli:"
 note "collector her span'i trace bitene kadar TAMPONLAR — gerçek bellek, gerçek karmaşıklık."
 note "Ara yol: hata/yavaşlık durumunda üretici tarafında zorla örnekleme (AlwaysSample + kural)."
+# İKİ FAZ DA SIFIRSA ÖLÇÜ YOK: span alıcısı (Alloy) kurulu değil ya da kazınmıyor. "Fark yok" demek,
+# sampling hakkında değil ölçüm hattı hakkında bir cümle olurdu. (Alloy yalnızca 11'in profilinde açık.)
+if awk -v a="$s5" -v b="$s100" 'BEGIN{exit !(a+0 == 0 && b+0 == 0)}'; then
+  warn "ölçüm yapılamadı: iki fazda da kabul edilen span 0 — Alloy (OTLP alıcısı) kurulu ve kazınıyor mu?"
+  warn "kubectl -n monitoring get pods | grep alloy · platform/manifests/obs-servicemonitors.yaml"
+  exit 2
+fi
 awk -v a="$s5" -v b="$s100" 'BEGIN{exit !(b > a*3)}' \
   && reproduced "%100 sampling span hacmini ${s5%%.*} → ${s100%%.*} yaptı ($(awk -v a="$s5" -v b="$s100" 'BEGIN{printf "%.1f", (a>0? b/a : 0)}')×); Alloy CPU $(awk -v v="$c5" 'BEGIN{printf "%.2f", v}') → $(awk -v v="$c100" 'BEGIN{printf "%.2f", v}') çekirdek, bellek $(( ${m5%%.*} / 1024 / 1024 )) → $(( ${m100%%.*} / 1024 / 1024 )) MB"
 not_reproduced "span hacmi farkı ölçülemedi (%5=${s5%%.*} · %100=${s100%%.*}) — otelcol_receiver_accepted_spans_total kazınıyor mu? (platform/manifests/obs-servicemonitors.yaml)"

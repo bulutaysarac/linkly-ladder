@@ -156,7 +156,11 @@ func (c *Collector) loop() {
 	// TR: Yazmadan önce topla. Aynı koda gelen bin tıklama, bin değil TEK satır güncellemesi olur.
 	//     P02-08'deki sıcak satır kilidini sorun olmaktan çıkaran şey bu: anahtar ne kadar sıcaksa
 	//     toplama oranı o kadar iyi.
-	batch := make(map[string]int64, c.cfg.BatchSize)
+	// Kapasite ipucu YOK: parti OLAY sayısıyla sınırlanır (BatchSize) ama harita KOD sayısı kadar büyür —
+	// sıcak bir anahtarda bir avuç. Olay sayısı kadar yer ayırmak belleği boşa harcar; büyük bir parti
+	// boyunda (ör. yazmayı fiilen durdurmak için 100 milyon, P05-03) pod'u ilk satırda OOM'a götürür.
+	// EN: no capacity hint — the batch is bounded by EVENTS but the map grows with distinct CODES.
+	batch := map[string]int64{}
 	n := 0
 	flush := func() {
 		if n == 0 {
@@ -174,7 +178,7 @@ func (c *Collector) loop() {
 		} else {
 			c.m.Events.WithLabelValues("written").Add(float64(n))
 		}
-		batch = make(map[string]int64, c.cfg.BatchSize)
+		batch = map[string]int64{}
 		n = 0
 	}
 

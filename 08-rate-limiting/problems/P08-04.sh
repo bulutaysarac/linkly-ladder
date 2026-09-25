@@ -25,6 +25,14 @@ note "pencere=${win:-10s} · IP başına limit=$LIM"
 # EN: the limiter is shared (Redis) but the decision counter is per-pod. Sampling one pod out of
 # three measures a third of the accepted requests, while the question is about the TOTAL.
 on_cleanup "scale 2"   # manifest 2 replika ilan ediyor
+# TEK POD: saniyelik kabul sayısı tek pod'un sayacından okunur. HPA'nın tabanı 2'dir ve elle 1'e
+# indirilen replikayı geri çıkarır — o zaman okunan sayı yükün yalnızca bir payı olur. Deney boyunca
+# taban 1'e sabitlenir, sonunda eski değerine döner.
+orig_min=$(kubectl -n "$NS" get hpa redirect -o jsonpath='{.spec.minReplicas}' 2>/dev/null) || true
+if [[ -n "$orig_min" ]]; then
+  on_cleanup "kubectl -n \"$NS\" patch hpa redirect --type=merge -p '{\"spec\":{\"minReplicas\":$orig_min}}' >/dev/null"
+  kubectl -n "$NS" patch hpa redirect --type=merge -p '{"spec":{"minReplicas":1}}' >/dev/null
+fi
 kubectl -n "$NS" scale "$(wl redirect)" --replicas=1 >/dev/null; wait_endpoints 1; sleep 3
 # LİMİT, DENEYİN BİR PARAMETRESİDİR. Tek pod bu kümede 400 rps'i servis edemiyor; yük limitin
 # (300/10 sn = 30 rps) ÜSTÜNE hiç çıkmıyor ve reddedilen istek 0 kalıyor — yani pencere sınırı
@@ -44,7 +52,13 @@ note "deney için IP limiti geçici olarak $LIM/${WIN_S}s yapıldı (manifest de
 # bu yüzden sayaç farkını doğrudan pod'un /metrics ucundan, saniyede bir örnekleyerek alıyoruz.
 measure_peak() {
   local pod out
-  pod=$(kubectl -n "$NS" get pods -l "$APP_SELECTOR" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) || true
+  # Ayar değişikliğinden hemen sonra eski pod hâlâ listededir (kapanıyor ama silinmedi); onu
+  # örneklemek, örneklerin çoğunu kaybettirir ve kabul 0 görünür. Tek hazır adresi bekle, hazır ve
+  # kapanmayan pod'u seç.
+  wait_endpoints 1
+  pod=$(kubectl -n "$NS" get pods -l "$APP_SELECTOR" -o json 2>/dev/null | jq -r '[.items[]
+          | select(.metadata.deletionTimestamp == null)
+          | select(any(.status.containerStatuses[]?; .ready)) | .metadata.name][0] // empty') || true
   [[ -z "$pod" ]] && { echo 0; return; }
   out=$(mktemp)
   ( k6run burst >/dev/null 2>&1 || true ) &

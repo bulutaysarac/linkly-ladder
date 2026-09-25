@@ -6,17 +6,23 @@ source "${LADDER_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}/platform/lib/repro.
 # verdiğini gösteriyor. Aradaki fark, bir gecelik nöbetle bir kahve molası arasındaki farktır.
 APP_SELECTOR="app.kubernetes.io/name=redirect"
 ensure_healthy
+# HER FAZ KENDİ PENCERESİNİ OKUR. Sabit [2m], taban fazına bir önceki deneyin kuyruğunu da katar
+# (ör. aşırı yük testinden kalan saniyelik gecikmeler): taban gecikmeli fazdan yüksek çıkar ve fark ters döner.
+# EN: each phase reads its own window; a fixed [2m] drags the previous experiment's tail into the baseline.
+phase_p99() { promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[$(( $(date +%s) - $1 ))s])) by (le))"; }
 step "Önce temiz taban"
+t0=$(date +%s)
 k6run redirect --vus 20 --duration 30s >/dev/null 2>&1 || true
 sleep 10
-base=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le))")
+base=$(phase_p99 "$t0")
 note "taban p99=$(awk -v v="$base" 'BEGIN{printf "%.0f", v*1000}') ms"
 step "Gizli bir gecikme enjekte ediliyor (hangi bağımlılık olduğunu SÖYLEMİYORUZ)"
 chaos_apply redis-delay-200ms
 sleep 5
+t1=$(date +%s)
 k6run redirect --vus 20 --duration 40s >/dev/null 2>&1 || true
 sleep 12
-slow=$(promq "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace=\"$NS\",route=\"/{code}\"}[2m])) by (le))")
+slow=$(phase_p99 "$t1")
 note "şimdi p99=$(awk -v v="$slow" 'BEGIN{printf "%.0f", v*1000}') ms — metrik sana BU KADARINI söylüyor"
 step "Metrikle teşhis denemesi: bağımlılık bazlı gecikmeler"
 # Her bağımlılığın kendi guard'ı ve `dep` etiketi var: Redis postgres guard'ının İÇİNDE ölçülseydi
@@ -24,7 +30,7 @@ step "Metrikle teşhis denemesi: bağımlılık bazlı gecikmeler"
 # söyler, ama yalnızca önceden ölçmeyi düşündüğün kapıları; tek bir isteğin adımlarını değil.
 # EN: Redis has its own guard; timed inside the postgres one, this delay would show up as dep="postgres".
 curl -sG "$PROM_URL/api/v1/query" --data-urlencode \
-  "query=histogram_quantile(0.99, sum(rate(dependency_request_duration_seconds_bucket{namespace=\"$NS\"}[2m])) by (le, dep))" \
+  "query=histogram_quantile(0.99, sum(rate(dependency_request_duration_seconds_bucket{namespace=\"$NS\"}[$(( $(date +%s) - t1 ))s])) by (le, dep))" \
   | jq -r '.data.result[] | "    \(.metric.dep): \((.value[1]|tonumber*1000)|floor) ms"' 2>/dev/null || true
 step "Trace ile teşhis: exemplar'dan tek bir yavaş isteğe atla"
 # Exemplar yalnızca ÖRNEKLENMİŞ isteklerde var (%5): her nokta Tempo'da gerçekten bulunan bir trace.

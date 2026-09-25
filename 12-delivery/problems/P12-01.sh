@@ -24,13 +24,22 @@ sleep 15
 setenv rollout/redirect BAD_VERSION_ERROR_PCT=25 >/dev/null
 note "canary başladı: 1 canary pod'u 3 stable'ın yanına ekleniyor → trafiğin ~1/4'ü kötü sürüme gidiyor"
 note "(trafik yönlendirici yok: setWeight 10 pod sayısıyla yaklaşık tutulur). Analiz 30 sn sonra ilk ölçümü alır."
+# "HEALTHY" ANCAK CANARY GÖRÜLDÜKTEN SONRA BİR SONUÇTUR. Ayar yazıldıktan hemen sonra kontrolcü durumu
+# henüz güncellemedi: ilk okumalar ESKİ sürümün "Healthy"sidir. Onu "rollout tamamlandı" saymak, analiz
+# daha başlamadan "kötü sürüm geçti" demektir. Durdurma da iki yerden okunur: faz Degraded ya da
+# mesaj RolloutAborted (abort sonrası faz, stable'a dönüldüğü için yeniden Healthy görünebilir).
+# EN: right after the change the controller still reports the OLD revision's Healthy; only a Healthy
+#     seen after the canary appeared means "promoted". An abort shows as Degraded or RolloutAborted.
 phase=""; aborted=0; canary=""
 for i in $(seq 1 45); do
   cur=$(kubectl -n "$NS" get rollout redirect -o jsonpath='{.status.currentPodHash}' 2>/dev/null) || true
   [[ -n "$cur" && "$cur" != "${stable:-}" ]] && canary=$cur
   phase=$(kubectl -n "$NS" get rollout redirect -o jsonpath='{.status.phase}' 2>/dev/null) || true
-  [[ "$phase" == "Degraded" ]] && { aborted=1; note "  → analiz BAŞARISIZ: rollout $((i*4)) sn içinde durduruldu"; break; }
-  [[ "$phase" == "Healthy" ]] && { note "  → rollout tamamlandı (analiz geçti?)"; break; }
+  rmsg=$(kubectl -n "$NS" get rollout redirect -o jsonpath='{.status.message}' 2>/dev/null) || true
+  if [[ "$phase" == "Degraded" || "$rmsg" == *RolloutAborted* ]]; then
+    aborted=1; note "  → analiz BAŞARISIZ: rollout ~$((i*4)) sn içinde durduruldu"; break
+  fi
+  [[ "$phase" == "Healthy" && -n "$canary" ]] && { note "  → rollout tamamlandı: yeni sürüm stable oldu (analiz geçti)"; break; }
   sleep 4
 done
 wait $kpid || true

@@ -29,10 +29,30 @@ on_cleanup "setenv $(app_workload) ANALYTICS_FLUSH_INTERVAL- ANALYTICS_BATCH_SIZ
 
 # Bu fazın pod'ları: yalnızca TAZE, hazır uygulama pod'ları. Ölçü onlarla sınırlanır, yoksa önceki fazın
 # ölen pod'larının son yazmaları pencereye sızar.
+# Fazın pod'ları AYARIYLA seçilir: rollout sürerken eski ayarla çalışan pod'lar da hazırdır ve
+# kapanmamıştır. Onları A'ya saymak, "yazıcı durduruldu" fazına çalışan bir yazıcıyı katar.
+# $1 = A (ANALYTICS_FLUSH_INTERVAL=1h) | B (varsayılan); $2 = "diğer" ise ters fazın pod'ları.
 phase_pods() {
   kubectl -n "$NS" get pods -l "app.kubernetes.io/name=$(app_name)" -o json 2>/dev/null \
-    | jq -r '[.items[] | select(.metadata.deletionTimestamp == null)
-              | select(any(.status.containerStatuses[]?; .ready)) | .metadata.name] | join("|")'
+    | jq -r --arg ph "$1" --arg inv "${2:-}" '[.items[] | select(.metadata.deletionTimestamp == null)
+              | select(any(.status.containerStatuses[]?; .ready))
+              | (any(.spec.containers[0].env[]?; .name == "ANALYTICS_FLUSH_INTERVAL" and .value == "1h")) as $a
+              | select((($a == ($ph == "A")) and $inv == "") or (($a != ($ph == "A")) and $inv != ""))
+              | .metadata.name] | join("|")'
+}
+# Bütün hazır pod'lar fazın ayarına geçene kadar bekle (en çok 3 dk). Geçmezse NEDENİNİ söyle: yeni
+# pod'lar hazır olamıyorsa (ör. OOMKilled) sebep o pod'ların son sonlanmasındadır.
+wait_phase() {
+  for _ in $(seq 1 60); do
+    [[ -z "$(phase_pods "$1" diğer)" && -n "$(phase_pods "$1")" ]] && return 0
+    sleep 3
+  done
+  local why
+  why=$(kubectl -n "$NS" get pods -l "app.kubernetes.io/name=$(app_name)" -o json 2>/dev/null \
+    | jq -r '[.items[] | select(.metadata.deletionTimestamp == null) | select(any(.status.containerStatuses[]?; .ready) | not)
+              | "\(.metadata.name): \(.status.containerStatuses[0].lastState.terminated.reason // .status.containerStatuses[0].state.waiting.reason // "hazır değil")"] | join(", ")') || true
+  [[ -n "$why" ]] && warn "hazır olmayan pod'lar: $why"
+  return 1
 }
 # Faz ölçüsü → "p99 acq wq batch" (saniye, saniye, sorgu/s, saniye)
 read_phase() {
@@ -48,7 +68,8 @@ ms() { awk -v v="$1" 'BEGIN{printf "%.2f", v * 1000}'; }
 step "A · yazıcının DB işi DURDURULDU (flush 1 sa, parti 100 M) — aynı yük: hot-key 80 VU, $PHASE"
 setenv "$(app_workload)" ANALYTICS_FLUSH_INTERVAL=1h ANALYTICS_BATCH_SIZE=100000000 >/dev/null
 settle_rollout "$(app_workload)"
-podsA=$(phase_pods || true)
+wait_phase A || { warn "A fazının ayarı 3 dk'da bütün pod'lara yayılmadı"; exit 2; }
+podsA=$(phase_pods A || true)
 [[ -n "$podsA" ]] || { warn "A fazı için hazır uygulama pod'u yok"; exit 2; }
 k6run hot-key --vus 80 --duration "$PHASE" >/dev/null 2>&1 || true
 reqA=$(k6_reqs)
@@ -58,7 +79,8 @@ read -r p99A acqA wA batchA <<< "$(read_phase "$podsA")"
 step "B · yazıcı VARSAYILAN hâlinde (flush 1 sn, parti 500) — aynı yük, taze pod'lar"
 setenv "$(app_workload)" ANALYTICS_FLUSH_INTERVAL- ANALYTICS_BATCH_SIZE- >/dev/null
 settle_rollout "$(app_workload)"
-podsB=$(phase_pods || true)
+wait_phase B || { warn "B fazının ayarı 3 dk'da bütün pod'lara yayılmadı"; exit 2; }
+podsB=$(phase_pods B || true)
 [[ -n "$podsB" ]] || { warn "B fazı için hazır uygulama pod'u yok"; exit 2; }
 k6run hot-key --vus 80 --duration "$PHASE" >/dev/null 2>&1 || true
 reqB=$(k6_reqs)

@@ -10,7 +10,7 @@ ensure_healthy
 step "Git'te düz metin sır var mı?"
 # Düz metin sır BULUNAMAMASI bu scriptin NOT-REPRODUCED yoludur; `|| true` olmadan grep'in 1
 # dönmesi pipefail ile atamayı düşürür ve set -e'yi tetiklerdi — yani iyi haber scripti öldürürdü.
-hits=$(grep -rn 'API_KEYS:\|POSTGRES_PASSWORD:\|linkly:linkly@' "$(dirname "$0")/../deploy/" 2>/dev/null | grep -v 'secretKeyRef' | head -4 || true)
+hits=$(grep -rn 'API_KEYS:\|POSTGRES_PASSWORD:\|linkly:linkly@' "$(level_deploy_dir)/" 2>/dev/null | grep -v 'secretKeyRef' | head -4 || true)
 echo "${hits:-    (bulunamadı)}" | sed 's/^/    /'
 step "sealed-secrets controller kurulu mu?"
 sc=$(kubectl -n kube-system get pods -l app.kubernetes.io/name=sealed-secrets --no-headers 2>/dev/null | awk '{print $1, $3}') || true

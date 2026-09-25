@@ -322,7 +322,8 @@ Güven sınırını yazıya dök: kaç proxy var, hangisi senin? Gerisi **veridi
 
 **Reproduce (adım adım):**
 
-Otomatik — ölçer ve hüküm basar: `make repro P=P08-04` (redirect'i tek pod'a indirir, IP limitini geçici olarak
+Otomatik — ölçer ve hüküm basar: `make repro P=P08-04` (redirect'i tek pod'a indirir — HPA'nın tabanı 2 olduğu için
+deney boyunca tabanı 1'e sabitler, sonunda geri alır; sayaç tek pod'dan, hazır ve kapanmayan pod'dan okunur —, IP limitini geçici olarak
 60 / 10 sn'ye çeker — `LIM_TEST` ile değişir —, önce kayan sonra sabit pencereyle `burst` koşar; pod'un `/metrics`
 ucunu saniyede bir okuyup 10 sn'lik en yoğun aralıkta kabul edilen isteği iki mod için basar). Yük sınıra
 dayanmazsa daha sert tepe: `PEAK=800 make repro P=P08-04`.

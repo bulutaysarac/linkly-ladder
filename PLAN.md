@@ -429,7 +429,7 @@ kendisi bir bağımlılık.
 | P04-04 | **TRAP_NO_TTL_JITTER**: deploy sonrası tüm anahtarlar aynı anda dolar → DB tepe | bayrak; 60 s bekle | DB qps periyodik tepe | seviye içi |
 | P04-05 | Cache-aside yarışı: okuma-doldurma sürerken silinen kayıt önbelleğe bayat olarak geri yazılır | `TRAP_READ_FILL_DELAY_MS` ile pencereyi büyüt, doldurma sırasında DELETE | stale redirect sayısı | tartışma (versiyonlu anahtar) |
 | P04-06 | `maxmemory` + `noeviction` → `OOM command not allowed` → yazmalar sessizce durur | `maxmemory` 4 MB'a indir, ~6 KB'lık URL'lerle doldur | `redis_memory_used_bytes` tavan, `cache_load_error` | seviye içi (`allkeys-lru`) |
-| P04-07 | **TRAP_DEBUG_KEYS**: `/debug/keys` → `KEYS *` Redis'i kilitler, tüm redirect'ler bekler | ~4000 anahtar seed, uca paralel çağrı | Redis latency tepe | seviye içi (`SCAN`/sayaç) |
+| P04-07 | **TRAP_DEBUG_KEYS**: `/debug/keys` → `KEYS *` Redis'i kilitler, tüm redirect'ler bekler | Redis'e 300 bin anahtar (Lua, tek komut), yük altında uç 20 sn boyunca aralıksız çağrılır | Redis latency tepe | seviye içi (`SCAN`/sayaç) |
 
 ---
 
@@ -533,7 +533,7 @@ okuma/yazma ayrımı, günlük partition'lar. Yedek/PITR bilerek yapılandırıl
 | ID | Sorun | Reproduce | Grafana'da | Çözüm |
 |---|---|---|---|---|
 | P09-01 | Replikasyon gecikmesi → **read-your-writes ihlali**: oluştur → hemen redirect → 404 | replikada `pg_wal_replay_pause()` + `TRAP_NO_STICKY` + `k6 read-your-writes` | RYW ihlal sayacı, lag | seviye içi (sticky okuma penceresi) |
-| P09-02 | Failover penceresi: primary ölür → 10–30 s yazma hatası; app'in yeniden bağlanması | `delete pod <primary>` | write error oranı, promote olayı | 10 (retry + idempotency) |
+| P09-02 | Failover penceresi: primary ölür → 10–30 s yazma hatası ya da asılı kalan yazma; app'in yeniden bağlanması | `delete pod <primary>` | 5xx, yazma p99, küme durumu (healthy → failing over → healthy) | 10 (retry + idempotency) |
 | P09-03 | **TRAP_PREPARED_STATEMENTS**: transaction pooling + pgx prepared statements → `prepared statement … does not exist` | bayrakla Pooler üzerinden | 500 oranı | seviye içi (`default_query_exec_mode=exec`) |
 | P09-04 | Uzun okuma replikada iptal: `canceling statement due to conflict with recovery` | uzun list + yoğun yazma | hata logu | tartışma (`hot_standby_feedback`) |
 | P09-05 | Silme pahalı: partition'sız retention | eski günleri `DELETE` ile vs partition `DROP` ile sil | süre, WAL, dead tuple | seviye içi (partition) |
@@ -601,7 +601,7 @@ ama bilerek bir Application'a bağlanmaz: P12-03, sürekli karşılaştırma, se
 |---|---|---|---|---|
 | P12-01 | Kötü sürüm rolling update ile %100'e gider | `BAD_VERSION_ERROR_PCT=25` ile yeni sürüm, yük altında | hata oranı | canary + analiz → otomatik geri alma |
 | P12-02 | Kırıcı migration (kolon rename) rolling update sırasında eski pod'ları kırar | yük altında `ALTER TABLE links RENAME COLUMN url TO url_old` | 500'ler pencere | seviye içi (expand/contract) |
-| P12-03 | Drift: elle yapılan değişiklik — kimse karşılaştırmaz, sessizce geri alınır | replicas'ı elle değiştir, sonra yeniden apply | "Git ile uyumsuz uygulamalar" boş (Application yok) | Argo CD (kurulu, bağlanmamış) |
+| P12-03 | Drift: elle yapılan değişiklik — kimse karşılaştırmaz, sessizce geri alınır | replicas'ı elle değiştir, sonra yeniden apply | "Hazır pod (sürüme göre)" 3 → 5 → 3; drift'in kendisi görünmez (Application yok) | Argo CD (kurulu, bağlanmamış) |
 | P12-04 | `:latest` etiketi → belirsiz, geri alınamaz sürüm (doğrulama scripti: merdiven içerik hash'li etiket kullanır) | latest ile deploy | — | 13 (Kyverno) |
 | P12-05 | Canary + cache anahtar formatı değişimi → karışık davranış | v2 anahtar öneki | cache miss tepe | tartışma (uyumlu anahtar) |
 | P12-06 | App geri alındı, migration geri alınmadı | P12-02 sonrası rollback | — | tartışma + runbook |

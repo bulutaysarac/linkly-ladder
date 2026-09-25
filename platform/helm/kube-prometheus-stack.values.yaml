@@ -65,12 +65,12 @@ prometheus:
     ingressClassName: nginx
     hosts: [prometheus.localtest.me]
   prometheusSpec:
-    # ÖLÇÜLDÜ: 6 CPU / 10 GB'lık bu VM'de 15 sn'lik scrape + 2 günlük saklama ile Prometheus
-    # tek başına ~880 MB ve %64 CPU yiyor; küme takla atıyor (node'lar NotReady, controller
-    # manager lider kiralamasını kaybediyor). Gözlemlenebilirlik yığınının da bir KAPASİTESİ
-    # vardır ve o kapasite, gözlediği sistemle aynı bütçeden çıkar — P11-05'in dersi, burada
-    # platformun kendisinde. Merdiven kısa deneyler koştuğu için 2 gün saklamaya gerek yok.
-    retention: 6h
+    # SAKLAMA 48 SAAT, EN ÇOK 6 GB. Tam tur (00 → 14, tools/full-run.sh) 8-12 saat sürer ve sonuçları
+    # sonradan saat aralığıyla incelenir; saklama bundan kısa olursa turun başı incelenmeden silinir.
+    # Bellek saklama süresine değil aktif seri sayısına bağlıdır (eski bloklar diskte durur); CPU'yu
+    # belirleyen kazıma aralığıdır (uygulama 10 sn, küme 30 sn). Disk tavanı PVC'yi (8 Gi) korur.
+    retention: 48h
+    retentionSize: 6GB
     scrapeInterval: 30s
     evaluationInterval: 15s
     enableRemoteWriteReceiver: true          # k6 -o experimental-prometheus-rw

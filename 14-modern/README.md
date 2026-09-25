@@ -523,7 +523,7 @@ kümeyi ölçüyor, uygulamayı değil — game day'i küme sakinken tekrar et.
 - "Uygulama → Redis gecikmesi (p99)" (06 · Redis) → aynı ~200 ms platosu, yalnızca Redis için: uygulamanın gördüğü gecikme. Script tepe değeri de basar (`redis=… ms`).
 - "Şu an işlenen istek (pod'a göre)" → Redis gecikmesiyle (00:15) yükselir ama yük atma eşiğinin (`SHED_MAX_INFLIGHT=200`) çok altında kalır; bu yüzden "Atılan yük / sn" düz kalabilir. "Hazır pod adresi (endpoint) sayısı" → 01:15'te bir basamak iner, yeni pod hazır olunca geri çıkar.
 - "İstek / saniye (durum koduna göre)" (App RED) ile "Dönen durum kodları" (k6) → uygulamanın saydığı 5xx ile istemcinin gördüğü 5xx'i yan yana koy: aradaki fark, araya giren bir katmanın (ingress, hazır pod'u kalmamış servis) cevabıdır. Bkz. [Grafana'yı okumak](../README.md#grafanayı-okumak).
-- Explore'da: `slo:period_error_budget_remaining:ratio{namespace="lvl14",sloth_slo="redirect-availability"}` → game day'in 5xx'leri kalan bütçeyi aşağı çeker; `12 · SLO` → "Kalan hata bütçesi" aynı seriyi çizer (kayıt kuralları `namespace` etiketini taşır). Pencere 30 gün yazılı ama Prometheus yalnızca 6 saat tutuyor: değer, eldeki birkaç saatin bütçesidir ve önceki deneylerin izi de içindedir (eksi olabilir).
+- Explore'da: `slo:period_error_budget_remaining:ratio{namespace="lvl14",sloth_slo="redirect-availability"}` → game day'in 5xx'leri kalan bütçeyi aşağı çeker; `12 · SLO` → "Kalan hata bütçesi" aynı seriyi çizer (kayıt kuralları `namespace` etiketini taşır). Pencere 30 gün yazılı ama Prometheus yalnızca 48 saat tutuyor: değer, eldeki birkaç saatin bütçesidir ve önceki deneylerin izi de içindedir (eksi olabilir).
 
 **Bu bir test değil, bir provadır:** amacı geçmek değil, hangi korumanın ne zaman devreye
 girdiğini **görmek** ve runbook'u buna göre yazmak. *Tek tek çalışan korumaların birlikte nasıl
@@ -554,8 +554,7 @@ Elle denemeye değer:
 Bu seviyede neredeyse hepsi dolu — merdivenin ilk bakışta en görünür kazancı bu. 00'da yalnızca
 `Pods & Resources` ve `k6` doluydu. Bilinen boşluklar, sebepleriyle: `05 · Postgres`'in
 postgres_exporter panelleri (CNPG'de exporter yok; havuz ve sorgu panelleri uygulamadan geldiği için
-dolu), `14 · Security` → "Ağ politikası hataları (Calico)" (felix kazınmıyor) ve `13 · Rollout` →
-"Git ile uyumsuz uygulamalar (Argo CD)" (Application tanımlı değil, P12-03).
+dolu).
 `13 · Rollout`'un sürüme göre panelleri pod şablonu hash'iyle ayrılır (stable hash:
 `kubectl -n lvl14 get rollout redirect -o jsonpath='{.status.stableRS}'`); `11 · Resilience` →
 "Bağımlılık gecikmesi p99" `postgres` ve `redis`'i ayrı çizer.

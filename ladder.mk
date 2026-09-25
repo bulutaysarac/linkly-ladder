@@ -155,8 +155,10 @@ profile: ## Bu seviyenin platform bileşenlerini aç, gerisini kapat (make up bu
 fresh: ## Grafana'yı temizle: seviyelerin ve k6'nın geçmiş metriklerini sil (make up bunu kendisi yapar)
 	@PROM_URL=$(PROM_URL) SOFT=$(SOFT) $(PLATFORM)/lib/fresh.sh
 
-up: profile ## profil → Grafana'yı temizle → build → push → deploy → wait → smoke
-	@$(MAKE) --no-print-directory fresh SOFT=1
+# FRESH=0: Grafana'yı temizlemeden kur — ardışık seviyelerin (tam tur, tools/full-run.sh) çizgileri
+# aynı zaman ekseninde kalsın, sonradan saat aralığıyla incelenebilsin.
+up: profile ## profil → Grafana'yı temizle → build → push → deploy → wait → smoke  (FRESH=0: temizleme)
+	@[ "$(FRESH)" = 0 ] || $(MAKE) --no-print-directory fresh SOFT=1
 	@$(MAKE) --no-print-directory push deploy wait smoke
 	@echo; echo "✔ $(NS) ayakta → $(BASE_URL)"; echo "  Grafana: $(GRAFANA_URL)/dashboards?query=Ladder  (level=$(NS))"
 

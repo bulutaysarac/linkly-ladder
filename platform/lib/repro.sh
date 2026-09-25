@@ -299,8 +299,37 @@ need_metric() {
 #     çağrılırsa ÖNCEKİ nesli — zaten tamamlanmış — görüp anında döner; script eski pod'ları ölçer
 #     ve tuzağın "etkisi yok" sonucuna varır. Belirtisi "301 modunda: durum=302" gibi bir satırdır.
 #     Önce observedGeneration'ın yetişmesini bekle, sonra rollout'u.
+# ARGO ROLLOUT'TA "HAZIR" CANARY BİTİNCE GELİR. 12+'da redirect bir Rollout: bir ayar değişikliği
+# canary adımlarından ve analizden geçer (~4 dk). `kubectl rollout status` Rollout'u tanımaz, hazır
+# replika sayısı ise canary sürerken de tamdır — ölçüm eski ve yeni sürümün karışımını okur. Beklenen
+# durum: aşama Healthy ve stable sürüm = güncel sürüm. Canary iptal edildiyse pod'lar ESKİ sürümdedir;
+# ölçüm anlamsızdır, script hüküm vermez.
+# EN: for an Argo Rollout, ready means the canary finished: phase Healthy and stableRS == currentPodHash.
+#     An aborted canary leaves the OLD version running, so the measurement is skipped.
+settle_argo_rollout() {
+  local w=$1 gen ph st cu i
+  gen=$(kubectl -n "$NS" get "$w" -o jsonpath='{.metadata.generation}' 2>/dev/null || echo 0)
+  for i in $(seq 1 30); do
+    [[ "$(kubectl -n "$NS" get "$w" -o jsonpath='{.status.observedGeneration}' 2>/dev/null)" == "$gen" ]] && break
+    sleep 2
+  done
+  for i in $(seq 1 240); do
+    ph=$(kubectl -n "$NS" get "$w" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+    st=$(kubectl -n "$NS" get "$w" -o jsonpath='{.status.stableRS}' 2>/dev/null || true)
+    cu=$(kubectl -n "$NS" get "$w" -o jsonpath='{.status.currentPodHash}' 2>/dev/null || true)
+    [[ "$ph" == Healthy && -n "$st" && "$st" == "$cu" ]] && break
+    if [[ "$ph" == Degraded ]]; then
+      warn "canary İPTAL edildi: $(kubectl -n "$NS" get "$w" -o jsonpath='{.status.message}' 2>/dev/null | head -c 160) — pod'lar ESKİ sürümde, ölçüm anlamsız"
+      exit 2
+    fi
+    (( i == 1 )) && note "  canary adımları sürüyor ($ph) — yeni sürüm stable olana kadar bekleniyor (analiz ~4 dk)"
+    sleep 2
+  done
+  for i in $(seq 1 30); do serving && break; sleep 2; done
+}
 settle_rollout() {
   local w=$1 gen obs i
+  [[ "$w" == rollout/* ]] && { settle_argo_rollout "$w"; return 0; }
   gen=$(kubectl -n "$NS" get "$w" -o jsonpath='{.metadata.generation}' 2>/dev/null || echo 0)
   for i in $(seq 1 30); do
     obs=$(kubectl -n "$NS" get "$w" -o jsonpath='{.status.observedGeneration}' 2>/dev/null || echo 0)
@@ -488,6 +517,14 @@ serving() {
 
 # Seviyenin İLAN ETTİĞİ replika sayısına dön. Önceki bir deney ölçeği değiştirip bıraktıysa (P00-03 gibi)
 # sonraki deney yanlış tabandan başlar ve başka bir sorunu ölçtüğünü sanır.
+# Deneyin KOŞTUĞU seviyenin deploy/ klasörü. Script dosyasının yeri değil: verify-prev önceki seviyenin
+# scriptlerini bu seviyede koşar ve script'in yanındaki manifest o ÖNCEKİ seviyenindir. Oradan okunan
+# taban (01'de 1 replika) bu seviyeye (02'de 3) uygulanırsa deney, seviyenin çözdüğü sorunu kendisi geri
+# getirir ve "çözüldü" iddiası yanlışlıkla düşer.
+level_deploy_dir() {
+  local d; d=$(ls -d "$LADDER_ROOT/${LEVEL:-}"-*/ 2>/dev/null | head -1)
+  if [[ -n "${LEVEL:-}" && -d "${d%/}/deploy" ]]; then echo "${d%/}/deploy"; else echo "$(dirname "$0")/../deploy"; fi
+}
 ensure_baseline_scale() {
   local want live svc; svc=$(app_name)
   # Manifest'teki replika sayısını, BU scriptin ilgilendiği iş yükünden oku.
@@ -495,7 +532,7 @@ ensure_baseline_scale() {
   # api, analytics) ve alfabetik sırada gelen başkasının sayısını redirect'e uygulamak sessizce
   # yanlış bir tabandan başlamak demek. 12'den sonra redirect Deployment bile değil (Argo
   # Rollout) — kind listesi ona göre.
-  want=$(kubectl kustomize "$(dirname "$0")/../deploy" 2>/dev/null | awk -v want_name="$svc" '
+  want=$(kubectl kustomize "$(level_deploy_dir)" 2>/dev/null | awk -v want_name="$svc" '
     /^kind: (Deployment|Rollout|StatefulSet)$/ { kind=$2; name=""; reps=""; next }
     /^kind: /                                  { kind="";  name=""; reps=""; next }
     kind != "" && /^  name: /                  { if (name == "") name=$2 }
@@ -503,7 +540,7 @@ ensure_baseline_scale() {
     kind != "" && name == want_name && reps != "" { print reps; exit }
   ')
   # Ada göre bulunamadıysa: ilk Deployment (tek servisli seviyeler)
-  [[ -z "$want" ]] && want=$(kubectl kustomize "$(dirname "$0")/../deploy" 2>/dev/null \
+  [[ -z "$want" ]] && want=$(kubectl kustomize "$(level_deploy_dir)" 2>/dev/null \
           | awk '/^kind: Deployment$/{d=1} d&&/^  replicas:/{print $2; exit}')
   [[ -z "$want" ]] && return 0
   live=$(replicas_of)
@@ -608,8 +645,15 @@ ensure_healthy() {
 ensure_fresh_pod() {
   kubectl -n "$NS" delete pod -l "$APP_SELECTOR" --force --grace-period=0 >/dev/null 2>&1 || true
   wait_ready
-  for _ in $(seq 1 20); do serving && break; sleep 2; done
-  serving || { warn "uygulama ayağa kalkmadı — önce 'make up'"; exit 2; }
+  # İKİ ARDIŞIK BAŞARI: zorla silinen pod'un yerine gelen hazır olmadan, `serving` bir an ölen pod'un
+  # açık bağlantısından ya da ingress'in henüz güncellenmemiş endpoint'inden cevap alabilir. Tek bir
+  # başarıya güvenen kontrol hemen ardından düşer ve deney hiç başlamadan "ayağa kalkmadı" der.
+  local ok=0
+  for _ in $(seq 1 45); do
+    if serving; then ok=$((ok + 1)); (( ok >= 2 )) && return 0; else ok=0; fi
+    sleep 2
+  done
+  warn "uygulama ayağa kalkmadı — önce 'make up'"; exit 2
 }
 
 # Ölümcül hata kanıtı: konteyner şu an ölüyse kendi logunda, yeniden başladıysa --previous logunda ara.

@@ -297,7 +297,7 @@ kubectl -n lvl13 delete pod netcheck
 (her `nc` 3 sn zaman aşımını bekler) ve log'da iki satır: `POSTGRES_ENGELLENDI` ve `REDIS_ENGELLENDI`. 3. adımda
 redirect pod'ları `1/1 Running`: izin listesindeki etiketi taşıdıkları için aynı havuza bağlanıyorlar.
 
-**Grafana'da gör:** Grafana'da görünmez — NetworkPolicy paketi CNI seviyesinde (Calico) düşürür; uygulama bunu hiç görmez ve bir metrik üretmez. `14 · Security` → "Ağ politikası hataları (Calico)" paneli bu kümede **boş** kalır: Calico'nun (felix) metrikleri Prometheus'a kazınmıyor — üstelik panelin sorguladığı `felix_int_dataplane_failures` düşürülen paketleri değil dataplane hatalarını sayar. Kanıt terminalde:
+**Grafana'da gör:** Grafana'da görünmez — NetworkPolicy paketi CNI seviyesinde (Calico) düşürür; uygulama bunu hiç görmez ve bir metrik üretmez; Calico'nun (felix) kendi metrikleri de bu kümede Prometheus'a kazınmıyor. Kanıt terminalde:
 - `kubectl -n lvl13 get networkpolicy` → `default-deny-ingress` ve izin listesi (`allow-postgres-from-apps`, `allow-redis-from-apps`, …): kim kiminle konuşuyor, tek bakışta.
 - `make repro P=P13-03` → yetkisiz `netcheck` pod'undan `POSTGRES_ENGELLENDI` ve `REDIS_ENGELLENDI`.
 
@@ -518,7 +518,7 @@ kubectl -n lvl13 run policy-test-noprobe --image=busybox:1.36 --restart=Never --
 taşıyan bir pod geçer — P13-03'teki `netcheck` pod'u bu yüzden bellek limiti ve readinessProbe taşır.
 
 **Grafana'da gör:** [`14 · Security`](http://grafana.localtest.me/d/ladder-security?var-level=lvl13&from=now-15m&to=now&refresh=10s) — script bittikten sonra aç (giriş: admin / ladder)
-- "Politika ihlalleri (Kyverno)" → `linkly-ladder-baseline` adında kısa, alçak bir `fail` tepesi: reddedilen üç deneme (panel 5 dk'lık `rate` çizdiği için tepe yayvan). Panel küme geneli sayar, namespace filtresi yok.
+- "Politika ihlalleri (Kyverno)" → kural başına bir basamak: `disallow-latest-tag`, `require-memory-limit`, `require-probes` çizgileri reddedilen denemeyle belirir ve 1'de durur. Panel bu seviyenin namespace'inde Kyverno başladığından beri reddedilenlerin toplamını çizer; Kyverno metrikleri yaklaşık bir dakika gecikmeyle yayınlar.
 - Çizgi hiç yoksa önce Kyverno'nun kazındığını doğrula (Explore'da `up{namespace="kyverno"}` → `1`). Kanıt her durumda terminalde: `kubectl -n lvl13 run policy-test --image=busybox:latest --restart=Never --dry-run=server` → `admission webhook … denied the request` ve ihlal edilen kural adları.
 
 **Politikaların kaynağı bu merdivenin kendi geçmişi:** P12-04 (`:latest`), P00-08 (bellek limiti),
@@ -609,9 +609,9 @@ Elle denemeye değer:
 
 | Dashboard | Durum | Neden |
 |---|---|---|
-| [`14 · Security`](http://grafana.localtest.me/d/ladder-security?var-level=lvl13&from=now-15m&to=now) | **Dolu** ✨ | Kimlik reddi (yalnızca `401`: bu seviyede `403` üreten yol yok, §5), tehlikeli URL reddi (`private_address_resolved` dahil), Kyverno ihlalleri, 404 taraması. "Ağ politikası hataları (Calico)" boş (felix kazınmıyor) |
+| [`14 · Security`](http://grafana.localtest.me/d/ladder-security?var-level=lvl13&from=now-15m&to=now) | **Dolu** ✨ | Kimlik reddi (yalnızca `401`: bu seviyede `403` üreten yol yok, §5), tehlikeli URL reddi (`private_address_resolved` dahil), Kyverno ihlalleri, 404 taraması |
 | [`10 · Rate limit`](http://grafana.localtest.me/d/ladder-ratelimit?var-level=lvl13&from=now-15m&to=now) | Dolu — **artık kimlikli** | `key_type=tenant` değerleri gerçek kiracılar |
-| [`13 · Rollout`](http://grafana.localtest.me/d/ladder-rollout?var-level=lvl13&from=now-15m&to=now) | Dolu | Sürüme göre paneller pod şablonu hash'iyle ayrılır (12'deki gibi); stable hash: `kubectl -n lvl13 get rollout redirect -o jsonpath='{.status.stableRS}'`. "Git ile uyumsuz uygulamalar (Argo CD)" boş: Application yok |
+| [`13 · Rollout`](http://grafana.localtest.me/d/ladder-rollout?var-level=lvl13&from=now-15m&to=now) | Dolu | Sürüme göre paneller pod şablonu hash'iyle ayrılır (12'deki gibi); stable hash: `kubectl -n lvl13 get rollout redirect -o jsonpath='{.status.stableRS}'`. "Hazır pod (sürüme göre)" her sürümün hazır pod sayısını çizer |
 | [`12 · SLO`](http://grafana.localtest.me/d/ladder-slo?var-level=lvl13&from=now-15m&to=now) · [`11 · Resilience`](http://grafana.localtest.me/d/ladder-resilience?var-level=lvl13&from=now-15m&to=now) | Dolu | "Bağımlılık gecikmesi p99" `postgres` ve `redis`'i ayrı çizer (Redis çağrıları kendi etiketiyle, `dep="redis"`) |
 
 Yeni metrik: `auth_attempts_total{result}` (panel yok — Explore'da). **`invalid` oranındaki ani
