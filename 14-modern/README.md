@@ -32,7 +32,7 @@ flowchart LR
   RS & AS -->|L1 ıskası| RD[("redis<br/>allkeys-lru<br/>+ pub/sub kanalı")]
   RD -.->|"invalidate yayını"| L1 & L1b
   RS & AS -->|L2 ıskası| PGP["pg-pooler-rw/ro"] --> PG[("CNPG: 1 primary + 1 replika")]
-  RS ==>|clicks (3 partition)| K[("redpanda")] ==> CN["analytics ×1-3 (KEDA)"]
+  RS ==>|"clicks (3 partition)"| K[("redpanda")] ==> CN["analytics ×1-3 (KEDA)"]
   CN --> PGP
 ```
 
