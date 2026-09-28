@@ -42,8 +42,7 @@ Hızlı başvuru (komutları tek tek kullan; satır sonu açıklamaları için z
 ```bash
 cd "$LADDER/NN-<ad>"
 make up            # profil → Grafana'yı temizle → build → push → deploy → rollout wait → smoke
-code=$(curl -s -XPOST http://lvlNN.localtest.me/api/links -H 'Content-Type: application/json' -d '{"url":"https://example.com"}' | jq -r .code); echo "$code"
-curl -s -o /dev/null -w '%{http_code} → %{redirect_url}\n' http://lvlNN.localtest.me/$code   # 302 → https://example.com
+make link          # example.com'a kısa link oluştur, yönlendirmeyi dene → 302 · başka adres: make link URL=https://…
 make grafana       # Ladder klasörü, level=lvlNN — giriş: admin / ladder
 make load S=mixed  # aynı senaryolar her seviyede: create redirect mixed hot-key burst abuser read-your-writes stairs scan
 make repro P=PNN-01   # §6'daki bir sorunu otomatik üret → REPRODUCED / NOT-REPRODUCED

@@ -61,8 +61,7 @@ Hızlı başvuru (komutları tek tek kullan; satır sonu açıklamaları için z
 ```bash
 cd "$LADDER/14-modern"
 make up            # profil → Grafana'yı temizle → build → push → deploy → rollout wait → smoke
-code=$(curl -s -XPOST http://lvl14.localtest.me/api/links -H 'Content-Type: application/json' -H 'Authorization: Bearer acme-key-9f2c' -d '{"url":"https://example.com"}' | jq -r .code); echo "$code"
-curl -s -o /dev/null -w '%{http_code} → %{redirect_url}\n' http://lvl14.localtest.me/$code   # 302 → https://example.com
+make link          # example.com'a kısa link oluştur, yönlendirmeyi dene → 302 · API anahtarını kümeden kendisi okur · başka adres: make link URL=https://…
 make grafana       # Ladder klasörü, level=lvl14 — giriş: admin / ladder
 make load S=mixed  # aynı senaryolar her seviyede: create redirect mixed hot-key burst abuser read-your-writes stairs scan
 make repro P=P14-01   # §6'daki bir sorunu otomatik üret → REPRODUCED / NOT-REPRODUCED

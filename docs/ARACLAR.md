@@ -99,7 +99,7 @@ Komutlar seviye numarası taşıyorsa (`lvl07` gibi) o seviye kuruluyken çalı�
 | Dosya | Ne yapar |
 |---|---|
 | `platform/Makefile` | Platformu kurar/durdurur: `make full`, `make stop`, `make start`, `make status`, `make destroy` |
-| `ladder.mk` | Her seviyenin Makefile'ı bunu içe alır: `make up/down/load/repro/chaos/set/reset/grafana …` (`make help`) |
+| `ladder.mk` | Her seviyenin Makefile'ı bunu içe alır: `make up/down/link/load/repro/chaos/set/reset/grafana …` (`make help`) |
 | `Makefile` (kök) | Bütün seviyeler için: `make wipe CONFIRM=1`, `make test`, `make lint`, `make full-run` |
 | `problems/PNN-XX.sh` | Bir sorunu ölçerek üreten script; son satırı `REPRODUCED` / `NOT-REPRODUCED` / `SKIPPED` |
 | `problems/SOLVES` | Önceki seviyenin bu seviyede artık üretilmemesi gereken sorunları (`make verify-prev` denetler) |
@@ -110,6 +110,7 @@ Komutlar seviye numarası taşıyorsa (`lvl07` gibi) o seviye kuruluyken çalı�
 | `platform/lib/wipe.sh` | `make wipe`: bütün seviye verilerini siler, kurulumu korur |
 | `platform/lib/k6run.sh` · `loadtest.sh` | k6'yı seviyeye göre koşar, sonuçları Prometheus'a yazar; 08+'da yükü hız sınırsız girişten yollar |
 | `platform/lib/smoke.sh` | `make up`'ın son adımı: bir link yaratıp 30 kez açar |
+| `platform/lib/link.sh` | `make link`: kısa link oluşturur (varsayılan https://example.com), yönlendirmeyi dener |
 | `platform/dashboards/gen.py` | 16 Grafana panosunu tek kaynaktan üretir |
 | `platform/kind/registry.sh` · `trust-ca.sh` | Yerel registry'yi kümeye bağlar · kurumsal ağın kök sertifikasını düğümlere kurar |
 | `tools/lint-skeleton.sh` · `lint-guide.py` · `lint-grafana.py` | Seviyelerin aynı iskelette kaldığını, README bloklarının yapıştırılabildiğini ve anılan her panelin gerçekten var olduğunu denetler |

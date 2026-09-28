@@ -31,7 +31,7 @@ SERVICES    := $(notdir $(wildcard cmd/*))
 PREV        := $(shell ls -d $(ROOT)/[0-9][0-9]-*/ | sort | awk -v cur="$(ROOT)/$(LEVEL)-$(NAME)/" '$$0==cur{print prev; exit}{prev=$$0}')
 EXPORT_ENV  := NS=$(NS) LEVEL=$(LEVEL) BASE_URL=$(BASE_URL) PROM_URL=$(PROM_URL) GRAFANA_URL=$(GRAFANA_URL) LADDER_ROOT=$(ROOT)
 
-.PHONY: help build push deploy wait smoke profile fresh up down status load repro chaos unchaos grafana set unset env reset logs diff-prev verify-prev test lint
+.PHONY: help build push deploy wait smoke link profile fresh up down status load repro chaos unchaos grafana set unset env reset logs diff-prev verify-prev test lint
 
 help: ## Hedefler
 	@echo "Seviye $(LEVEL) ($(NAME))  namespace=$(NS)  url=$(BASE_URL)  servisler=$(SERVICES)"
@@ -145,6 +145,9 @@ wait: ## Deployment/StatefulSet + (varsa) Argo Rollout hazır olana kadar bekle
 
 smoke: ## POST + GET 30x
 	@$(EXPORT_ENV) $(PLATFORM)/lib/smoke.sh
+
+link: ## Kısa link oluştur ve yönlendirmeyi dene: make link [URL=https://example.com]
+	@$(EXPORT_ENV) LINK_URL='$(URL)' $(PLATFORM)/lib/link.sh
 
 # PROFİL `make up`'IN İLK ADIMI. Yalnızca otomatik turun uyguladığı bir profili elle çalışan
 # biri atlar: 6 çekirdekli VM'de her operatör birden açık kalır ve küme deneyden önce çöker.

@@ -90,6 +90,9 @@ make grafana
 (admin / ladder) → **Dashboards → Ladder** → üstte `level` = `lvl00`. `01 · Pods & Resources` panosunda tek bir
 pod ve 0 restart. 301'in kendisi de 00'ın sorunlarından biri (P00-10); 01'den itibaren 302 döner.
 
+İki `curl` satırının kısa yolu `make link`: linki oluşturur, yönlendirmeyi dener ve ikisini de basar (13+'da API
+anahtarını kendisi ekler; başka bir adres için `make link URL=https://…`).
+
 ### 4. İlk sorunu yaşa (P00-01: eşzamanlı yazma süreci öldürür)
 
 Her seviye README'sinin §6'sı sorunları bu düzende verir. İkinci bir terminal aç, pod'u izle ve açık bırak:
@@ -279,6 +282,7 @@ Hepsi seviyenin klasöründe çalışır (`cd "$LADDER/NN-ad"`); bu liste başvu
 
 ```
 make up        # profil → Grafana'yı temizle → build → push → deploy → rollout → smoke
+make link      # example.com'a kısa link oluştur, yönlendirmeyi dene (başka adres: make link URL=https://…)
 make fresh     # Grafana'yı temizle: geçmiş çizgiler gider, kurulum ve veri kalır (her deneyin ilk adımı)
 make down      # namespace sil
 make status    # pod/servis durumu        ·  make logs  # uygulama logları
