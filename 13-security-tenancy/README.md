@@ -128,16 +128,18 @@ kendisi yapar, ölçer ve hükmünü basar (`REPRODUCED` = sorun var · `NOT-REP
 düzende: **Ne oluyor** → **Neden oluyor** → **Bu deney** → adımlar → **Terminalde ne görmelisin** →
 **Grafana'da gör** (giriş: admin / ladder) → **Nasıl çözülüyor**.
 
-| ID | Ne olur? | Neden olur? | Nasıl çözülür? |
-|---|---|---|---|
-| P13-01 | Anahtarı olmayan biri, isteğine `X-Tenant-ID: acme` başlığını yazarak başka bir kiracının (acme) linkini silebilir | Kiracı kimliği herkesin yazabileceği bir başlıktan okunuyor (bu seviyede yalnızca `TRAP_HEADER_TENANT` tuzağı açıkken) | **13:** kiracı yalnızca gizli API anahtarından çıkarılır, başlık yok sayılır |
-| P13-02 | Bir sorguda "yalnızca bu kiracı" filtresi unutulursa sorgu bütün kiracıların verisini döndürür; hata ya da uyarı çıkmaz | Filtreyi her sorguya uygulamanın kendisi eklemek zorunda; unutmak sessizdir | **13 (deneyde):** filtreyi veritabanı kendisi uygular (satır düzeyi güvenlik — RLS) |
-| P13-03 | Ele geçirilen ya da yanlışlıkla kurulan herhangi bir pod veritabanına ve Redis'e doğrudan bağlanabilir | Kubernetes'te varsayılan olarak her pod her pod'la konuşabilir | **13:** varsayılan olarak her bağlantıyı reddeden ağ kuralı + izin listesi (NetworkPolicy) |
-| P13-04 | API anahtarları ve veritabanı şifresi git'te düz metin; repoyu okuyan herkes görür | Kubernetes Secret'ı yalnızca base64 ile kodlar (şifreleme değil); sırları şifreleyen araç kurulu ama kullanılmıyor | **Kısmen:** sealed-secrets (sırrı şifreleyip git'e koyma) hazır; kullanımı 14 §9'da |
-| P13-05 | İç ağ adresine çözülen bir alan adı (ör. `localtest.me` → 127.0.0.1) kısaltılabilir; tıklayan iç ağa yönlendirilir | Kontrol yalnızca yazılan IP'ye bakar, alan adının hangi IP'ye çözüldüğüne bakmaz (bu seviyede yalnızca `TRAP_NO_DNS_CHECK` açıkken) | **13:** alan adı DNS'ten çözülür, iç adrese çıkıyorsa reddedilir |
-| P13-06 | Var olmayan kodları arka arkaya deneyen biri (tarama) sisteme yük bindirir ve normal trafik içinde zor fark edilir | Her deneme bir 404 ve çoğu zaman bir veritabanı okuması; 404 oranına bakan bir kural yok | **Kısmen:** uzun rastgele kod (01), "bu kod yok" önbelleği (03), hız sınırı (08) |
-| P13-07 | `:latest` etiketli, bellek sınırı ya da sağlık kontrolü (probe) olmayan bir pod kümeye kurulabilir | Bu kurallar yalnızca README'de yazıyor; Kubernetes böyle pod'ları kendiliğinden reddetmez | **13:** Kyverno kuralları kümeye giriş kapısında zorunlu kılar |
-| P13-08 | Konteyner ele geçirilirse imajdaki shell, root yetkisi ve yazılabilir dosya sistemi saldırgana alan açar | Kodun güvenliği, çalıştığı imajın güvenliğiyle sınırlı | **Kısmen (13):** shell'siz imaj, root olmayan kullanıcı, yetkiler kapalı; imaj tarama ve imza 14 §9'da |
+**Kısa komut** deneyi otomatik başlatır; seviyenin klasöründe çalıştır (önce `cd "$LADDER/13-security-tenancy"`).
+
+| ID | Kısa komut | Ne olur? | Neden olur? | Nasıl çözülür? |
+|---|---|---|---|---|
+| P13-01 | `make repro P=P13-01` | Anahtarı olmayan biri, isteğine `X-Tenant-ID: acme` başlığını yazarak başka bir kiracının (acme) linkini silebilir | Kiracı kimliği herkesin yazabileceği bir başlıktan okunuyor (bu seviyede yalnızca `TRAP_HEADER_TENANT` tuzağı açıkken) | **13:** kiracı yalnızca gizli API anahtarından çıkarılır, başlık yok sayılır |
+| P13-02 | `make repro P=P13-02` | Bir sorguda "yalnızca bu kiracı" filtresi unutulursa sorgu bütün kiracıların verisini döndürür; hata ya da uyarı çıkmaz | Filtreyi her sorguya uygulamanın kendisi eklemek zorunda; unutmak sessizdir | **13 (deneyde):** filtreyi veritabanı kendisi uygular (satır düzeyi güvenlik — RLS) |
+| P13-03 | `make repro P=P13-03` | Ele geçirilen ya da yanlışlıkla kurulan herhangi bir pod veritabanına ve Redis'e doğrudan bağlanabilir | Kubernetes'te varsayılan olarak her pod her pod'la konuşabilir | **13:** varsayılan olarak her bağlantıyı reddeden ağ kuralı + izin listesi (NetworkPolicy) |
+| P13-04 | `make repro P=P13-04` | API anahtarları ve veritabanı şifresi git'te düz metin; repoyu okuyan herkes görür | Kubernetes Secret'ı yalnızca base64 ile kodlar (şifreleme değil); sırları şifreleyen araç kurulu ama kullanılmıyor | **Kısmen:** sealed-secrets (sırrı şifreleyip git'e koyma) hazır; kullanımı 14 §9'da |
+| P13-05 | `make repro P=P13-05` | İç ağ adresine çözülen bir alan adı (ör. `localtest.me` → 127.0.0.1) kısaltılabilir; tıklayan iç ağa yönlendirilir | Kontrol yalnızca yazılan IP'ye bakar, alan adının hangi IP'ye çözüldüğüne bakmaz (bu seviyede yalnızca `TRAP_NO_DNS_CHECK` açıkken) | **13:** alan adı DNS'ten çözülür, iç adrese çıkıyorsa reddedilir |
+| P13-06 | `make repro P=P13-06` | Var olmayan kodları arka arkaya deneyen biri (tarama) sisteme yük bindirir ve normal trafik içinde zor fark edilir | Her deneme bir 404 ve çoğu zaman bir veritabanı okuması; 404 oranına bakan bir kural yok | **Kısmen:** uzun rastgele kod (01), "bu kod yok" önbelleği (03), hız sınırı (08) |
+| P13-07 | `make repro P=P13-07` | `:latest` etiketli, bellek sınırı ya da sağlık kontrolü (probe) olmayan bir pod kümeye kurulabilir | Bu kurallar yalnızca README'de yazıyor; Kubernetes böyle pod'ları kendiliğinden reddetmez | **13:** Kyverno kuralları kümeye giriş kapısında zorunlu kılar |
+| P13-08 | `make repro P=P13-08` | Konteyner ele geçirilirse imajdaki shell, root yetkisi ve yazılabilir dosya sistemi saldırgana alan açar | Kodun güvenliği, çalıştığı imajın güvenliğiyle sınırlı | **Kısmen (13):** shell'siz imaj, root olmayan kullanıcı, yetkiler kapalı; imaj tarama ve imza 14 §9'da |
 
 ---
 

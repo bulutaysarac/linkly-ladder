@@ -128,16 +128,21 @@ kendisi yapar, ölçer ve hükmünü basar (`REPRODUCED` = sorun var · `NOT-REP
 düzende: **Ne oluyor** → **Neden oluyor** → **Bu deney** → adımlar → **Terminalde ne görmelisin** →
 **Grafana'da gör** (giriş: admin / ladder) → **Nasıl çözülüyor**.
 
-| ID | Ne olur? | Neden olur? | Nasıl çözülür? |
-|---|---|---|---|
-| P07-01 | Trafik birkaç saniyede 80 katına çıkınca istekler yavaşlar; yeni pod'lar ancak dalga geçtikten sonra gelir | Otomatik ölçekleyici (HPA) CPU'yu 15 sn'de bir ölçüp karar verir; pod'un yerleşmesi, açılması ve hazır olması da sürer — zincir dalgadan uzun | **Bu seviyede:** ölçekleme yavaş büyüyen trafik içindir; ani dalgaya karşı en az pod sayısı (`minReplicas`) yüksek tutulur |
-| P07-02 | Pod sayısı artınca uygulama rahatlar ama veritabanı bağlantıları tükenir; istekler veritabanını bekler | Her yeni pod kendi bağlantı havuzunu açar: toplam 112 bağlantı, veritabanı en fazla 100 kabul eder | **09:** bağlantı havuzlayıcı (PgBouncer) + okuma replikaları |
-| P07-03 | Yük altında yeni eklenen pod'lar eskilerden yavaş cevap verir | "Hazır" sinyali yalnızca "program açıldı" demek; bağlantılar ve önbellek henüz ısınmadı | **Bu seviyede:** açılış kontrolü (`startupProbe`), baştan açık bağlantılar, yeni pod'a trafiği yavaş açmak |
-| P07-04 | CPU grafiği boşta görünürken istekler yavaşlar | CPU limiti bir kotadır: pod her 100 ms'de payını bitirince dilimin sonuna kadar bekletilir (throttling) | **Bu seviyede:** CPU limiti yerine yalnızca CPU isteği (`requests`); bellek limiti kalır |
-| P07-05 | Ölçekleyici 10 pod ister ama bir kısmı hiç çalışmaz, `Pending` bekler | Düğümlerde yer (CPU) kalmadı; ölçekleyici yalnızca sayı ister, yeni makine ekleyen yok | **Bulutta:** yeni düğüm ekleyen küme ölçekleyici (cluster autoscaler) + kapasite planı |
-| P07-06 | 100 linki listeleyen tek istek veritabanına 101 sorgu gönderir; sayfa büyüdükçe yavaşlar | Tuzak (`TRAP_LIST_N_PLUS_ONE`): liste bir sorguyla gelir, sonra her link için ayrı sorgu (N+1) | **Bu seviyede:** tek toplu sorgu (tuzak kapalıyken) · **14:** servisler arası toplu çağrı |
-| P07-07 | Bir sunucu (düğüm) donunca isteklerin bir kısmı dakikalarca takılı kalır | Kubernetes donmuş düğümdeki pod'u hâlâ sağlam sanır ve trafik göndermeye devam eder (40 sn + 5 dk) | **10:** devre kesici + aktif sağlık kontrolü |
-| P07-08 | Yeni sürüm dağıtılırken hata sayısı artabilir | Tuzak (`TRAP_READY_ALWAYS`): pod her zaman "hazırım" der; Kubernetes gerçekten hazır olanı ayıramaz | **Bu seviyede:** tuzak kapalıyken hazır olma kontrolü gerçek durumu söyler |
+**Kısa komut** deneyi otomatik başlatır; seviyenin klasöründe çalıştır (önce
+`cd "$LADDER/07-services-autoscaling"`). Başında `CONFIRM=1` olanlar yıkıcı bir adım içerir (pod silmek, yeniden
+başlatmak, arıza enjekte etmek gibi); bu onay olmadan script o adımı yapmaz ve `SKIPPED` basar. `FREEZE_NODE=1` bir
+worker düğümünü gerçekten dondurur.
+
+| ID | Kısa komut | Ne olur? | Neden olur? | Nasıl çözülür? |
+|---|---|---|---|---|
+| P07-01 | `make repro P=P07-01` | Trafik birkaç saniyede 80 katına çıkınca istekler yavaşlar; yeni pod'lar ancak dalga geçtikten sonra gelir | Otomatik ölçekleyici (HPA) CPU'yu 15 sn'de bir ölçüp karar verir; pod'un yerleşmesi, açılması ve hazır olması da sürer — zincir dalgadan uzun | **Bu seviyede:** ölçekleme yavaş büyüyen trafik içindir; ani dalgaya karşı en az pod sayısı (`minReplicas`) yüksek tutulur |
+| P07-02 | `make repro P=P07-02` | Pod sayısı artınca uygulama rahatlar ama veritabanı bağlantıları tükenir; istekler veritabanını bekler | Her yeni pod kendi bağlantı havuzunu açar: toplam 112 bağlantı, veritabanı en fazla 100 kabul eder | **09:** bağlantı havuzlayıcı (PgBouncer) + okuma replikaları |
+| P07-03 | `make repro P=P07-03` | Yük altında yeni eklenen pod'lar eskilerden yavaş cevap verir | "Hazır" sinyali yalnızca "program açıldı" demek; bağlantılar ve önbellek henüz ısınmadı | **Bu seviyede:** açılış kontrolü (`startupProbe`), baştan açık bağlantılar, yeni pod'a trafiği yavaş açmak |
+| P07-04 | `make repro P=P07-04` | CPU grafiği boşta görünürken istekler yavaşlar | CPU limiti bir kotadır: pod her 100 ms'de payını bitirince dilimin sonuna kadar bekletilir (throttling) | **Bu seviyede:** CPU limiti yerine yalnızca CPU isteği (`requests`); bellek limiti kalır |
+| P07-05 | `CONFIRM=1 make repro P=P07-05` | Ölçekleyici 10 pod ister ama bir kısmı hiç çalışmaz, `Pending` bekler | Düğümlerde yer (CPU) kalmadı; ölçekleyici yalnızca sayı ister, yeni makine ekleyen yok | **Bulutta:** yeni düğüm ekleyen küme ölçekleyici (cluster autoscaler) + kapasite planı |
+| P07-06 | `make repro P=P07-06` | 100 linki listeleyen tek istek veritabanına 101 sorgu gönderir; sayfa büyüdükçe yavaşlar | Tuzak (`TRAP_LIST_N_PLUS_ONE`): liste bir sorguyla gelir, sonra her link için ayrı sorgu (N+1) | **Bu seviyede:** tek toplu sorgu (tuzak kapalıyken) · **14:** servisler arası toplu çağrı |
+| P07-07 | `FREEZE_NODE=1 CONFIRM=1 make repro P=P07-07` | Bir sunucu (düğüm) donunca isteklerin bir kısmı dakikalarca takılı kalır | Kubernetes donmuş düğümdeki pod'u hâlâ sağlam sanır ve trafik göndermeye devam eder (40 sn + 5 dk) | **10:** devre kesici + aktif sağlık kontrolü |
+| P07-08 | `make repro P=P07-08` | Yeni sürüm dağıtılırken hata sayısı artabilir | Tuzak (`TRAP_READY_ALWAYS`): pod her zaman "hazırım" der; Kubernetes gerçekten hazır olanı ayıramaz | **Bu seviyede:** tuzak kapalıyken hazır olma kontrolü gerçek durumu söyler |
 
 ---
 

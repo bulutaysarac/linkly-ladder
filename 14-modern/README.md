@@ -124,13 +124,17 @@ kendisi yapar, ölçer ve hükmünü basar (`REPRODUCED` = sorun var · `NOT-REP
 düzende: **Ne oluyor** → **Neden oluyor** → **Bu deney** → adımlar → **Terminalde ne görmelisin** →
 **Grafana'da gör** (giriş: admin / ladder) → **Nasıl çözülüyor**.
 
-| ID | Ne olur? | Neden olur? | Nasıl çözülür? |
-|---|---|---|---|
-| P14-01 | Pod belleğinde önbellek (L1) yokken en sıcak link bile her okumada ağ üzerinden Redis'e sorulur; Redis'in tek çekirdeği okuma hızını sınırlar | Önbellek yalnızca Redis'te (L2); her isabet bir ağ çağrısı | **14:** iki katmanlı önbellek — önce pod belleği (L1), bulamazsa Redis (L2) |
-| P14-02 | Silinen bir link bazı pod'larda bir süre daha yönlendirmeye devam eder | Her pod linkin kendi kopyasını (L1) tutar; silme duyurusu kapalıyken (`TRAP_NO_INVALIDATION_PUBSUB`) kopya süresi dolana kadar yaşar | **14:** silme bütün pod'lara Redis üzerinden duyurulur (pub/sub); kısa önbellek süresi (10 sn) yedek |
-| P14-03 | Olay tüketicisine kopya eklemek işi hızlandırmayabilir: partition sayısından fazla kopya boşta oturur | Olay akışında bir partition'ı aynı anda yalnızca bir tüketici okur; partition sayısı paralelliğin tavanı | **14:** `clicks` topic'i 3 partition, otomatik ölçekleyici (KEDA) en fazla 3 kopya |
-| P14-04 | "Günde 100 milyon yönlendirme için kaç pod gerekir?" tahminle cevaplanırsa kapasite ya boşa gider ya ilk yoğunlukta yetmez | Kapasite modeli ancak bu kümede ölçülmüş "pod başına istek/sn" sayısıyla kurulabilir | **14:** tek pod kademeli yükle doyurulur, model ölçülen sayıyla kurulur (`docs-capacity.md`) |
-| P14-05 | Redis yavaşlar, veritabanı paket kaybeder ve bir pod ölür — hepsi aynı anda, yük altında: sistem kısmen mi, tamamen mi çöker? | Korumalar (devre kesici, yeniden deneme, yük atma, önbellek) tek tek sınandı ama birlikte hiç | **Prova (game day):** amaç geçmek değil, hangi korumanın ne zaman devreye girdiğini görmek |
+**Kısa komut** deneyi otomatik başlatır; seviyenin klasöründe çalıştır (önce `cd "$LADDER/14-modern"`). Başında
+`CONFIRM=1` olanlar yıkıcı bir adım içerir (pod silmek, yeniden başlatmak, arıza enjekte etmek gibi); bu onay
+olmadan script o adımı yapmaz ve `SKIPPED` basar.
+
+| ID | Kısa komut | Ne olur? | Neden olur? | Nasıl çözülür? |
+|---|---|---|---|---|
+| P14-01 | `make repro P=P14-01` | Pod belleğinde önbellek (L1) yokken en sıcak link bile her okumada ağ üzerinden Redis'e sorulur; Redis'in tek çekirdeği okuma hızını sınırlar | Önbellek yalnızca Redis'te (L2); her isabet bir ağ çağrısı | **14:** iki katmanlı önbellek — önce pod belleği (L1), bulamazsa Redis (L2) |
+| P14-02 | `make repro P=P14-02` | Silinen bir link bazı pod'larda bir süre daha yönlendirmeye devam eder | Her pod linkin kendi kopyasını (L1) tutar; silme duyurusu kapalıyken (`TRAP_NO_INVALIDATION_PUBSUB`) kopya süresi dolana kadar yaşar | **14:** silme bütün pod'lara Redis üzerinden duyurulur (pub/sub); kısa önbellek süresi (10 sn) yedek |
+| P14-03 | `make repro P=P14-03` | Olay tüketicisine kopya eklemek işi hızlandırmayabilir: partition sayısından fazla kopya boşta oturur | Olay akışında bir partition'ı aynı anda yalnızca bir tüketici okur; partition sayısı paralelliğin tavanı | **14:** `clicks` topic'i 3 partition, otomatik ölçekleyici (KEDA) en fazla 3 kopya |
+| P14-04 | `make repro P=P14-04` | "Günde 100 milyon yönlendirme için kaç pod gerekir?" tahminle cevaplanırsa kapasite ya boşa gider ya ilk yoğunlukta yetmez | Kapasite modeli ancak bu kümede ölçülmüş "pod başına istek/sn" sayısıyla kurulabilir | **14:** tek pod kademeli yükle doyurulur, model ölçülen sayıyla kurulur (`docs-capacity.md`) |
+| P14-05 | `CONFIRM=1 make repro P=P14-05` | Redis yavaşlar, veritabanı paket kaybeder ve bir pod ölür — hepsi aynı anda, yük altında: sistem kısmen mi, tamamen mi çöker? | Korumalar (devre kesici, yeniden deneme, yük atma, önbellek) tek tek sınandı ama birlikte hiç | **Prova (game day):** amaç geçmek değil, hangi korumanın ne zaman devreye girdiğini görmek |
 
 ---
 

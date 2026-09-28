@@ -121,14 +121,18 @@ kendisi yapar, ölçer ve hükmünü basar (`REPRODUCED` = sorun var · `NOT-REP
 düzende: **Ne oluyor** → **Neden oluyor** → **Bu deney** → adımlar → **Terminalde ne görmelisin** →
 **Grafana'da gör** (giriş: admin / ladder) → **Nasıl çözülüyor**.
 
-| ID | Ne olur? | Neden olur? | Nasıl çözülür? |
-|---|---|---|---|
-| P12-01 | Hatalı bir sürüm dağıtılınca kısa sürede bütün kullanıcılara ulaşır | Klasik dağıtım yalnızca "süreç ayakta mı?"ya bakar, "istekler başarılı mı?"ya bakmaz | **12:** yeni sürüm önce trafiğin ~1/4'üne verilir (canary); hata oranı eşiği aşarsa otomatik geri alınır |
-| P12-02 | Yük altında bir sütunun adı değiştirilince çalışan pod'lar link oluşturamaz (503) | Dağıtım sırasında eski kod hâlâ eski sütun adını kullanır; ad değişikliği ona uyumsuz | **12:** genişlet → taşı → daralt (expand/contract): her adım eski kodla da çalışır |
-| P12-03 | Kümede elle yapılan bir değişiklik (`kubectl scale`) kayıtsızdır; sonraki dağıtım onu sessizce geri alır | Kaynaktaki manifest ile küme sürekli karşılaştırılmıyor | Argo CD: sürekli karşılaştırma + otomatik düzeltme (kurulu, bu seviyeye bilerek bağlı değil) |
-| P12-04 | `:latest` gibi değişebilen bir etiketle hangi sürümün çalıştığı bilinmez, geri almak işe yaramaz | Aynı etiket her yeni imajda başka bir içeriği gösterir | Bu merdivende etiket `<git-sha>-<kaynak-hash>` (deney bunu doğrular) · **13:** Kyverno `:latest`'i yasaklar |
-| P12-05 | Yeni sürüm önbellek anahtar biçimini değiştirirse canary ile eski sürüm birbirinin yazdığını bulamaz, sistem önbelleksiz kalır | Canary iki sürümün yan yana çalışabileceğini varsayar; paylaşılan önbellek bu varsayımı kırar | Tartışma: geriye uyumlu biçim, iki biçimi birden okumak ya da canary'ye ayrı önbellek |
-| P12-06 | Uygulamayı geri almak veritabanı şemasını geri almaz; şemayı geri almak ise veri kaybettirebilir | Geri alma iki ayrı iştir ve yalnızca uygulamanınki otomatiktir | Disiplin: yalnızca geriye uyumlu şema değişikliği ("N−1 sürümü N şemasıyla çalışır") |
+**Kısa komut** deneyi otomatik başlatır; seviyenin klasöründe çalıştır (önce `cd "$LADDER/12-delivery"`). Başında
+`CONFIRM=1` olanlar yıkıcı bir adım içerir (pod silmek, yeniden başlatmak, arıza enjekte etmek gibi); bu onay
+olmadan script o adımı yapmaz ve `SKIPPED` basar.
+
+| ID | Kısa komut | Ne olur? | Neden olur? | Nasıl çözülür? |
+|---|---|---|---|---|
+| P12-01 | `make repro P=P12-01` | Hatalı bir sürüm dağıtılınca kısa sürede bütün kullanıcılara ulaşır | Klasik dağıtım yalnızca "süreç ayakta mı?"ya bakar, "istekler başarılı mı?"ya bakmaz | **12:** yeni sürüm önce trafiğin ~1/4'üne verilir (canary); hata oranı eşiği aşarsa otomatik geri alınır |
+| P12-02 | `CONFIRM=1 make repro P=P12-02` | Yük altında bir sütunun adı değiştirilince çalışan pod'lar link oluşturamaz (503) | Dağıtım sırasında eski kod hâlâ eski sütun adını kullanır; ad değişikliği ona uyumsuz | **12:** genişlet → taşı → daralt (expand/contract): her adım eski kodla da çalışır |
+| P12-03 | `make repro P=P12-03` | Kümede elle yapılan bir değişiklik (`kubectl scale`) kayıtsızdır; sonraki dağıtım onu sessizce geri alır | Kaynaktaki manifest ile küme sürekli karşılaştırılmıyor | Argo CD: sürekli karşılaştırma + otomatik düzeltme (kurulu, bu seviyeye bilerek bağlı değil) |
+| P12-04 | `make repro P=P12-04` | `:latest` gibi değişebilen bir etiketle hangi sürümün çalıştığı bilinmez, geri almak işe yaramaz | Aynı etiket her yeni imajda başka bir içeriği gösterir | Bu merdivende etiket `<git-sha>-<kaynak-hash>` (deney bunu doğrular) · **13:** Kyverno `:latest`'i yasaklar |
+| P12-05 | `make repro P=P12-05` | Yeni sürüm önbellek anahtar biçimini değiştirirse canary ile eski sürüm birbirinin yazdığını bulamaz, sistem önbelleksiz kalır | Canary iki sürümün yan yana çalışabileceğini varsayar; paylaşılan önbellek bu varsayımı kırar | Tartışma: geriye uyumlu biçim, iki biçimi birden okumak ya da canary'ye ayrı önbellek |
+| P12-06 | `make repro P=P12-06` | Uygulamayı geri almak veritabanı şemasını geri almaz; şemayı geri almak ise veri kaybettirebilir | Geri alma iki ayrı iştir ve yalnızca uygulamanınki otomatiktir | Disiplin: yalnızca geriye uyumlu şema değişikliği ("N−1 sürümü N şemasıyla çalışır") |
 
 ---
 

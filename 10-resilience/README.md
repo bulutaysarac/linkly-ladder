@@ -126,14 +126,18 @@ kendisi yapar, ölçer ve hükmünü basar (`REPRODUCED` = sorun var · `NOT-REP
 düzende: **Ne oluyor** → **Neden oluyor** → **Bu deney** → adımlar → **Terminalde ne görmelisin** →
 **Grafana'da gör** (giriş: admin / ladder) → **Nasıl çözülüyor**.
 
-| ID | Ne olur? | Neden olur? | Nasıl çözülür? |
-|---|---|---|---|
-| P10-01 | Tuzak açıkken bağımlılık hata verdikçe ona giden yük katlanır | Her başarısız çağrı sınırsız yeniden denenir (retry); zaten zorlanan bağımlılığa ikinci bir yük kaynağı eklenir | **Seviye içi:** retry bütçesi (trafiğin en fazla %10'u) + giderek uzayan, rastgele bekleme (backoff + jitter) |
-| P10-02 | Tuzak açıkken Redis kısa süre kesilince bütün pod'lar trafikten düşer (503) | Hazır olma kontrolü (readiness) Redis'e bakar; Redis yokken bütün pod'lar aynı anda "hazır değilim" der | **Seviye içi:** readiness yalnızca pod'un kendisine bakar; Redis kesintisi önbelleği atlatır (degrade) |
-| P10-03 | İstemci 1 sn'de vazgeçse de sunucu işi saniyelerce taşımaya devam eder | Bekleme sınırları (timeout) katmanlar arasında hizasızsa sunucu, kimseye teslim edemeyeceği iş için kaynak harcar | **Seviye içi:** her katmanda süre sınırı + bağımlılık başına eşzamanlılık sınırı; eksik halka veritabanının kendi sorgu sınırı |
-| P10-04 | Tuzak açıkken bozuk bir bağımlılık her isteği saniyelerce bekletir | Devre kesici yoksa her istek bozuk bağımlılığa gidip cevap bekler; hızlı reddetme yok | **Seviye içi:** devre kesici: hatalar birikince bağımlılığa gitmeyi bir süre bırakıp hızlı reddeder |
-| P10-05 | Tuzak açıkken Redis ölmeyip yavaşlayınca istekler birikir, bellek ve eşzamanlı istek sayısı tırmanır | Süre sınırı olmayan çağrı sınırsız bekler; yavaş ama başarılı cevaplar devre kesiciyi de tetiklemez | **Seviye içi:** her bağımlılık çağrısının süre sınırı var (500 ms) |
-| P10-06 | Kapasite dolunca bütün istekler yavaşlar ve zaman aşımına uğrar | Aşırı yüklü sunucu her isteği kabul ederse herkes sıraya girer | **Seviye içi:** yük atma: eşiği aşan istek anında 503 ile reddedilir, kabul edilenler hızlı kalır |
+**Kısa komut** deneyi otomatik başlatır; seviyenin klasöründe çalıştır (önce `cd "$LADDER/10-resilience"`). Başında
+`CONFIRM=1` olanlar yıkıcı bir adım içerir (pod silmek, yeniden başlatmak, arıza enjekte etmek gibi); bu onay
+olmadan script o adımı yapmaz ve `SKIPPED` basar.
+
+| ID | Kısa komut | Ne olur? | Neden olur? | Nasıl çözülür? |
+|---|---|---|---|---|
+| P10-01 | `make repro P=P10-01` | Tuzak açıkken bağımlılık hata verdikçe ona giden yük katlanır | Her başarısız çağrı sınırsız yeniden denenir (retry); zaten zorlanan bağımlılığa ikinci bir yük kaynağı eklenir | **Seviye içi:** retry bütçesi (trafiğin en fazla %10'u) + giderek uzayan, rastgele bekleme (backoff + jitter) |
+| P10-02 | `CONFIRM=1 make repro P=P10-02` | Tuzak açıkken Redis kısa süre kesilince bütün pod'lar trafikten düşer (503) | Hazır olma kontrolü (readiness) Redis'e bakar; Redis yokken bütün pod'lar aynı anda "hazır değilim" der | **Seviye içi:** readiness yalnızca pod'un kendisine bakar; Redis kesintisi önbelleği atlatır (degrade) |
+| P10-03 | `make repro P=P10-03` | İstemci 1 sn'de vazgeçse de sunucu işi saniyelerce taşımaya devam eder | Bekleme sınırları (timeout) katmanlar arasında hizasızsa sunucu, kimseye teslim edemeyeceği iş için kaynak harcar | **Seviye içi:** her katmanda süre sınırı + bağımlılık başına eşzamanlılık sınırı; eksik halka veritabanının kendi sorgu sınırı |
+| P10-04 | `make repro P=P10-04` | Tuzak açıkken bozuk bir bağımlılık her isteği saniyelerce bekletir | Devre kesici yoksa her istek bozuk bağımlılığa gidip cevap bekler; hızlı reddetme yok | **Seviye içi:** devre kesici: hatalar birikince bağımlılığa gitmeyi bir süre bırakıp hızlı reddeder |
+| P10-05 | `make repro P=P10-05` | Tuzak açıkken Redis ölmeyip yavaşlayınca istekler birikir, bellek ve eşzamanlı istek sayısı tırmanır | Süre sınırı olmayan çağrı sınırsız bekler; yavaş ama başarılı cevaplar devre kesiciyi de tetiklemez | **Seviye içi:** her bağımlılık çağrısının süre sınırı var (500 ms) |
+| P10-06 | `make repro P=P10-06` | Kapasite dolunca bütün istekler yavaşlar ve zaman aşımına uğrar | Aşırı yüklü sunucu her isteği kabul ederse herkes sıraya girer | **Seviye içi:** yük atma: eşiği aşan istek anında 503 ile reddedilir, kabul edilenler hızlı kalır |
 
 ---
 

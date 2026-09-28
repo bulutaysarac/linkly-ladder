@@ -115,15 +115,19 @@ kendisi yapar, ölçer ve hükmünü basar (`REPRODUCED` = sorun var · `NOT-REP
 düzende: **Ne oluyor** → **Neden oluyor** → **Bu deney** → adımlar → **Terminalde ne görmelisin** →
 **Grafana'da gör** (giriş: admin / ladder) → **Nasıl çözülüyor**.
 
-| ID | Ne olur? | Neden olur? | Nasıl çözülür? |
-|---|---|---|---|
-| P03-01 | Silinen bir link bazı isteklerde hâlâ açılır; önbellek süresi (60 sn) dolana kadar çalışmaya devam eder | Silme isteği tek bir pod'a düşer; o pod kendi önbelleğini temizler, diğer pod'ların önbelleğindeki kopyadan haberi olmaz | **04:** tek paylaşılan önbellek (Redis); silme herkes için geçerli olur |
-| P03-02 | Her yeni sürüm dağıtımından sonra veritabanına giden okumalar birden sıçrar, sonra normale döner (grafikte testere dişi) | Önbellek pod'un belleğinde; yeni pod boş önbellekle başlar ve ilk istekleri veritabanına sorar | **04:** önbellek pod'ların dışında durur, dağıtımda boşalmaz |
-| P03-03 | Aynı linkler her pod'da ayrı ayrı saklanır; 3 pod'da aynı veri için 3 kat bellek harcanır | Her pod'un önbelleği yalnızca kendisine ait; pod'lar birbirinin önbelleğini göremez | **04:** tek önbellek, veri bir kez saklanır |
-| P03-04 | Pod sayısı arttıkça önbellekte bulunamayan istek (ıska) ve veritabanına giden okuma artar | Her pod aynı linkleri kendi önbelleği için ayrı ayrı veritabanından çeker; önbelleğin dolması (ısınma) pod sayısı kadar tekrarlanır | **04:** tek önbellek; pod sayısı ıskayı artırmaz |
-| P03-05 | Popüler bir linkin önbellek süresi dolduğu anda o linki isteyen herkes aynı anda veritabanına koşar (izdiham) | `TRAP_NO_SINGLEFLIGHT` açıkken aynı link için gelen istekler tek sorguda birleştirilmez | **Seviye içi:** bayrak kapalıyken (varsayılan) istekler tek sorguyu bekler |
-| P03-06 | Var olmayan kodlara gelen istekler (tarama, yazım hatası, silinmiş link) hep veritabanına gider | `TRAP_NO_NEGATIVE_CACHE` açıkken "böyle link yok" cevabı önbellekte saklanmaz | **Seviye içi:** bayrak kapalıyken "yok" cevabı 10 sn saklanır |
-| P03-07 | Dağıtımdan sonra veritabanı düzenli aralıklarla ani yük dalgası alır | `TRAP_NO_TTL_JITTER` açıkken aynı anda önbelleğe giren kayıtların süresi de aynı saniyede dolar | **Seviye içi:** bayrak kapalıyken sürelere ±%20 rastgelelik eklenir, dolmalar zamana yayılır |
+**Kısa komut** deneyi otomatik başlatır; seviyenin klasöründe çalıştır (önce `cd "$LADDER/03-local-cache"`).
+Başında `CONFIRM=1` olanlar yıkıcı bir adım içerir (pod silmek, yeniden başlatmak, arıza enjekte etmek gibi); bu
+onay olmadan script o adımı yapmaz ve `SKIPPED` basar.
+
+| ID | Kısa komut | Ne olur? | Neden olur? | Nasıl çözülür? |
+|---|---|---|---|---|
+| P03-01 | `make repro P=P03-01` | Silinen bir link bazı isteklerde hâlâ açılır; önbellek süresi (60 sn) dolana kadar çalışmaya devam eder | Silme isteği tek bir pod'a düşer; o pod kendi önbelleğini temizler, diğer pod'ların önbelleğindeki kopyadan haberi olmaz | **04:** tek paylaşılan önbellek (Redis); silme herkes için geçerli olur |
+| P03-02 | `make repro P=P03-02` | Her yeni sürüm dağıtımından sonra veritabanına giden okumalar birden sıçrar, sonra normale döner (grafikte testere dişi) | Önbellek pod'un belleğinde; yeni pod boş önbellekle başlar ve ilk istekleri veritabanına sorar | **04:** önbellek pod'ların dışında durur, dağıtımda boşalmaz |
+| P03-03 | `make repro P=P03-03` | Aynı linkler her pod'da ayrı ayrı saklanır; 3 pod'da aynı veri için 3 kat bellek harcanır | Her pod'un önbelleği yalnızca kendisine ait; pod'lar birbirinin önbelleğini göremez | **04:** tek önbellek, veri bir kez saklanır |
+| P03-04 | `CONFIRM=1 make repro P=P03-04` | Pod sayısı arttıkça önbellekte bulunamayan istek (ıska) ve veritabanına giden okuma artar | Her pod aynı linkleri kendi önbelleği için ayrı ayrı veritabanından çeker; önbelleğin dolması (ısınma) pod sayısı kadar tekrarlanır | **04:** tek önbellek; pod sayısı ıskayı artırmaz |
+| P03-05 | `make repro P=P03-05` | Popüler bir linkin önbellek süresi dolduğu anda o linki isteyen herkes aynı anda veritabanına koşar (izdiham) | `TRAP_NO_SINGLEFLIGHT` açıkken aynı link için gelen istekler tek sorguda birleştirilmez | **Seviye içi:** bayrak kapalıyken (varsayılan) istekler tek sorguyu bekler |
+| P03-06 | `make repro P=P03-06` | Var olmayan kodlara gelen istekler (tarama, yazım hatası, silinmiş link) hep veritabanına gider | `TRAP_NO_NEGATIVE_CACHE` açıkken "böyle link yok" cevabı önbellekte saklanmaz | **Seviye içi:** bayrak kapalıyken "yok" cevabı 10 sn saklanır |
+| P03-07 | `make repro P=P03-07` | Dağıtımdan sonra veritabanı düzenli aralıklarla ani yük dalgası alır | `TRAP_NO_TTL_JITTER` açıkken aynı anda önbelleğe giren kayıtların süresi de aynı saniyede dolar | **Seviye içi:** bayrak kapalıyken sürelere ±%20 rastgelelik eklenir, dolmalar zamana yayılır |
 
 ---
 

@@ -101,9 +101,14 @@ düzende: **Ne oluyor** → **Neden oluyor** → **Bu deney** → adımlar → *
 **Grafana'da gör** (giriş: admin / ladder) → **Nasıl çözülüyor**.
 
 <!-- Tablo, konuyu hiç bilmeyen birinin okuyup anlayacağı özet: terim kullanırsan parantez içinde açıkla. -->
-| ID | Ne olur? | Neden olur? | Nasıl çözülür? |
-|---|---|---|---|
-| PNN-01 | <kullanıcının/operatörün gördüğü, sade dille> | <kök neden, sade dille> | **NN+k:** <ne ile, sade dille> |
+**Kısa komut** deneyi otomatik başlatır; seviyenin klasöründe çalıştır (önce `cd "$LADDER/NN-<ad>"`). Başında
+`CONFIRM=1` olanlar yıkıcı bir adım içerir (pod silmek, yeniden başlatmak, arıza enjekte etmek gibi); bu onay
+olmadan script o adımı yapmaz ve `SKIPPED` basar.
+
+<!-- Kısa komut, sorunun "Otomatik:" satırındaki komutun AYNISI. Seviyede CONFIRM=1'li sorun yoksa son cümleyi sil. -->
+| ID | Kısa komut | Ne olur? | Neden olur? | Nasıl çözülür? |
+|---|---|---|---|---|
+| PNN-01 | `make repro P=PNN-01` | <kullanıcının/operatörün gördüğü, sade dille> | <kök neden, sade dille> | **NN+k:** <ne ile, sade dille> |
 
 Her sorun için alt bölüm: [docs/PROBLEM-TEMPLATE.md](PROBLEM-TEMPLATE.md) kalıbı.
 

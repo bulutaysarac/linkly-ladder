@@ -126,18 +126,22 @@ kendisi yapar, ölçer ve hükmünü basar (`REPRODUCED` = sorun var · `NOT-REP
 düzende: **Ne oluyor** → **Neden oluyor** → **Bu deney** → adımlar → **Terminalde ne görmelisin** →
 **Grafana'da gör** (giriş: admin / ladder) → **Nasıl çözülüyor**.
 
-| ID | Ne olur? | Neden olur? | Nasıl çözülür? |
-|---|---|---|---|
-| P02-01 | Her yönlendirme veritabanına iki sorgu attırır; trafik arttıkça bütün yük tek bir yerde, Postgres'te toplanır | Link her seferinde veritabanından okunur (`SELECT`), tıklama her seferinde veritabanına yazılır (`UPDATE`) | **03/04:** okumalar önbellekten · **05:** tıklama yazması istek yolundan çıkar |
-| P02-02 | Uygulama 10 kopyaya çıkınca veritabanı yeni bağlantıları reddeder, istekler 503 alır | Her kopya 25 bağlantılık kendi havuzunu açar: 10 × 25 = 250, Postgres'in sınırı 100 | **09:** bağlantı havuzlayıcı (PgBouncer) çok bağlantıyı az sayıda gerçek bağlantıya indirir |
-| P02-03 | Tek veritabanı ölünce 3 kopyalı uygulama da hata verir | Uygulama 3 kopya ama veritabanı tek; yedeklilik en zayıf halka kadardır | **09:** yedekli veritabanı (ana + yedek + otomatik devralma) |
-| P02-04 | "Saniyede 40 istek" sınırı pratikte saniyede ~120 | Her kopya sınırı kendi belleğinde sayar ve artık varsayılan 3 kopya var | **08:** ortak sınır sayacı Redis'te |
-| P02-05 | Kiracıya göre link listesi, tablo büyüdükçe belirgin yavaşlar | Aranan sütunda indeks yok; veritabanı her seferinde bütün tabloyu okur (seq scan) | **Bu seviyede:** indeks eklenir (`migrations/002`) |
-| P02-06 | Veritabanı ölmeden yalnızca yavaşlayınca uygulama da tıkanır ve 503 verir | Uygulama beklemeyi bırakır ama veritabanı sorguyu sürdürür; bağlantılar meşgul kalır, havuz dolar | **Bu seviyede:** veritabanı tarafı zaman aşımı (`STATEMENT_TIMEOUT`) · **10:** devre kesici |
-| P02-07 | **Tuzak:** şema değişikliğini her pod kendisi uygularsa pod'lar çöker, şema bozuk kalabilir | Aynı anda açılan pod'lar aynı işe girişip birbirini kilitler | **Bu seviyenin ayarı:** şema değişikliği tek seferlik ayrı bir iş (Job) |
-| P02-08 | En popüler link en yavaş link olur | Her tıklama aynı veritabanı satırını günceller; güncellemeler o satırın kilidini sırayla bekler | **05:** tıklamalar kuyrukta toplanıp toplu yazılır · **06:** olay akışı |
-| P02-09 | Veritabanı parolası repoyu ya da kümeyi okuyabilen herkese açık | Parola repoda düz metin; Kubernetes Secret'ı şifrelemez, yalnızca kodlar (base64) | **13** (kısmen): ağ kuralları; sırlar hâlâ düz metin (P13-04) |
-| P02-10 | **Tuzak:** veritabanı kısa süre gidince uygulamanın bütün kopyaları trafikten çıkar, servis tamamen kesilir | Kopyalar "hazır mısın?" sorusuna "veritabanına ulaşabiliyor muyum?" diye cevap verir; hepsi aynı anda "hayır" der | **Bu seviyenin ayarı:** hazır olma kontrolü yalnızca pod'un kendisine bakar · **10:** devre kesici |
+**Kısa komut** deneyi otomatik başlatır; seviyenin klasöründe çalıştır (önce `cd "$LADDER/02-postgres"`). Başında
+`CONFIRM=1` olanlar yıkıcı bir adım içerir (pod silmek, yeniden başlatmak, arıza enjekte etmek gibi); bu onay
+olmadan script o adımı yapmaz ve `SKIPPED` basar.
+
+| ID | Kısa komut | Ne olur? | Neden olur? | Nasıl çözülür? |
+|---|---|---|---|---|
+| P02-01 | `make repro P=P02-01` | Her yönlendirme veritabanına iki sorgu attırır; trafik arttıkça bütün yük tek bir yerde, Postgres'te toplanır | Link her seferinde veritabanından okunur (`SELECT`), tıklama her seferinde veritabanına yazılır (`UPDATE`) | **03/04:** okumalar önbellekten · **05:** tıklama yazması istek yolundan çıkar |
+| P02-02 | `CONFIRM=1 make repro P=P02-02` | Uygulama 10 kopyaya çıkınca veritabanı yeni bağlantıları reddeder, istekler 503 alır | Her kopya 25 bağlantılık kendi havuzunu açar: 10 × 25 = 250, Postgres'in sınırı 100 | **09:** bağlantı havuzlayıcı (PgBouncer) çok bağlantıyı az sayıda gerçek bağlantıya indirir |
+| P02-03 | `CONFIRM=1 make repro P=P02-03` | Tek veritabanı ölünce 3 kopyalı uygulama da hata verir | Uygulama 3 kopya ama veritabanı tek; yedeklilik en zayıf halka kadardır | **09:** yedekli veritabanı (ana + yedek + otomatik devralma) |
+| P02-04 | `CONFIRM=1 make repro P=P02-04` | "Saniyede 40 istek" sınırı pratikte saniyede ~120 | Her kopya sınırı kendi belleğinde sayar ve artık varsayılan 3 kopya var | **08:** ortak sınır sayacı Redis'te |
+| P02-05 | `make repro P=P02-05` | Kiracıya göre link listesi, tablo büyüdükçe belirgin yavaşlar | Aranan sütunda indeks yok; veritabanı her seferinde bütün tabloyu okur (seq scan) | **Bu seviyede:** indeks eklenir (`migrations/002`) |
+| P02-06 | `make repro P=P02-06` | Veritabanı ölmeden yalnızca yavaşlayınca uygulama da tıkanır ve 503 verir | Uygulama beklemeyi bırakır ama veritabanı sorguyu sürdürür; bağlantılar meşgul kalır, havuz dolar | **Bu seviyede:** veritabanı tarafı zaman aşımı (`STATEMENT_TIMEOUT`) · **10:** devre kesici |
+| P02-07 | `make repro P=P02-07` | **Tuzak:** şema değişikliğini her pod kendisi uygularsa pod'lar çöker, şema bozuk kalabilir | Aynı anda açılan pod'lar aynı işe girişip birbirini kilitler | **Bu seviyenin ayarı:** şema değişikliği tek seferlik ayrı bir iş (Job) |
+| P02-08 | `make repro P=P02-08` | En popüler link en yavaş link olur | Her tıklama aynı veritabanı satırını günceller; güncellemeler o satırın kilidini sırayla bekler | **05:** tıklamalar kuyrukta toplanıp toplu yazılır · **06:** olay akışı |
+| P02-09 | `make repro P=P02-09` | Veritabanı parolası repoyu ya da kümeyi okuyabilen herkese açık | Parola repoda düz metin; Kubernetes Secret'ı şifrelemez, yalnızca kodlar (base64) | **13** (kısmen): ağ kuralları; sırlar hâlâ düz metin (P13-04) |
+| P02-10 | `CONFIRM=1 make repro P=P02-10` | **Tuzak:** veritabanı kısa süre gidince uygulamanın bütün kopyaları trafikten çıkar, servis tamamen kesilir | Kopyalar "hazır mısın?" sorusuna "veritabanına ulaşabiliyor muyum?" diye cevap verir; hepsi aynı anda "hayır" der | **Bu seviyenin ayarı:** hazır olma kontrolü yalnızca pod'un kendisine bakar · **10:** devre kesici |
 
 ---
 

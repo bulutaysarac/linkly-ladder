@@ -131,16 +131,18 @@ kendisi yapar, ölçer ve hükmünü basar (`REPRODUCED` = sorun var · `NOT-REP
 düzende: **Ne oluyor** → **Neden oluyor** → **Bu deney** → adımlar → **Terminalde ne görmelisin** →
 **Grafana'da gör** (giriş: admin / ladder) → **Nasıl çözülüyor**.
 
-| ID | Ne olur? | Neden olur? | Nasıl çözülür? |
-|---|---|---|---|
-| P11-01 | Uygulama yavaşlar; grafik "yavaş" der ama hangi bağımlılığın (Redis mi, Postgres mi) beklettiğini söylemez | Metrikler bütün isteklerin toplamıdır; tek bir isteğin adım adım süresini yalnızca trace (isteğin zaman çizelgesi) gösterir | **11:** grafikteki yavaş noktadan (exemplar) o isteğin trace'ine ve loguna atlanır |
-| P11-02 | Bir tıklamanın izi kuyrukta (Kafka) kopar; tüketicinin işi ayrı, sahipsiz bir trace olarak görünür | HTTP'de trace kimliği kendiliğinden taşınır; kuyruk mesajına kod koymazsa taşınmaz | **11:** kimlik mesaj başlığına yazılır (tuzak: `TRAP_NO_KAFKA_PROPAGATION`) |
-| P11-03 | Bütün trace'leri kaydetmek toplayıcıyı (Alloy) yorar; yalnızca %5'ini kaydetmek nadir hataları kaçırır | Kaydetme kararı isteğin başında, yavaş ya da hatalı olacağı bilinmeden verilir (head sampling) | Takas: doğru trace'i exemplar zaten gösterir; nadir hatalar için tail sampling |
-| P11-04 | Kısa bir hata sıçramasında basit eşik alarmı gereksiz yere çalar; uzun süren küçük bir hatada ise susar | Alarm "şu an hata var mı?" diye soruyor; doğru soru hata bütçesinin ne hızla bittiği (burn rate) | **11:** birden çok pencereli burn-rate alarmları |
-| P11-05 | Log seviyesi `debug` yapılınca log hattı (Loki) sınırına takılabilir; tam araştırdığın anın logları düşer | Loki saniyede en fazla 8 MB kabul eder; `debug` her isteğe bir satır daha ekler | **11:** ayrıntılı logu kısa süre ve yerinde açmak, örneklemek, ayrıntıyı trace'e taşımak |
-| P11-06 | Kiracı (tenant) metrik etiketi yapılınca Prometheus'taki seri sayısı kiracı sayısıyla birlikte büyür | Her farklı etiket değeri ayrı bir seri, yani ayrı bellek; kiracı sayısı iş büyüdükçe sınırsız artar | **11:** metriklerde kiracı etiketi yok (tuzak: `TRAP_TENANT_LABEL`); kiracı analizi log, trace ve veritabanında |
-| P11-07 | Grafana'da elle yapılan bir düzeltme hiçbir yerde kayıtlı değildir ve bir sonraki yüklemede silinir | Panolar kod olarak tutulmazsa sürüm kontrolleri yoktur | **11:** panolar kod (`gen.py` + `make dashboards`), Grafana'da elle düzenlenemez |
-| P11-08 | Her istekte gereksiz yere regex derlemek CPU'yu artırır ama hiçbir metrik sebebi söylemez | "CPU'yu hangi satır yiyor?" sorusunu yalnızca CPU profili cevaplar | **11:** `pprof` ile profil alınır (tuzak: `TRAP_REGEX_PER_REQUEST`) |
+**Kısa komut** deneyi otomatik başlatır; seviyenin klasöründe çalıştır (önce `cd "$LADDER/11-observability-deep"`).
+
+| ID | Kısa komut | Ne olur? | Neden olur? | Nasıl çözülür? |
+|---|---|---|---|---|
+| P11-01 | `make repro P=P11-01` | Uygulama yavaşlar; grafik "yavaş" der ama hangi bağımlılığın (Redis mi, Postgres mi) beklettiğini söylemez | Metrikler bütün isteklerin toplamıdır; tek bir isteğin adım adım süresini yalnızca trace (isteğin zaman çizelgesi) gösterir | **11:** grafikteki yavaş noktadan (exemplar) o isteğin trace'ine ve loguna atlanır |
+| P11-02 | `make repro P=P11-02` | Bir tıklamanın izi kuyrukta (Kafka) kopar; tüketicinin işi ayrı, sahipsiz bir trace olarak görünür | HTTP'de trace kimliği kendiliğinden taşınır; kuyruk mesajına kod koymazsa taşınmaz | **11:** kimlik mesaj başlığına yazılır (tuzak: `TRAP_NO_KAFKA_PROPAGATION`) |
+| P11-03 | `make repro P=P11-03` | Bütün trace'leri kaydetmek toplayıcıyı (Alloy) yorar; yalnızca %5'ini kaydetmek nadir hataları kaçırır | Kaydetme kararı isteğin başında, yavaş ya da hatalı olacağı bilinmeden verilir (head sampling) | Takas: doğru trace'i exemplar zaten gösterir; nadir hatalar için tail sampling |
+| P11-04 | `make repro P=P11-04` | Kısa bir hata sıçramasında basit eşik alarmı gereksiz yere çalar; uzun süren küçük bir hatada ise susar | Alarm "şu an hata var mı?" diye soruyor; doğru soru hata bütçesinin ne hızla bittiği (burn rate) | **11:** birden çok pencereli burn-rate alarmları |
+| P11-05 | `make repro P=P11-05` | Log seviyesi `debug` yapılınca log hattı (Loki) sınırına takılabilir; tam araştırdığın anın logları düşer | Loki saniyede en fazla 8 MB kabul eder; `debug` her isteğe bir satır daha ekler | **11:** ayrıntılı logu kısa süre ve yerinde açmak, örneklemek, ayrıntıyı trace'e taşımak |
+| P11-06 | `make repro P=P11-06` | Kiracı (tenant) metrik etiketi yapılınca Prometheus'taki seri sayısı kiracı sayısıyla birlikte büyür | Her farklı etiket değeri ayrı bir seri, yani ayrı bellek; kiracı sayısı iş büyüdükçe sınırsız artar | **11:** metriklerde kiracı etiketi yok (tuzak: `TRAP_TENANT_LABEL`); kiracı analizi log, trace ve veritabanında |
+| P11-07 | `make repro P=P11-07` | Grafana'da elle yapılan bir düzeltme hiçbir yerde kayıtlı değildir ve bir sonraki yüklemede silinir | Panolar kod olarak tutulmazsa sürüm kontrolleri yoktur | **11:** panolar kod (`gen.py` + `make dashboards`), Grafana'da elle düzenlenemez |
+| P11-08 | `make repro P=P11-08` | Her istekte gereksiz yere regex derlemek CPU'yu artırır ama hiçbir metrik sebebi söylemez | "CPU'yu hangi satır yiyor?" sorusunu yalnızca CPU profili cevaplar | **11:** `pprof` ile profil alınır (tuzak: `TRAP_REGEX_PER_REQUEST`) |
 
 ---
 

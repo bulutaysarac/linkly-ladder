@@ -121,14 +121,18 @@ kendisi yapar, ölçer ve hükmünü basar (`REPRODUCED` = sorun var · `NOT-REP
 düzende: **Ne oluyor** → **Neden oluyor** → **Bu deney** → adımlar → **Terminalde ne görmelisin** →
 **Grafana'da gör** (giriş: admin / ladder) → **Nasıl çözülüyor**.
 
-| ID | Ne olur? | Neden olur? | Nasıl çözülür? |
-|---|---|---|---|
-| P09-01 | Kullanıcı link oluşturup hemen açınca kendi linki için 404 alabilir | Okumalar veritabanının kopyasına (replika) gider; kopya ana veritabanının (primary) birkaç an gerisindedir, yeni link henüz orada yoktur | **Seviye içi:** yazmadan sonraki 2 sn okumalar ana veritabanına yönlendirilir |
-| P09-02 | Ana veritabanı çökünce yazmalar 10–30 sn hata verir ya da bekler | Kopyanın ana veritabanını devralması (failover) anlık değildir: arıza fark edilir, kopya terfi eder, bağlantılar yeni adrese geçer | Pencere saniyelere iner ama sıfırlanmaz · **10:** yazmayı yeniden deneme + tekrar edilse de tek kayıt üreten istek (idempotency) |
-| P09-03 | Tuzak açıkken bazı yönlendirmeler aralıklı 503 hatası verir | Havuzlayıcı (PgBouncer) veritabanı bağlantısını her işlemde başkasına verir; bir bağlantıda hazırlanan sorgu (prepared statement) diğerinde yoktur | **Seviye içi:** sorgular hazırlanmadan gönderilir (exec modu); tuzak bunu kapatır |
-| P09-04 | Kopyadaki uzun bir okuma, ana veritabanında silinen satırların temizlenmesini engeller; tablo şişer | Kopya, okuması sürerken ihtiyaç duyduğu eski satırları ana veritabanına "temizleme" diye bildirir (`hot_standby_feedback`) | Çözülmez, seçilir: ya kopyadaki okuma iptal edilir ya ana veritabanı şişer |
-| P09-05 | Eski kayıtları `DELETE` ile silmek saniyeler sürer ve diskte yer açmaz | Postgres'te silinen satır "ölü" olarak kalır; yeri ancak temizlikle (vacuum) yeniden kullanılır | **Seviye içi:** tablo zamana göre bölümlere ayrılır (partition), eski bölüm tek hamlede atılır |
-| P09-06 | Yanlışlıkla silinen bir kayıt kopyadan da geri alınamaz | Kopyalama (replikasyon) hatayı da saniyeler içinde kopyalar; yedek yok | Kapsam dışı: sürekli yedek + belirli bir ana geri dönme (PITR) + geri yükleme tatbikatı (14 §9) |
+**Kısa komut** deneyi otomatik başlatır; seviyenin klasöründe çalıştır (önce `cd "$LADDER/09-database-scaling"`).
+Başında `CONFIRM=1` olanlar yıkıcı bir adım içerir (pod silmek, yeniden başlatmak, arıza enjekte etmek gibi); bu
+onay olmadan script o adımı yapmaz ve `SKIPPED` basar.
+
+| ID | Kısa komut | Ne olur? | Neden olur? | Nasıl çözülür? |
+|---|---|---|---|---|
+| P09-01 | `make repro P=P09-01` | Kullanıcı link oluşturup hemen açınca kendi linki için 404 alabilir | Okumalar veritabanının kopyasına (replika) gider; kopya ana veritabanının (primary) birkaç an gerisindedir, yeni link henüz orada yoktur | **Seviye içi:** yazmadan sonraki 2 sn okumalar ana veritabanına yönlendirilir |
+| P09-02 | `CONFIRM=1 make repro P=P09-02` | Ana veritabanı çökünce yazmalar 10–30 sn hata verir ya da bekler | Kopyanın ana veritabanını devralması (failover) anlık değildir: arıza fark edilir, kopya terfi eder, bağlantılar yeni adrese geçer | Pencere saniyelere iner ama sıfırlanmaz · **10:** yazmayı yeniden deneme + tekrar edilse de tek kayıt üreten istek (idempotency) |
+| P09-03 | `make repro P=P09-03` | Tuzak açıkken bazı yönlendirmeler aralıklı 503 hatası verir | Havuzlayıcı (PgBouncer) veritabanı bağlantısını her işlemde başkasına verir; bir bağlantıda hazırlanan sorgu (prepared statement) diğerinde yoktur | **Seviye içi:** sorgular hazırlanmadan gönderilir (exec modu); tuzak bunu kapatır |
+| P09-04 | `make repro P=P09-04` | Kopyadaki uzun bir okuma, ana veritabanında silinen satırların temizlenmesini engeller; tablo şişer | Kopya, okuması sürerken ihtiyaç duyduğu eski satırları ana veritabanına "temizleme" diye bildirir (`hot_standby_feedback`) | Çözülmez, seçilir: ya kopyadaki okuma iptal edilir ya ana veritabanı şişer |
+| P09-05 | `make repro P=P09-05` | Eski kayıtları `DELETE` ile silmek saniyeler sürer ve diskte yer açmaz | Postgres'te silinen satır "ölü" olarak kalır; yeri ancak temizlikle (vacuum) yeniden kullanılır | **Seviye içi:** tablo zamana göre bölümlere ayrılır (partition), eski bölüm tek hamlede atılır |
+| P09-06 | `CONFIRM=1 make repro P=P09-06` | Yanlışlıkla silinen bir kayıt kopyadan da geri alınamaz | Kopyalama (replikasyon) hatayı da saniyeler içinde kopyalar; yedek yok | Kapsam dışı: sürekli yedek + belirli bir ana geri dönme (PITR) + geri yükleme tatbikatı (14 §9) |
 
 ---
 

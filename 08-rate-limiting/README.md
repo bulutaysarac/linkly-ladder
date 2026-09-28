@@ -123,14 +123,18 @@ kendisi yapar, ölçer ve hükmünü basar (`REPRODUCED` = sorun var · `NOT-REP
 düzende: **Ne oluyor** → **Neden oluyor** → **Bu deney** → adımlar → **Terminalde ne görmelisin** →
 **Grafana'da gör** (giriş: admin / ladder) → **Nasıl çözülüyor**.
 
-| ID | Ne olur? | Neden olur? | Nasıl çözülür? |
-|---|---|---|---|
-| P08-01 | Hız sınırı sayaçlarının tutulduğu Redis durunca ya koruma kalkar ya da herkes reddedilir | Koruma paylaşılan bir sayaca (Redis) bağlı; sayaca ulaşamayan limiter ya geçirir (fail-open) ya reddeder (fail-closed) | **Bir karar:** geçir + alarm (**11**'de SLO alarmı); pod içinde gevşek bir yedek limit |
-| P08-02 | Her istek, hız sınırı kontrolü için Redis'e iki kez gidip gelir; bu, isteğin süresine eklenir | 07'de sayaç pod'un belleğindeydi (~100 nanosaniye); şimdi kiracı ve IP için iki ağ çağrısı | **Bu seviyede:** iki kontrolü tek gidiş-gelişte yapmak (pipeline), pod'da kısa ömürlü tampon |
-| P08-03 | İstemcinin adresi yanlış okunursa hız sınırı ya herkesi birden cezalandırır ya da saldırgan onu atlatır | Tuzaklar (`TRAP_IGNORE_XFF`, `TRAP_TRUST_ANY_XFF`): adres, istemcinin de yazabildiği `X-Forwarded-For` başlığından yanlış okunur | **Bu seviyede:** tuzaklar kapalıyken yalnızca kendi proxy'lerinin eklediği adrese güvenilir |
-| P08-04 | Sayaç her 10 sn'de sıfırlanan bir pencereyse, iki pencerenin sınırında limitin iki katı istek geçer | Tuzak (`TRAP_FIXED_WINDOW`): 9.9. saniyede 300, sayaç sıfırlanınca 10.1. saniyede 300 daha | **Bu seviyede:** kayan pencere (varsayılan) — önceki pencere ağırlıklı sayılır |
-| P08-05 | "Bütün sistem için saniyede N istek" kuralı, pod eklenerek aşılamayan bir tavana çarpar | Tuzak (`TRAP_GLOBAL_LIMIT`): her istek aynı tek Redis anahtarına yazar; Redis tek çekirdekte çalışır | **Bu seviyede:** anahtarı parçalara bölmek (`global:0..15`) |
-| P08-06 | Açgözlü bir istemci sınırlanırken normal kullanıcılar etkilenmiyor mu? Bu seviyenin asıl sorusu | Hız sınırının amacı adalet: IP ve kiracı başına ayrı sayaçlar gürültülü komşuyu diğerlerinden ayırmalı | **Bu seviye** IP + kiracı limiti getirir · **13:** kimliğe göre müşteri kotaları |
+**Kısa komut** deneyi otomatik başlatır; seviyenin klasöründe çalıştır (önce `cd "$LADDER/08-rate-limiting"`).
+Başında `CONFIRM=1` olanlar yıkıcı bir adım içerir (pod silmek, yeniden başlatmak, arıza enjekte etmek gibi); bu
+onay olmadan script o adımı yapmaz ve `SKIPPED` basar.
+
+| ID | Kısa komut | Ne olur? | Neden olur? | Nasıl çözülür? |
+|---|---|---|---|---|
+| P08-01 | `CONFIRM=1 make repro P=P08-01` | Hız sınırı sayaçlarının tutulduğu Redis durunca ya koruma kalkar ya da herkes reddedilir | Koruma paylaşılan bir sayaca (Redis) bağlı; sayaca ulaşamayan limiter ya geçirir (fail-open) ya reddeder (fail-closed) | **Bir karar:** geçir + alarm (**11**'de SLO alarmı); pod içinde gevşek bir yedek limit |
+| P08-02 | `make repro P=P08-02` | Her istek, hız sınırı kontrolü için Redis'e iki kez gidip gelir; bu, isteğin süresine eklenir | 07'de sayaç pod'un belleğindeydi (~100 nanosaniye); şimdi kiracı ve IP için iki ağ çağrısı | **Bu seviyede:** iki kontrolü tek gidiş-gelişte yapmak (pipeline), pod'da kısa ömürlü tampon |
+| P08-03 | `make repro P=P08-03` | İstemcinin adresi yanlış okunursa hız sınırı ya herkesi birden cezalandırır ya da saldırgan onu atlatır | Tuzaklar (`TRAP_IGNORE_XFF`, `TRAP_TRUST_ANY_XFF`): adres, istemcinin de yazabildiği `X-Forwarded-For` başlığından yanlış okunur | **Bu seviyede:** tuzaklar kapalıyken yalnızca kendi proxy'lerinin eklediği adrese güvenilir |
+| P08-04 | `make repro P=P08-04` | Sayaç her 10 sn'de sıfırlanan bir pencereyse, iki pencerenin sınırında limitin iki katı istek geçer | Tuzak (`TRAP_FIXED_WINDOW`): 9.9. saniyede 300, sayaç sıfırlanınca 10.1. saniyede 300 daha | **Bu seviyede:** kayan pencere (varsayılan) — önceki pencere ağırlıklı sayılır |
+| P08-05 | `make repro P=P08-05` | "Bütün sistem için saniyede N istek" kuralı, pod eklenerek aşılamayan bir tavana çarpar | Tuzak (`TRAP_GLOBAL_LIMIT`): her istek aynı tek Redis anahtarına yazar; Redis tek çekirdekte çalışır | **Bu seviyede:** anahtarı parçalara bölmek (`global:0..15`) |
+| P08-06 | `make repro P=P08-06` | Açgözlü bir istemci sınırlanırken normal kullanıcılar etkilenmiyor mu? Bu seviyenin asıl sorusu | Hız sınırının amacı adalet: IP ve kiracı başına ayrı sayaçlar gürültülü komşuyu diğerlerinden ayırmalı | **Bu seviye** IP + kiracı limiti getirir · **13:** kimliğe göre müşteri kotaları |
 
 ---
 

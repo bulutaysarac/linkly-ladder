@@ -128,15 +128,19 @@ kendisi yapar, ölçer ve hükmünü basar (`REPRODUCED` = sorun var · `NOT-REP
 düzende: **Ne oluyor** → **Neden oluyor** → **Bu deney** → adımlar → **Terminalde ne görmelisin** →
 **Grafana'da gör** (giriş: admin / ladder) → **Nasıl çözülüyor**.
 
-| ID | Ne olur? | Neden olur? | Nasıl çözülür? |
-|---|---|---|---|
-| P06-01 | Tüketici bir grup tıklamayı yazıp "buraya kadar okudum" diyemeden ölürse aynı tıklamalar tekrar gelir; önlem olmasa iki kez sayılırdı | Tüketici önce yazar, sonra nerede kaldığını (offset) kaydeder; aradaki her ölüm tekrar teslim demek ("en az bir kez") | **Bu seviyede:** tekrar gelen olay tanınıp atlanır (idempotent yazma) |
-| P06-02 | Tüketici durunca istatistikler güncellenmez (bayatlar); tüketici dönünce sayı yakalar, veri kaybolmaz | Olaylar logda güvende bekler; tüketici yalnızca nerede kaldığını izler. Bekleyen olay sayısına "lag" denir ve kendiliğinden erimez | **07:** KEDA bekleyen olay sayısına göre tüketiciyi açar/büyütür |
-| P06-03 | Tüketiciyi 3 kopyaya çıkarmak işleme hızını artırmaz; iki kopya boşta oturur | Olay logunun tek bölümü (partition) var ve bir bölümü aynı anda yalnızca bir tüketici okuyabilir | **Bu seviyede:** bölüm sayısını artırmak (`rpk topic add-partitions`) |
-| P06-04 | Okunamayan tek bir bozuk mesaj, arkasındaki bütün tıklamaların işlenmesini durdurur | Tuzak açıkken tüketici bozuk mesajı ayıramaz, sonsuza kadar yeniden dener | **Bu seviyenin tuzağı:** kapatınca bozuk mesaj ayrı bir kutuya (DLQ) taşınır, akış sürer |
-| P06-05 | Olay sunucusu (broker) tamamen durunca tıklamalar atılır ama yönlendirmeler hatasız çalışmaya devam eder | Uygulama broker'ı beklemez; gönderilmeyi bekleyen tıklamaların tamponu sınırlı, dolunca atılır | **Bu seviyede:** sınır + atma · **14:** 3 broker ve kopyalama |
-| P06-06 | "Nerede kaldım" kaydını tıklamaları yazmadan önce yapan bir tüketici ölürse o tıklamalar kalıcı olarak kaybolur | Kayıt yazmadan önce yapılınca yazılamayan olaylar bir daha gelmez ("en fazla bir kez"); sonra yapılınca yalnızca tekrar gelir ("en az bir kez") | **Seçim:** önce yaz, sonra kaydet + tekrarları yut (varsayılan) |
-| P06-07 | Tüketicinin tanımadığı yeni sürüm bir olay gelir; tüketici çökseydi bütün analitik dururdu | Üretici ve tüketici ayrı dağıtılır; bir süre farklı sürümlerde çalışırlar | **Bu seviyede:** bilinmeyen sürüm sayılıp atlanır; şema kayıt defteri kapsam dışı |
+**Kısa komut** deneyi otomatik başlatır; seviyenin klasöründe çalıştır (önce `cd "$LADDER/06-event-stream"`).
+Başında `CONFIRM=1` olanlar yıkıcı bir adım içerir (pod silmek, yeniden başlatmak, arıza enjekte etmek gibi); bu
+onay olmadan script o adımı yapmaz ve `SKIPPED` basar.
+
+| ID | Kısa komut | Ne olur? | Neden olur? | Nasıl çözülür? |
+|---|---|---|---|---|
+| P06-01 | `CONFIRM=1 make repro P=P06-01` | Tüketici bir grup tıklamayı yazıp "buraya kadar okudum" diyemeden ölürse aynı tıklamalar tekrar gelir; önlem olmasa iki kez sayılırdı | Tüketici önce yazar, sonra nerede kaldığını (offset) kaydeder; aradaki her ölüm tekrar teslim demek ("en az bir kez") | **Bu seviyede:** tekrar gelen olay tanınıp atlanır (idempotent yazma) |
+| P06-02 | `make repro P=P06-02` | Tüketici durunca istatistikler güncellenmez (bayatlar); tüketici dönünce sayı yakalar, veri kaybolmaz | Olaylar logda güvende bekler; tüketici yalnızca nerede kaldığını izler. Bekleyen olay sayısına "lag" denir ve kendiliğinden erimez | **07:** KEDA bekleyen olay sayısına göre tüketiciyi açar/büyütür |
+| P06-03 | `CONFIRM=1 make repro P=P06-03` | Tüketiciyi 3 kopyaya çıkarmak işleme hızını artırmaz; iki kopya boşta oturur | Olay logunun tek bölümü (partition) var ve bir bölümü aynı anda yalnızca bir tüketici okuyabilir | **Bu seviyede:** bölüm sayısını artırmak (`rpk topic add-partitions`) |
+| P06-04 | `make repro P=P06-04` | Okunamayan tek bir bozuk mesaj, arkasındaki bütün tıklamaların işlenmesini durdurur | Tuzak açıkken tüketici bozuk mesajı ayıramaz, sonsuza kadar yeniden dener | **Bu seviyenin tuzağı:** kapatınca bozuk mesaj ayrı bir kutuya (DLQ) taşınır, akış sürer |
+| P06-05 | `CONFIRM=1 make repro P=P06-05` | Olay sunucusu (broker) tamamen durunca tıklamalar atılır ama yönlendirmeler hatasız çalışmaya devam eder | Uygulama broker'ı beklemez; gönderilmeyi bekleyen tıklamaların tamponu sınırlı, dolunca atılır | **Bu seviyede:** sınır + atma · **14:** 3 broker ve kopyalama |
+| P06-06 | `CONFIRM=1 make repro P=P06-06` | "Nerede kaldım" kaydını tıklamaları yazmadan önce yapan bir tüketici ölürse o tıklamalar kalıcı olarak kaybolur | Kayıt yazmadan önce yapılınca yazılamayan olaylar bir daha gelmez ("en fazla bir kez"); sonra yapılınca yalnızca tekrar gelir ("en az bir kez") | **Seçim:** önce yaz, sonra kaydet + tekrarları yut (varsayılan) |
+| P06-07 | `make repro P=P06-07` | Tüketicinin tanımadığı yeni sürüm bir olay gelir; tüketici çökseydi bütün analitik dururdu | Üretici ve tüketici ayrı dağıtılır; bir süre farklı sürümlerde çalışırlar | **Bu seviyede:** bilinmeyen sürüm sayılıp atlanır; şema kayıt defteri kapsam dışı |
 
 ---
 

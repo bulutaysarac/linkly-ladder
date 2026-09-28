@@ -97,18 +97,22 @@ kendisi yapar, ölçer ve hükmünü basar (`REPRODUCED` = sorun var · `NOT-REP
 düzende: **Ne oluyor** → **Neden oluyor** → **Bu deney** → adımlar → **Terminalde ne görmelisin** →
 **Grafana'da gör** (giriş: admin / ladder) → **Nasıl çözülüyor**.
 
-| ID | Ne olur? | Neden olur? | Nasıl çözülür? |
-|---|---|---|---|
-| P00-01 | 50 kişi aynı anda link oluşturunca uygulama çöker ve yeniden başlar; çöktüğü anlarda herkes hata alır | Linkler korumasız bir bellek tablosunda (Go `map`); iki istek aynı anda yazınca Go programı kendisi durdurur | **01:** yazmalar bir kilitle sıraya girer |
-| P00-02 | Uygulama yeniden başlayınca o ana kadar oluşturulan bütün linkler kaybolur (404) | Linkler yalnızca programın belleğinde; program kapanınca bellek de gider | **02:** linkler veritabanında tutulur |
-| P00-03 | Uygulama 3 kopyaya çıkınca aynı link bazen çalışır, bazen 404 verir | Her kopyanın kendi belleği var; istek linki bilmeyen kopyaya düşerse link bulunamaz | **02:** bütün kopyalar aynı veritabanını okur |
-| P00-04 | Yeni sürüm dağıtılırken bazı istekler 502/503 hatası alır | Kubernetes yeni kopyanın hazır olduğunu bilmez; eski kopya elindeki işi bitirmeden kapanır | **01:** hazır olma kontrolü + düzgün kapanma |
-| P00-05 | İki kullanıcı aynı kısa kodu alabilir; ilkinin linki sessizce ikincisininkiyle değişir | Kod yalnızca 4 karakter ve aynı kodun var olup olmadığına bakılmıyor | **01:** 7 karakterlik güvenli kod + çakışmada yeniden dene |
-| P00-06 | `javascript:` linkleri, iç ağ adresleri ve 5 MB'lık istekler kabul edilir | Gelen URL ve istek boyutu hiç denetlenmiyor | **01:** şema, adres, boyut kontrolü · **13:** DNS ile iç adres kontrolü |
-| P00-07 | İsteğini hiç bitirmeyen istemciler bağlantıyı sonsuza kadar açık tutar (slowloris) | Sunucuda hiçbir zaman aşımı (timeout) yok | **01:** sunucu zaman aşımları |
-| P00-08 | Link eklendikçe bellek dolar; sınır aşılınca Kubernetes uygulamayı öldürür (OOMKilled) | Bellekteki link sayısının üst sınırı yok | **01** ölçer · **02** veriyi veritabanına taşır |
-| P00-09 | "Kaç istek hata verdi?" sorusuna cevap veremezsin | Uygulama hiçbir metrik yayınlamıyor; yalnızca CPU/bellek görünür | **01:** uygulama metrikleri + JSON log |
-| P00-10 | Silinen bir link tarayıcıda çalışmaya devam eder, tıklamalar sayılmaz | Yönlendirme "kalıcı" (301) işaretli; tarayıcı cevabı saklar, bir daha sunucuya sormaz | **01:** geçici yönlendirme (302) + "saklama" başlığı |
+**Kısa komut** deneyi otomatik başlatır; seviyenin klasöründe çalıştır (önce `cd "$LADDER/00-naive"`). Başında
+`CONFIRM=1` olanlar yıkıcı bir adım içerir (pod silmek, yeniden başlatmak, arıza enjekte etmek gibi); bu onay
+olmadan script o adımı yapmaz ve `SKIPPED` basar.
+
+| ID | Kısa komut | Ne olur? | Neden olur? | Nasıl çözülür? |
+|---|---|---|---|---|
+| P00-01 | `make repro P=P00-01` | 50 kişi aynı anda link oluşturunca uygulama çöker ve yeniden başlar; çöktüğü anlarda herkes hata alır | Linkler korumasız bir bellek tablosunda (Go `map`); iki istek aynı anda yazınca Go programı kendisi durdurur | **01:** yazmalar bir kilitle sıraya girer |
+| P00-02 | `CONFIRM=1 make repro P=P00-02` | Uygulama yeniden başlayınca o ana kadar oluşturulan bütün linkler kaybolur (404) | Linkler yalnızca programın belleğinde; program kapanınca bellek de gider | **02:** linkler veritabanında tutulur |
+| P00-03 | `CONFIRM=1 make repro P=P00-03` | Uygulama 3 kopyaya çıkınca aynı link bazen çalışır, bazen 404 verir | Her kopyanın kendi belleği var; istek linki bilmeyen kopyaya düşerse link bulunamaz | **02:** bütün kopyalar aynı veritabanını okur |
+| P00-04 | `make repro P=P00-04` | Yeni sürüm dağıtılırken bazı istekler 502/503 hatası alır | Kubernetes yeni kopyanın hazır olduğunu bilmez; eski kopya elindeki işi bitirmeden kapanır | **01:** hazır olma kontrolü + düzgün kapanma |
+| P00-05 | `make repro P=P00-05` | İki kullanıcı aynı kısa kodu alabilir; ilkinin linki sessizce ikincisininkiyle değişir | Kod yalnızca 4 karakter ve aynı kodun var olup olmadığına bakılmıyor | **01:** 7 karakterlik güvenli kod + çakışmada yeniden dene |
+| P00-06 | `make repro P=P00-06` | `javascript:` linkleri, iç ağ adresleri ve 5 MB'lık istekler kabul edilir | Gelen URL ve istek boyutu hiç denetlenmiyor | **01:** şema, adres, boyut kontrolü · **13:** DNS ile iç adres kontrolü |
+| P00-07 | `make repro P=P00-07` | İsteğini hiç bitirmeyen istemciler bağlantıyı sonsuza kadar açık tutar (slowloris) | Sunucuda hiçbir zaman aşımı (timeout) yok | **01:** sunucu zaman aşımları |
+| P00-08 | `make repro P=P00-08` | Link eklendikçe bellek dolar; sınır aşılınca Kubernetes uygulamayı öldürür (OOMKilled) | Bellekteki link sayısının üst sınırı yok | **01** ölçer · **02** veriyi veritabanına taşır |
+| P00-09 | `make repro P=P00-09` | "Kaç istek hata verdi?" sorusuna cevap veremezsin | Uygulama hiçbir metrik yayınlamıyor; yalnızca CPU/bellek görünür | **01:** uygulama metrikleri + JSON log |
+| P00-10 | `make repro P=P00-10` | Silinen bir link tarayıcıda çalışmaya devam eder, tıklamalar sayılmaz | Yönlendirme "kalıcı" (301) işaretli; tarayıcı cevabı saklar, bir daha sunucuya sormaz | **01:** geçici yönlendirme (302) + "saklama" başlığı |
 
 ---
 

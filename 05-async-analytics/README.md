@@ -117,14 +117,18 @@ kendisi yapar, ölçer ve hükmünü basar (`REPRODUCED` = sorun var · `NOT-REP
 düzende: **Ne oluyor** → **Neden oluyor** → **Bu deney** → adımlar → **Terminalde ne görmelisin** →
 **Grafana'da gör** (giriş: admin / ladder) → **Nasıl çözülüyor**.
 
-| ID | Ne olur? | Neden olur? | Nasıl çözülür? |
-|---|---|---|---|
-| P05-01 | Uygulama pod'u aniden (sert) öldürülünce son birkaç saniyenin tıklamaları hiç kaydedilmez | Tıklamalar yazılmadan önce programın belleğindeki bir kuyrukta bekler; program aniden ölünce kuyruğu yazacak kimse kalmaz ("en fazla bir kez" teslimat) | **06:** tıklamalar kalıcı bir olay loguna (Redpanda) yazılır |
-| P05-02 | Veritabanı yavaşlayınca tıklamaların bir kısmı bilerek atılır; yönlendirmeler ise yavaşlamaz | Tıklama kuyruğunun boyu sınırlı; dolunca yenileri atılır (beklemek yönlendirmeyi yavaşlatır, sınırsız kuyruk belleği doldurur) | **06:** kalıcı olay logu · **07:** ayrı tüketici servisi |
-| P05-03 | Tıklamaları veritabanına yazan iş, yönlendirme yapan pod'ların içinde çalışır; ayrı büyütülemez, ayrı sınırlanamaz | Yazma işi isteğin yolundan çıktı ama aynı programda kaldı: aynı CPU, aynı veritabanı bağlantı havuzu | **06 + 07:** yazıcı ayrı bir servis (tüketici) olur |
-| P05-04 | Tıklamaları tek tek (ayrıntılı) saklasaydık "bu link kaç kez tıklandı?" sorusu milyonlarca satır taramayı gerektirirdi | Toplama tablosu veriyi yazarken küçültür (link ve gün başına tek satır); ayrıntı tablosu okurken büyür | **09:** ayrıntı gerekiyorsa güne göre bölümlenmiş tablo (partition); asıl karar ürün kararı |
-| P05-05 | Kapanış süresi kısaltılınca her yeni sürüm dağıtımında tıklama kaybolur | Program kapanırken kuyruğu boşaltmaya çalışır ama Kubernetes süre dolunca onu zorla öldürür | **Bu seviyenin ayarı:** kapanış süresi, kuyruğu boşaltmaya yetecek kadar uzun |
-| P05-06 | Aynı link tarayıcıda 5 kez açılınca yalnızca 1 tıklama sayılır | Tuzak açıkken yönlendirme "kalıcı" (301); tarayıcı cevabı saklar, sonraki açılışlar sunucuya hiç gelmez | **Bu seviyenin tuzağı:** kapatınca 302 + "saklama" başlığı döner |
+**Kısa komut** deneyi otomatik başlatır; seviyenin klasöründe çalıştır (önce `cd "$LADDER/05-async-analytics"`).
+Başında `CONFIRM=1` olanlar yıkıcı bir adım içerir (pod silmek, yeniden başlatmak, arıza enjekte etmek gibi); bu
+onay olmadan script o adımı yapmaz ve `SKIPPED` basar.
+
+| ID | Kısa komut | Ne olur? | Neden olur? | Nasıl çözülür? |
+|---|---|---|---|---|
+| P05-01 | `CONFIRM=1 make repro P=P05-01` | Uygulama pod'u aniden (sert) öldürülünce son birkaç saniyenin tıklamaları hiç kaydedilmez | Tıklamalar yazılmadan önce programın belleğindeki bir kuyrukta bekler; program aniden ölünce kuyruğu yazacak kimse kalmaz ("en fazla bir kez" teslimat) | **06:** tıklamalar kalıcı bir olay loguna (Redpanda) yazılır |
+| P05-02 | `make repro P=P05-02` | Veritabanı yavaşlayınca tıklamaların bir kısmı bilerek atılır; yönlendirmeler ise yavaşlamaz | Tıklama kuyruğunun boyu sınırlı; dolunca yenileri atılır (beklemek yönlendirmeyi yavaşlatır, sınırsız kuyruk belleği doldurur) | **06:** kalıcı olay logu · **07:** ayrı tüketici servisi |
+| P05-03 | `make repro P=P05-03` | Tıklamaları veritabanına yazan iş, yönlendirme yapan pod'ların içinde çalışır; ayrı büyütülemez, ayrı sınırlanamaz | Yazma işi isteğin yolundan çıktı ama aynı programda kaldı: aynı CPU, aynı veritabanı bağlantı havuzu | **06 + 07:** yazıcı ayrı bir servis (tüketici) olur |
+| P05-04 | `make repro P=P05-04` | Tıklamaları tek tek (ayrıntılı) saklasaydık "bu link kaç kez tıklandı?" sorusu milyonlarca satır taramayı gerektirirdi | Toplama tablosu veriyi yazarken küçültür (link ve gün başına tek satır); ayrıntı tablosu okurken büyür | **09:** ayrıntı gerekiyorsa güne göre bölümlenmiş tablo (partition); asıl karar ürün kararı |
+| P05-05 | `CONFIRM=1 make repro P=P05-05` | Kapanış süresi kısaltılınca her yeni sürüm dağıtımında tıklama kaybolur | Program kapanırken kuyruğu boşaltmaya çalışır ama Kubernetes süre dolunca onu zorla öldürür | **Bu seviyenin ayarı:** kapanış süresi, kuyruğu boşaltmaya yetecek kadar uzun |
+| P05-06 | `make repro P=P05-06` | Aynı link tarayıcıda 5 kez açılınca yalnızca 1 tıklama sayılır | Tuzak açıkken yönlendirme "kalıcı" (301); tarayıcı cevabı saklar, sonraki açılışlar sunucuya hiç gelmez | **Bu seviyenin tuzağı:** kapatınca 302 + "saklama" başlığı döner |
 
 ---
 

@@ -375,7 +375,8 @@ Diğer adresler: http://prometheus.localtest.me (ham metrik) · http://argocd.lo
 ## Kullanılan teknolojiler
 
 Her araç bu projede tek bir iş yapar. **İlk** sütunu aracın hangi seviyede sahneye çıktığını söyler;
-"kurulum" yazanlar platformla gelir ve her seviyede arka planda çalışır.
+"kurulum" yazanlar platformla gelir ve her seviyede arka planda çalışır. Her aracın ne olduğu ve kendi
+gözünle nasıl görüleceği: [docs/ARACLAR.md](docs/ARACLAR.md).
 
 ### Çalışma ortamı
 

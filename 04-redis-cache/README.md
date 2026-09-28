@@ -124,15 +124,19 @@ kendisi yapar, ölçer ve hükmünü basar (`REPRODUCED` = sorun var · `NOT-REP
 düzende: **Ne oluyor** → **Neden oluyor** → **Bu deney** → adımlar → **Terminalde ne görmelisin** →
 **Grafana'da gör** (giriş: admin / ladder) → **Nasıl çözülüyor**.
 
-| ID | Ne olur? | Neden olur? | Nasıl çözülür? |
-|---|---|---|---|
-| P04-01 | Redis (önbellek sunucusu) çökünce servis çalışmaya devam eder ama veritabanına giden okuma yükü birden kat kat artar | Redis'e ulaşılamazsa uygulama veritabanına döner (fail-open); önbelleğin karşıladığı bütün okuma yükü veritabanına biner | **10:** veritabanına giden eşzamanlı istek sınırlanır · **14:** pod içinde ikinci, küçük bir önbellek |
-| P04-02 | Önbellekten okumak mikrosaniye değil yüzlerce mikrosaniye sürer | Önbellek artık ayrı bir sunucuda; her okuma bir ağ gidiş-gelişi | **14:** pod içi küçük önbellek (L1) + Redis (L2) |
-| P04-03 | Trafiğin çoğu tek bir linke giderse Redis'in tek çekirdeği tavana dayanır ve Redis'i büyütmek işe yaramaz | Redis komutları tek iş parçacığında (tek çekirdekte) çalıştırır; tek bir anahtara erişim bölünemez | **14:** en popüler linkler pod'un kendi önbelleğinden döner, Redis'e hiç gitmez |
-| P04-04 | Önbellek süreleri aynı anda dolunca veritabanına keskin, düzenli yük dalgaları gelir — 03'tekinden de keskin | `TRAP_NO_TTL_JITTER` açıkken sürelere rastgelelik eklenmez; tek paylaşılan önbellekte bütün pod'lar aynı anda ıskalar | **Seviye içi:** bayrak kapalıyken sürelere ±%20 rastgelelik |
-| P04-05 | Silinmiş bir link, silmeden sonra bile önbellek süresi boyunca yönlendirmeye devam edebilir | Bir okuma eski değeri veritabanından alırken link silinir; okuma sonra bu eski değeri önbelleğe yazar (cache-aside yarışı) | **Tartışma:** bedava çözümü yok; pencere daraltılabilir, tamamen kapanmaz |
-| P04-06 | Redis ayakta görünür ama önbelleğe yeni hiçbir şey girmez; önbellek sessizce işe yaramaz hale gelir | Bellek dolunca `noeviction` ayarı yeni yazmaları reddeder, eski kayıtları atmaz | **Seviye içi · 14:** dolunca en az kullanılanı atan politika (`allkeys-lru`; 14'te varsayılan) ve yeterli bellek |
-| P04-07 | "Sadece hata ayıklama için" bir uç çağrılınca bütün yönlendirmeler aynı anda yavaşlar | `TRAP_DEBUG_KEYS` açıkken uç `KEYS *` çalıştırır; Redis bu komut bütün anahtarları tarayana kadar başka hiçbir komutu çalıştırmaz | **Seviye içi:** bayrak kapalıyken uç yok; güvenli karşılığı `SCAN` |
+**Kısa komut** deneyi otomatik başlatır; seviyenin klasöründe çalıştır (önce `cd "$LADDER/04-redis-cache"`).
+Başında `CONFIRM=1` olanlar yıkıcı bir adım içerir (pod silmek, yeniden başlatmak, arıza enjekte etmek gibi); bu
+onay olmadan script o adımı yapmaz ve `SKIPPED` basar.
+
+| ID | Kısa komut | Ne olur? | Neden olur? | Nasıl çözülür? |
+|---|---|---|---|---|
+| P04-01 | `CONFIRM=1 make repro P=P04-01` | Redis (önbellek sunucusu) çökünce servis çalışmaya devam eder ama veritabanına giden okuma yükü birden kat kat artar | Redis'e ulaşılamazsa uygulama veritabanına döner (fail-open); önbelleğin karşıladığı bütün okuma yükü veritabanına biner | **10:** veritabanına giden eşzamanlı istek sınırlanır · **14:** pod içinde ikinci, küçük bir önbellek |
+| P04-02 | `make repro P=P04-02` | Önbellekten okumak mikrosaniye değil yüzlerce mikrosaniye sürer | Önbellek artık ayrı bir sunucuda; her okuma bir ağ gidiş-gelişi | **14:** pod içi küçük önbellek (L1) + Redis (L2) |
+| P04-03 | `make repro P=P04-03` | Trafiğin çoğu tek bir linke giderse Redis'in tek çekirdeği tavana dayanır ve Redis'i büyütmek işe yaramaz | Redis komutları tek iş parçacığında (tek çekirdekte) çalıştırır; tek bir anahtara erişim bölünemez | **14:** en popüler linkler pod'un kendi önbelleğinden döner, Redis'e hiç gitmez |
+| P04-04 | `make repro P=P04-04` | Önbellek süreleri aynı anda dolunca veritabanına keskin, düzenli yük dalgaları gelir — 03'tekinden de keskin | `TRAP_NO_TTL_JITTER` açıkken sürelere rastgelelik eklenmez; tek paylaşılan önbellekte bütün pod'lar aynı anda ıskalar | **Seviye içi:** bayrak kapalıyken sürelere ±%20 rastgelelik |
+| P04-05 | `make repro P=P04-05` | Silinmiş bir link, silmeden sonra bile önbellek süresi boyunca yönlendirmeye devam edebilir | Bir okuma eski değeri veritabanından alırken link silinir; okuma sonra bu eski değeri önbelleğe yazar (cache-aside yarışı) | **Tartışma:** bedava çözümü yok; pencere daraltılabilir, tamamen kapanmaz |
+| P04-06 | `make repro P=P04-06` | Redis ayakta görünür ama önbelleğe yeni hiçbir şey girmez; önbellek sessizce işe yaramaz hale gelir | Bellek dolunca `noeviction` ayarı yeni yazmaları reddeder, eski kayıtları atmaz | **Seviye içi · 14:** dolunca en az kullanılanı atan politika (`allkeys-lru`; 14'te varsayılan) ve yeterli bellek |
+| P04-07 | `make repro P=P04-07` | "Sadece hata ayıklama için" bir uç çağrılınca bütün yönlendirmeler aynı anda yavaşlar | `TRAP_DEBUG_KEYS` açıkken uç `KEYS *` çalıştırır; Redis bu komut bütün anahtarları tarayana kadar başka hiçbir komutu çalıştırmaz | **Seviye içi:** bayrak kapalıyken uç yok; güvenli karşılığı `SCAN` |
 
 ---
 

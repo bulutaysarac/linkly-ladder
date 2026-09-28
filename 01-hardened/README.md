@@ -125,16 +125,20 @@ kendisi yapar, ölçer ve hükmünü basar (`REPRODUCED` = sorun var · `NOT-REP
 düzende: **Ne oluyor** → **Neden oluyor** → **Bu deney** → adımlar → **Terminalde ne görmelisin** →
 **Grafana'da gör** (giriş: admin / ladder) → **Nasıl çözülüyor**.
 
-| ID | Ne olur? | Neden olur? | Nasıl çözülür? |
-|---|---|---|---|
-| P01-01 | Uygulama yeniden başlayınca bütün linkler yine kaybolur — ama kayıp artık bir grafikte görünür | Kilit çökmeyi durdurdu ama linkler hâlâ yalnızca programın belleğinde | **02:** linkler veritabanında tutulur |
-| P01-02 | 3 kopyaya çıkınca aynı link yine bazen 404 verir — artık hangi kopyanın 404 verdiği görünür | Her kopyanın kendi belleği var; istek linki bilmeyen kopyaya düşerse link bulunamaz | **02:** bütün kopyalar aynı veritabanını okur |
-| P01-03 | Tek kopyalı servisi korumak için konan kural (PDB) düğüm bakımını kilitler; bakım zorlanırsa servis kesilir | PDB "en az 1 kopya ayakta kalsın" der; tek kopya varken hiçbir kapatmaya izin verilmez. PDB yedek kopya üretmez | **02:** farklı makinelere yayılmış 3 kopya |
-| P01-04 | Link eklendikçe bellek yine sınırsız büyür — ama artık çarpmadan önce grafikte görünür | Bellekteki link sayısının üst sınırı yok | **02** veriyi veritabanına taşır · **03** önbellek sınırlı boyutta |
-| P01-05 | "Saniyede 50 istek" sınırı 3 kopyada saniyede 150'ye çıkar | Her kopya sınırı kendi belleğinde ayrı sayar; toplamı kimse bilmez | **08:** sınır sayacı bütün kopyaların ortak kullandığı Redis'te |
-| P01-06 | **Tuzak:** kısa kod metriğe etiket olarak eklenince Prometheus'taki seri sayısı link sayısıyla birlikte patlar | Prometheus her farklı etiket değerini ayrı bir zaman serisi olarak saklar | **Bu seviyenin ayarı:** tuzağı kapat; tekil kimlikler loga ve trace'e gider (11) |
-| P01-07 | **Tuzak:** yük artınca sağlıklı pod trafikten çıkarılır, sonunda yeniden başlatılır | Sağlık kontrolleri de hız sınırına takılıp "429" alır; Kubernetes pod'u hasta sanır | **Bu seviyenin ayarı:** tuzağı kapat; sağlık kontrolleri hız sınırının dışında |
-| P01-08 | Her tıklama yönlendirmeyi bir kilitte bekletir; uygulama yeniden başlayınca tıklama sayıları sıfırlanır | Tıklama sayacı yönlendirme isteğinin içinde ve programın belleğinde | **05:** tıklamalar kuyruğa alınıp toplu yazılır · **06:** dayanıklı olay akışı |
+**Kısa komut** deneyi otomatik başlatır; seviyenin klasöründe çalıştır (önce `cd "$LADDER/01-hardened"`). Başında
+`CONFIRM=1` olanlar yıkıcı bir adım içerir (pod silmek, yeniden başlatmak, arıza enjekte etmek gibi); bu onay
+olmadan script o adımı yapmaz ve `SKIPPED` basar.
+
+| ID | Kısa komut | Ne olur? | Neden olur? | Nasıl çözülür? |
+|---|---|---|---|---|
+| P01-01 | `CONFIRM=1 make repro P=P01-01` | Uygulama yeniden başlayınca bütün linkler yine kaybolur — ama kayıp artık bir grafikte görünür | Kilit çökmeyi durdurdu ama linkler hâlâ yalnızca programın belleğinde | **02:** linkler veritabanında tutulur |
+| P01-02 | `CONFIRM=1 make repro P=P01-02` | 3 kopyaya çıkınca aynı link yine bazen 404 verir — artık hangi kopyanın 404 verdiği görünür | Her kopyanın kendi belleği var; istek linki bilmeyen kopyaya düşerse link bulunamaz | **02:** bütün kopyalar aynı veritabanını okur |
+| P01-03 | `CONFIRM=1 make repro P=P01-03` | Tek kopyalı servisi korumak için konan kural (PDB) düğüm bakımını kilitler; bakım zorlanırsa servis kesilir | PDB "en az 1 kopya ayakta kalsın" der; tek kopya varken hiçbir kapatmaya izin verilmez. PDB yedek kopya üretmez | **02:** farklı makinelere yayılmış 3 kopya |
+| P01-04 | `make repro P=P01-04` | Link eklendikçe bellek yine sınırsız büyür — ama artık çarpmadan önce grafikte görünür | Bellekteki link sayısının üst sınırı yok | **02** veriyi veritabanına taşır · **03** önbellek sınırlı boyutta |
+| P01-05 | `CONFIRM=1 make repro P=P01-05` | "Saniyede 50 istek" sınırı 3 kopyada saniyede 150'ye çıkar | Her kopya sınırı kendi belleğinde ayrı sayar; toplamı kimse bilmez | **08:** sınır sayacı bütün kopyaların ortak kullandığı Redis'te |
+| P01-06 | `make repro P=P01-06` | **Tuzak:** kısa kod metriğe etiket olarak eklenince Prometheus'taki seri sayısı link sayısıyla birlikte patlar | Prometheus her farklı etiket değerini ayrı bir zaman serisi olarak saklar | **Bu seviyenin ayarı:** tuzağı kapat; tekil kimlikler loga ve trace'e gider (11) |
+| P01-07 | `make repro P=P01-07` | **Tuzak:** yük artınca sağlıklı pod trafikten çıkarılır, sonunda yeniden başlatılır | Sağlık kontrolleri de hız sınırına takılıp "429" alır; Kubernetes pod'u hasta sanır | **Bu seviyenin ayarı:** tuzağı kapat; sağlık kontrolleri hız sınırının dışında |
+| P01-08 | `CONFIRM=1 make repro P=P01-08` | Her tıklama yönlendirmeyi bir kilitte bekletir; uygulama yeniden başlayınca tıklama sayıları sıfırlanır | Tıklama sayacı yönlendirme isteğinin içinde ve programın belleğinde | **05:** tıklamalar kuyruğa alınıp toplu yazılır · **06:** dayanıklı olay akışı |
 
 ---
 
